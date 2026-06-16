@@ -87,6 +87,12 @@ Seed demo data:
 tailwag seed demo
 ```
 
+Wipe all Neo4j data before re-seeding:
+
+```bash
+tailwag db wipe --yes
+```
+
 Create an episode from JSON:
 
 ```bash

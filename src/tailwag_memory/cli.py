@@ -24,6 +24,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     schema_subparsers = schema_parser.add_subparsers(dest="schema_command", required=True)
     schema_subparsers.add_parser("init")
 
+    db_parser = subparsers.add_parser("db")
+    db_subparsers = db_parser.add_subparsers(dest="db_command", required=True)
+    wipe_parser = db_subparsers.add_parser("wipe")
+    wipe_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm destructive deletion of all Neo4j nodes and relationships",
+    )
+
     seed_parser = subparsers.add_parser("seed")
     seed_subparsers = seed_parser.add_subparsers(dest="seed_command", required=True)
     seed_subparsers.add_parser("demo")
@@ -72,6 +81,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     slack_poll_parser.add_argument("--reply-limit", type=int, default=200)
 
     args = parser.parse_args(argv)
+    if args.command == "db" and args.db_command == "wipe" and not args.yes:
+        parser.error("db wipe requires --yes because it deletes all Neo4j data.")
+
     settings = load_settings()
     runner = Neo4jQueryRunner(settings)
     embeddings = MockOpenAIEmbeddingProvider(settings.embedding_dimension)
@@ -80,6 +92,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "schema":
             initialize_schema(runner, settings.embedding_dimension)
             print("Schema initialized.")
+            return 0
+
+        if args.command == "db":
+            runner.run("MATCH (n) DETACH DELETE n")
+            print("Neo4j data wiped.")
             return 0
 
         if args.command == "seed":
