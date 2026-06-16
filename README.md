@@ -123,6 +123,12 @@ The first run without `--backfill-hours` arms the cursor from the current time a
 tailwag slack poll --channel C0123456789 --once --backfill-hours 2
 ```
 
+After wiping Neo4j data, force a backfill even if local Slack polling state already has a saved cursor:
+
+```bash
+tailwag slack poll --channel C0123456789 --once --backfill-hours 10 --force-backfill
+```
+
 Run continuous polling:
 
 ```bash

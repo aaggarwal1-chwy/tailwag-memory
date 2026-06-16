@@ -154,13 +154,19 @@ class SlackMemoryPoller:
         channel: str,
         *,
         backfill_hours: float | None = None,
+        force_backfill: bool = False,
         history_limit: int = 200,
         reply_limit: int = 200,
     ) -> SlackPollResult:
+        if force_backfill and backfill_hours is None:
+            raise ValueError("force_backfill requires backfill_hours.")
+
         state = SlackPollState(self.state_path)
         oldest = state.latest_history_ts(channel)
 
-        if oldest is None and backfill_hours is None:
+        if force_backfill:
+            oldest = _datetime_to_slack_ts(datetime.now(timezone.utc) - timedelta(hours=backfill_hours or 0))
+        elif oldest is None and backfill_hours is None:
             now_ts = _now_slack_ts()
             state.set_latest_history_ts(channel, now_ts)
             state.save()
@@ -209,7 +215,7 @@ class SlackMemoryPoller:
 
             latest_thread_ts = _max_ts(messages)
             prior_thread_ts = active_threads.get(thread_ts, {}).get("latest_ts")
-            if prior_thread_ts is None or _ts_greater(latest_thread_ts, prior_thread_ts):
+            if force_backfill or prior_thread_ts is None or _ts_greater(latest_thread_ts, prior_thread_ts):
                 episode = build_episode_from_slack_thread(
                     channel=channel,
                     messages=messages,

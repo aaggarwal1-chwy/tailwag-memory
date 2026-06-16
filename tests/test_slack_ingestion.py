@@ -176,6 +176,37 @@ class SlackMemoryPollerTest(unittest.TestCase):
             state = json.loads(state_path.read_text())
             self.assertEqual(state["channels"]["C123"]["latest_history_ts"], root_ts)
 
+    def test_force_backfill_ignores_saved_cursor_and_reingests_seen_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            root_ts = _ts()
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "channels": {
+                            "C123": {
+                                "active_threads": {root_ts: {"latest_ts": root_ts}},
+                                "latest_history_ts": _ts(300),
+                            }
+                        }
+                    }
+                )
+            )
+            service = FakeEpisodeService()
+            client = FakeSlackClient(
+                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread", "reply_count": 1}],
+                replies_by_thread={root_ts: [{"ts": root_ts, "user": "U1", "text": "Start thread"}]},
+                user_names={"U1": "Asha"},
+            )
+            poller = SlackMemoryPoller(client, service, state_path)
+
+            result = poller.poll_once("C123", backfill_hours=1, force_backfill=True)
+
+            self.assertEqual(result.checked_threads, 1)
+            self.assertEqual(result.ingested_threads, 1)
+            self.assertEqual(service.episodes[0].id, f"slack:C123:{root_ts}")
+            self.assertLess(float(client.history_calls[0]["oldest"]), float(root_ts))
+
     def test_active_thread_is_refreshed_when_new_reply_arrives(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"

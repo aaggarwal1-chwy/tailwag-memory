@@ -76,6 +76,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     slack_poll_parser.add_argument("--once", action="store_true")
     slack_poll_parser.add_argument("--state-file", default=".tailwag/slack-state.json")
     slack_poll_parser.add_argument("--backfill-hours", type=float)
+    slack_poll_parser.add_argument(
+        "--force-backfill",
+        action="store_true",
+        help="use --backfill-hours even when saved Slack polling state already exists",
+    )
     slack_poll_parser.add_argument("--active-thread-hours", type=float, default=24.0)
     slack_poll_parser.add_argument("--history-limit", type=int, default=200)
     slack_poll_parser.add_argument("--reply-limit", type=int, default=200)
@@ -83,6 +88,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "db" and args.db_command == "wipe" and not args.yes:
         parser.error("db wipe requires --yes because it deletes all Neo4j data.")
+    if args.command == "slack" and args.slack_command == "poll" and args.force_backfill and args.backfill_hours is None:
+        parser.error("slack poll --force-backfill requires --backfill-hours.")
 
     settings = load_settings()
     runner = Neo4jQueryRunner(settings)
@@ -170,6 +177,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 result = poller.poll_once(
                     args.channel,
                     backfill_hours=args.backfill_hours,
+                    force_backfill=args.force_backfill,
                     history_limit=args.history_limit,
                     reply_limit=args.reply_limit,
                 )

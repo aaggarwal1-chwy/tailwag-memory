@@ -70,6 +70,12 @@ Import recent existing activity for testing:
 tailwag slack poll --channel C0123456789 --once --backfill-hours 2
 ```
 
+After wiping Neo4j data, force a backfill even when `.tailwag/slack-state.json` already has a saved cursor:
+
+```bash
+tailwag slack poll --channel C0123456789 --once --backfill-hours 10 --force-backfill
+```
+
 Run continuously:
 
 ```bash
