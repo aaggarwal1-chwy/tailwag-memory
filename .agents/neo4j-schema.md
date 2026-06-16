@@ -13,7 +13,7 @@ Use this agent for Neo4j constraints, labels, vector indexes, and schema initial
 
 - `src/tailwag_memory/schema.py`
 - schema-related tests in `tests/test_schema.py`
-- schema sections in `docs/mockup-implementation-plan.md`
+- schema sections in `docs/implementation-plan.md`
 
 ## Inputs
 

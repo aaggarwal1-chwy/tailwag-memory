@@ -1,7 +1,7 @@
 [project]
 name = "tailwag-memory"
 version = "0.1.0"
-description = "Neo4j-only hybrid memory mockup with mocked OpenAI-style embeddings."
+description = "Neo4j-only hybrid memory service with mocked OpenAI-style embeddings."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

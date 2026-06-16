@@ -1,8 +1,8 @@
-# Neo4j-Only Memory Mockup Implementation Plan
+# Neo4j-Only Memory Implementation Plan
 
 ## Goal
 
-Build a small Neo4j-only memory mockup that proves the core loop:
+Build a compact Neo4j-only memory service that proves the core loop:
 
 1. Accept caller-owned people, places, episode inputs, and event inputs.
 2. Store each interaction as an `Episode`.
@@ -12,7 +12,7 @@ Build a small Neo4j-only memory mockup that proves the core loop:
 6. Generate mocked OpenAI-style embeddings for episode text.
 7. Retrieve memories through graph lookups and Neo4j vector search.
 
-This mockup should be narrow, inspectable, and easy to extend later.
+This project should remain narrow, inspectable, and easy to extend.
 
 ## Current Scope
 
@@ -49,13 +49,13 @@ Deferred for later:
 
 ## Design Decisions
 
-- Do not store confidence ratings in the mockup.
-- Do not store `org_id` anywhere in the mockup.
+- Do not store confidence ratings in the current scope.
+- Do not store `org_id` anywhere in the current scope.
 - `Person.id` is supplied by the calling system.
 - `Episode.id` is supplied by the calling system.
 - `Event.id` is supplied by the calling system.
 - `Place` is identified only by `building_code` and `room_id`.
-- Embeddings should use an OpenAI-compatible interface, but the mockup should return deterministic fake embeddings for now.
+- Embeddings should use an OpenAI-compatible interface, while the current implementation returns deterministic fake embeddings.
 - The code should be split early enough to avoid large, tangled modules.
 
 ## Initial Graph Model
@@ -82,7 +82,7 @@ Notes:
 - `last_seen` is updated when the person participates in a newer episode.
 - `identity_status` is intentionally excluded.
 - `face_embedding` and `audio_embedding` are optional biometric vectors supplied by the calling system or upstream recognition models.
-- Raw face images and raw audio are not stored by this mockup.
+- Raw face images and raw audio are not stored by this package.
 - On first encounter, the caller should provide consent/profile data. Later episode payloads can reference the existing person by `id` only.
 
 ### Episode
@@ -124,7 +124,7 @@ Notes:
 
 - `id` comes from the calling system.
 - Events represent something that happened, is happening, or is scheduled to happen in a place.
-- Events do not directly reference people in the current mockup.
+- Events do not directly reference people in the current scope.
 - Events are linked to `Place` through `OCCURRED_AT`.
 
 ### Place
@@ -138,7 +138,7 @@ Notes:
 
 Notes:
 
-- The mockup uses only `building_code` and `room_id`.
+- The system uses only `building_code` and `room_id`.
 - Later place enrichment can add properties such as names, maps, floors, and coordinates without changing the episode-to-place relationship.
 
 ## Initial Relationships
@@ -212,7 +212,7 @@ MockOpenAIEmbeddingProvider
 Requirements:
 
 - deterministic for repeatable tests
-- same vector dimension as configured for the mockup
+- same vector dimension as configured for the service
 - no network calls
 - shaped so a future `OpenAIEmbeddingProvider` can replace it without changing ingestion or retrieval
 
@@ -225,7 +225,7 @@ tailwag-memory/
   .env.example
   pyproject.toml
   docs/
-    mockup-implementation-plan.md
+    implementation-plan.md
     agent-trigger-matrix.md
   src/tailwag_memory/
     __init__.py
@@ -313,7 +313,7 @@ tailwag-memory/
 - Keep provider boundaries clear.
 - Ensure deferred concepts can be added without rewriting ingestion and retrieval.
 
-## CLI Mockup Commands
+## CLI Commands
 
 Target command shape:
 
@@ -350,4 +350,4 @@ Expected future relationships:
 - `(:Episode)-[:CONTAINS]->(:Utterance)`
 - `(:SemanticFact)-[:SUPPORTED_BY]->(:Episode)`
 
-The mockup should not create these nodes or relationships yet.
+The current implementation should not create these nodes or relationships yet.

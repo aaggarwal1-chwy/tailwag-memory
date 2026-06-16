@@ -1,4 +1,4 @@
-"""Tailwag memory mockup package."""
+"""Tailwag memory package."""
 
 __all__ = [
     "config",

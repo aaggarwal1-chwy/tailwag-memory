@@ -1,16 +1,16 @@
 # tailwag-memory
 
-Neo4j-only hybrid memory mockup with mocked OpenAI-style embeddings.
+Neo4j-only hybrid memory service with mocked OpenAI-style embeddings.
 
 ## Planning Documents
 
 - [Repository agent instructions](AGENTS.md)
 - [Concrete agent role cards](.agents/README.md)
-- [Mockup implementation plan](docs/mockup-implementation-plan.md)
+- [Implementation plan](docs/implementation-plan.md)
 - [Agent and subagent trigger matrix](docs/agent-trigger-matrix.md)
 - [Python package integration guide](docs/integration-guide.md)
 
-## Current Mockup Scope
+## Current Scope
 
 Implemented now:
 
@@ -151,7 +151,7 @@ tailwag person search-face --embedding-file examples/face-embedding.json
 tailwag person search-audio --embedding-file examples/audio-embedding.json
 ```
 
-Face and audio embeddings are biometric identifiers. The mockup stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
+Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
 
 ## Tests
 

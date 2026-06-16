@@ -1,17 +1,17 @@
 ---
 name: Scope Guard Agent
 slug: scope-guard
-primary_scope: Mockup boundary checks and deferred concept protection
+primary_scope: Scope boundary checks and deferred concept protection
 main_outputs: scope review notes, deferred-concept checks, scope documentation updates
 ---
 
 # Scope Guard Agent
 
-Use this checker agent when a change risks expanding the mockup beyond the approved Neo4j-only scope or introducing deferred concepts.
+Use this checker agent when a change risks expanding the project beyond the approved Neo4j-only scope or introducing deferred concepts.
 
 ## Owns
 
-- deferred concept lists in `README.md` and `docs/mockup-implementation-plan.md`
+- deferred concept lists in `README.md` and `docs/implementation-plan.md`
 - scope boundaries in `docs/agent-trigger-matrix.md`
 - tests that exclude deferred fields and labels
 
@@ -19,7 +19,7 @@ Use this checker agent when a change risks expanding the mockup beyond the appro
 
 - Proposed schema, model, ingestion, retrieval, or adapter changes
 - Deferred concept list
-- Current mockup scope
+- Current scope
 
 ## Outputs
 

@@ -40,7 +40,7 @@ export TAILWAG_EMBEDDING_DIMENSION=64
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
-The embedding dimension must match every vector index and vector payload used by the mockup.
+The embedding dimension must match every vector index and vector payload used by the service.
 `SLACK_BOT_TOKEN` is only required when polling Slack.
 
 ## Initialize Schema
@@ -312,7 +312,7 @@ Useful values include:
 - `caller`
 - `demo`
 
-For example, a camera pipeline might pass `source="face_recognition"`, while an audio pipeline might pass `source="speaker_recognition"`. This is relationship provenance, not a confidence score. The current mockup does not store confidence ratings.
+For example, a camera pipeline might pass `source="face_recognition"`, while an audio pipeline might pass `source="speaker_recognition"`. This is relationship provenance, not a confidence score. The current implementation does not store confidence ratings.
 
 ## Neo4j Browser IDs
 
@@ -408,7 +408,7 @@ for match in face_matches:
 
 ## Swapping Embedding Providers Later
 
-The mockup uses:
+The current embedding provider is:
 
 ```python
 MockOpenAIEmbeddingProvider
@@ -422,7 +422,7 @@ The consuming repo should depend on the `EmbeddingProvider` behavior rather than
 - Run schema initialization before ingestion or retrieval.
 - Use caller-owned IDs for people, episodes, and events.
 - Send consent/profile information on the first encounter, then reference existing people by ID on later memories.
-- Use only `building_code` and `room_id` for places in the current mockup.
+- Use only `building_code` and `room_id` for places in the current scope.
 - Use `Event` for place-linked happenings that may reference people as attendees/participants.
 - Do not pass raw face images or raw audio into this package.
 - Keep biometric vector usage tied to consent and retention policies in the calling system.

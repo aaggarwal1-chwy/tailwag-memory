@@ -25,7 +25,7 @@ They are repo-local instructions for Codex or human contributors, not runtime ap
 | Source Adapter Agent | `source-adapter.md` | External source adapters such as Slack polling |
 | Integration Contract Agent | `integration-contract.md` | Package-consumer APIs, examples, env vars, install workflow |
 | Privacy/Biometric Review Agent | `privacy-biometric-review.md` | Consent, biometric vectors, retention, raw media boundaries |
-| Scope Guard Agent | `scope-guard.md` | Deferred concept and mockup boundary checks |
+| Scope Guard Agent | `scope-guard.md` | Deferred concept and scope boundary checks |
 | Release Quality Gate Agent | `release-quality-gate.md` | Final pre-merge or pre-release verification |
 | Test Agent | `test.md` | Tests, fixtures, verification workflow |
 | Code Refactor Agent | `code-refactor.md` | Module boundaries, duplication, code organization |

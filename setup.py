@@ -4,7 +4,7 @@ from setuptools import find_packages, setup
 setup(
     name="tailwag-memory",
     version="0.1.0",
-    description="Neo4j-only hybrid memory mockup with mocked OpenAI-style embeddings.",
+    description="Neo4j-only hybrid memory service with mocked OpenAI-style embeddings.",
     package_dir={"": "src"},
     packages=find_packages("src"),
     python_requires=">=3.11",
