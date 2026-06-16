@@ -66,6 +66,7 @@ Deferred for later:
 (:Person {
   id,
   display_name,
+  email,
   consent_status,
   face_embedding,
   audio_embedding,
@@ -77,6 +78,7 @@ Deferred for later:
 Notes:
 
 - `id` comes from the calling system.
+- `email` is optional identity evidence for future linking; it is not the unique person key.
 - `last_seen` is updated when the person participates in a newer episode.
 - `identity_status` is intentionally excluded.
 - `face_embedding` and `audio_embedding` are optional biometric vectors supplied by the calling system or upstream recognition models.

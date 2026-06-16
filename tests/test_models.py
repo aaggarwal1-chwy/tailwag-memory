@@ -18,6 +18,7 @@ class EpisodeInputTest(unittest.TestCase):
                     {
                         "id": "person_external_456",
                         "display_name": "Jamie",
+                        "email": "jamie@example.com",
                         "consent_status": "consented",
                         "face_embedding": [0.1, 0.2],
                         "audio_embedding": [0.3, 0.4],
@@ -32,6 +33,7 @@ class EpisodeInputTest(unittest.TestCase):
         self.assertEqual(episode.place.room_id, "101")
         self.assertEqual(episode.participants[0].role, "participant")
         self.assertEqual(episode.participants[0].source, "caller")
+        self.assertEqual(episode.participants[0].email, "jamie@example.com")
         self.assertEqual(episode.participants[0].face_embedding, [0.1, 0.2])
         self.assertEqual(episode.participants[0].audio_embedding, [0.3, 0.4])
 
@@ -52,6 +54,7 @@ class EpisodeInputTest(unittest.TestCase):
         person = episode.participants[0]
         self.assertEqual(person.id, "person_external_456")
         self.assertIsNone(person.display_name)
+        self.assertIsNone(person.email)
         self.assertIsNone(person.consent_status)
         self.assertEqual(person.role, "participant")
         self.assertEqual(person.source, "caller")

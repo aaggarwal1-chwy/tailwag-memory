@@ -19,6 +19,7 @@ def _episode() -> EpisodeInput:
             PersonInput(
                 id="person_external_jamie",
                 display_name="Jamie",
+                email="jamie@example.com",
                 consent_status="consented",
                 face_embedding=[0.1] * 8,
                 audio_embedding=[0.2] * 8,
@@ -43,9 +44,11 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[1].parameters["room_id"], "101")
         self.assertEqual(runner.queries[2].parameters["person_id"], "person_external_jamie")
         self.assertEqual(runner.queries[2].parameters["last_seen"], "2026-06-15T10:05:00+00:00")
+        self.assertEqual(runner.queries[2].parameters["email"], "jamie@example.com")
         self.assertEqual(runner.queries[2].parameters["face_embedding"], [0.1] * 8)
         self.assertEqual(runner.queries[2].parameters["audio_embedding"], [0.2] * 8)
         self.assertIn("p.display_name = coalesce($display_name, p.display_name)", runner.queries[2].query)
+        self.assertIn("p.email = coalesce($email, p.email)", runner.queries[2].query)
         self.assertIn("p.consent_status = coalesce($consent_status, p.consent_status)", runner.queries[2].query)
 
     def test_ingest_query_excludes_org_identity_and_confidence(self) -> None:
@@ -98,6 +101,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
 
         self.assertEqual(runner.queries[2].parameters["person_id"], "person_external_jamie")
         self.assertIsNone(runner.queries[2].parameters["display_name"])
+        self.assertIsNone(runner.queries[2].parameters["email"])
         self.assertIsNone(runner.queries[2].parameters["consent_status"])
         self.assertIsNone(runner.queries[2].parameters["face_embedding"])
         self.assertIsNone(runner.queries[2].parameters["audio_embedding"])

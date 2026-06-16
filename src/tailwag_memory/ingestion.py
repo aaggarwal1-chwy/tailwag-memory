@@ -61,6 +61,7 @@ class EpisodeIngestionService:
                 MATCH (e:Episode {id: $episode_id})
                 MERGE (p:Person {id: $person_id})
                 SET p.display_name = coalesce($display_name, p.display_name),
+                    p.email = coalesce($email, p.email),
                     p.consent_status = coalesce($consent_status, p.consent_status),
                     p.face_embedding = coalesce($face_embedding, p.face_embedding),
                     p.audio_embedding = coalesce($audio_embedding, p.audio_embedding),
@@ -77,6 +78,7 @@ class EpisodeIngestionService:
                     "episode_id": episode.id,
                     "person_id": person.id,
                     "display_name": person.display_name,
+                    "email": person.email,
                     "consent_status": person.consent_status,
                     "face_embedding": person.face_embedding,
                     "audio_embedding": person.audio_embedding,

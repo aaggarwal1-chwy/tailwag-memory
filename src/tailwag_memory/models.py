@@ -13,6 +13,7 @@ def utc_now_iso() -> str:
 class PersonInput:
     id: str
     display_name: str | None = None
+    email: str | None = None
     consent_status: str | None = None
     face_embedding: list[float] | None = None
     audio_embedding: list[float] | None = None
@@ -58,6 +59,7 @@ class EpisodeInput:
                 PersonInput(
                     id=item["id"],
                     display_name=item.get("display_name"),
+                    email=item.get("email"),
                     consent_status=item.get("consent_status"),
                     face_embedding=item.get("face_embedding"),
                     audio_embedding=item.get("audio_embedding"),

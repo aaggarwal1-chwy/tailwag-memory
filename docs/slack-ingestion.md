@@ -9,9 +9,10 @@ The adapter does not add Slack-specific Neo4j labels or relationships. It maps S
 - Slack channel: `Place` with `building_code="SLACK"` and `room_id=<channel_id>`
 - Slack thread/root message: `Episode` with ID `slack:<channel_id>:<thread_ts>`
 - Slack user: `Person` with ID `slack:<user_id>`
+- Slack user email: stored on `Person.email` when available
 - Slack participation: `PARTICIPATED_IN` with `source="slack"` and `role="speaker"`
 
-Slack-created people do not include face or audio embeddings.
+Slack-created people do not include face or audio embeddings. Email is identity evidence for a future linking agent; it does not replace the Slack-owned `Person.id`.
 
 ## Slack App Setup
 
@@ -26,6 +27,7 @@ Required bot scopes for public channels:
 - `channels:read`
 - `channels:history`
 - `users:read`
+- `users:read.email`
 
 Additional bot scopes for private channels:
 

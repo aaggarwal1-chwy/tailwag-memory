@@ -17,8 +17,14 @@ class SlackConversationClient(Protocol):
     def replies(self, channel: str, thread_ts: str, limit: int) -> list[dict[str, Any]]:
         ...
 
-    def user_display_name(self, user_id: str) -> str | None:
+    def user_profile(self, user_id: str) -> "SlackUserProfile":
         ...
+
+
+@dataclass(frozen=True)
+class SlackUserProfile:
+    display_name: str | None = None
+    email: str | None = None
 
 
 @dataclass(frozen=True)
@@ -38,7 +44,7 @@ class SlackWebApiClient:
             raise RuntimeError("Install the slack-sdk package to use Slack ingestion.") from exc
 
         self._client = WebClient(token=token)
-        self._user_cache: dict[str, str | None] = {}
+        self._user_cache: dict[str, SlackUserProfile] = {}
 
     def history(self, channel: str, oldest: str | None, limit: int) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
@@ -82,16 +88,19 @@ class SlackWebApiClient:
                 break
         return messages
 
-    def user_display_name(self, user_id: str) -> str | None:
+    def user_profile(self, user_id: str) -> SlackUserProfile:
         if user_id not in self._user_cache:
             response = self._client.users_info(user=user_id)
             user = response.get("user") or {}
             profile = user.get("profile") or {}
-            self._user_cache[user_id] = (
-                profile.get("display_name")
-                or profile.get("real_name")
-                or user.get("real_name")
-                or user.get("name")
+            self._user_cache[user_id] = SlackUserProfile(
+                display_name=(
+                    profile.get("display_name")
+                    or profile.get("real_name")
+                    or user.get("real_name")
+                    or user.get("name")
+                ),
+                email=_normalize_email(profile.get("email")),
             )
         return self._user_cache[user_id]
 
@@ -167,17 +176,33 @@ class SlackMemoryPoller:
             oldest = _datetime_to_slack_ts(datetime.now(timezone.utc) - timedelta(hours=backfill_hours))
 
         history = self.client.history(channel=channel, oldest=oldest, limit=history_limit)
-        history_threads = {_thread_ts(message) for message in history if _is_memory_message(message)}
-        history_threads.discard(None)
+        history_messages: dict[str, list[dict[str, Any]]] = {}
+        threaded_history: set[str] = set()
+        for message in history:
+            if not _is_memory_message(message):
+                continue
+
+            thread_ts = _thread_ts(message)
+            if thread_ts is None:
+                continue
+
+            history_messages.setdefault(thread_ts, []).append(message)
+            if _has_thread_replies(message):
+                threaded_history.add(thread_ts)
 
         active_threads = state.active_threads(channel)
-        threads_to_check = set(active_threads) | {str(thread_ts) for thread_ts in history_threads}
+        threads_to_check = set(active_threads) | set(history_messages)
         ingested_threads = 0
         thread_cutoff = datetime.now(timezone.utc) - timedelta(hours=self.active_thread_hours)
 
         for thread_ts in sorted(threads_to_check, key=float):
-            replies = self.client.replies(channel=channel, thread_ts=thread_ts, limit=reply_limit)
-            messages = [message for message in replies if _is_memory_message(message)]
+            should_fetch_replies = thread_ts in active_threads or thread_ts in threaded_history
+            if should_fetch_replies:
+                replies = self.client.replies(channel=channel, thread_ts=thread_ts, limit=reply_limit)
+                messages = [message for message in replies if _is_memory_message(message)]
+            else:
+                messages = [message for message in history_messages.get(thread_ts, []) if _is_memory_message(message)]
+
             if not messages:
                 active_threads.pop(thread_ts, None)
                 continue
@@ -195,7 +220,7 @@ class SlackMemoryPoller:
                 ingested_threads += 1
 
             latest_thread_time = _slack_ts_to_datetime(latest_thread_ts)
-            if latest_thread_time >= thread_cutoff:
+            if should_fetch_replies and latest_thread_time >= thread_cutoff:
                 active_threads[thread_ts] = {"latest_ts": latest_thread_ts}
             else:
                 active_threads.pop(thread_ts, None)
@@ -225,22 +250,24 @@ def build_episode_from_slack_thread(
         raise ValueError("Cannot build an episode from an empty Slack thread.")
 
     thread_ts = _thread_ts(ordered[0])
-    user_names: dict[str, str | None] = {}
+    user_profiles: dict[str, SlackUserProfile] = {}
     participants: list[PersonInput] = []
     seen_users: set[str] = set()
     transcript_lines: list[str] = []
 
     for message in ordered:
         user_id = str(message["user"])
-        if user_id not in user_names:
-            user_names[user_id] = client.user_display_name(user_id)
-        display_name = user_names[user_id] or f"slack:{user_id}"
+        if user_id not in user_profiles:
+            user_profiles[user_id] = client.user_profile(user_id)
+        user_profile = user_profiles[user_id]
+        display_name = user_profile.display_name or f"slack:{user_id}"
 
         if user_id not in seen_users:
             participants.append(
                 PersonInput(
                     id=f"slack:{user_id}",
                     display_name=display_name,
+                    email=_normalize_email(user_profile.email),
                     role="speaker",
                     source="slack",
                 )
@@ -275,8 +302,19 @@ def _thread_ts(message: dict[str, Any]) -> str | None:
     return str(ts) if ts is not None else None
 
 
+def _has_thread_replies(message: dict[str, Any]) -> bool:
+    return int(message.get("reply_count") or 0) > 0
+
+
 def _clean_text(text: str) -> str:
     return " ".join(text.split())
+
+
+def _normalize_email(email: Any) -> str | None:
+    if not isinstance(email, str):
+        return None
+    normalized = email.strip().lower()
+    return normalized or None
 
 
 def _summarize(message: dict[str, Any]) -> str:

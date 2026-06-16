@@ -8,6 +8,8 @@ import unittest
 
 from tailwag_memory.slack_ingestion import (
     SlackMemoryPoller,
+    SlackWebApiClient,
+    SlackUserProfile,
     build_episode_from_slack_thread,
 )
 
@@ -23,10 +25,12 @@ class FakeSlackClient:
         history_messages: list[dict] | None = None,
         replies_by_thread: dict[str, list[dict]] | None = None,
         user_names: dict[str, str] | None = None,
+        user_emails: dict[str, str] | None = None,
     ) -> None:
         self.history_messages = history_messages or []
         self.replies_by_thread = replies_by_thread or {}
         self.user_names = user_names or {}
+        self.user_emails = user_emails or {}
         self.history_calls: list[dict] = []
         self.reply_calls: list[dict] = []
 
@@ -38,8 +42,11 @@ class FakeSlackClient:
         self.reply_calls.append({"channel": channel, "thread_ts": thread_ts, "limit": limit})
         return self.replies_by_thread.get(thread_ts, [])
 
-    def user_display_name(self, user_id: str) -> str | None:
-        return self.user_names.get(user_id)
+    def user_profile(self, user_id: str) -> SlackUserProfile:
+        return SlackUserProfile(
+            display_name=self.user_names.get(user_id),
+            email=self.user_emails.get(user_id),
+        )
 
 
 class FakeEpisodeService:
@@ -75,10 +82,56 @@ class SlackThreadConversionTest(unittest.TestCase):
         self.assertEqual(episode.place.room_id, "C123")
         self.assertEqual([person.id for person in episode.participants], ["slack:U1", "slack:U2"])
         self.assertEqual([person.display_name for person in episode.participants], ["Asha", "Ben"])
+        self.assertIsNone(episode.participants[0].email)
         self.assertIsNone(episode.participants[0].face_embedding)
         self.assertIsNone(episode.participants[0].audio_embedding)
         self.assertEqual(episode.participants[0].source, "slack")
         self.assertEqual(episode.transcript, "Asha: Can someone review the deck?\nBen: Yes, I can help.")
+
+    def test_thread_keeps_slack_person_id_and_stores_email_metadata(self) -> None:
+        root_ts = _ts()
+        client = FakeSlackClient(
+            user_names={"U1": "Asha"},
+            user_emails={"U1": "Asha.Example@Example.COM"},
+        )
+        episode = build_episode_from_slack_thread(
+            channel="C123",
+            messages=[{"ts": root_ts, "user": "U1", "text": "Can someone review the deck?"}],
+            client=client,
+        )
+
+        self.assertEqual(episode.participants[0].id, "slack:U1")
+        self.assertEqual(episode.participants[0].email, "asha.example@example.com")
+
+
+class SlackWebApiClientTest(unittest.TestCase):
+    def test_user_profile_reads_and_normalizes_email(self) -> None:
+        class FakeWebClient:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def users_info(self, user: str) -> dict:
+                self.calls += 1
+                return {
+                    "user": {
+                        "profile": {
+                            "display_name": "Asha",
+                            "email": " Asha.Example@Example.COM ",
+                        }
+                    }
+                }
+
+        fake_web_client = FakeWebClient()
+        client = SlackWebApiClient.__new__(SlackWebApiClient)
+        client._client = fake_web_client
+        client._user_cache = {}
+
+        profile = client.user_profile("U1")
+        cached_profile = client.user_profile("U1")
+
+        self.assertEqual(profile, SlackUserProfile(display_name="Asha", email="asha.example@example.com"))
+        self.assertEqual(cached_profile, profile)
+        self.assertEqual(fake_web_client.calls, 1)
 
 
 class SlackMemoryPollerTest(unittest.TestCase):
@@ -104,7 +157,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             reply_ts = _ts(2)
             service = FakeEpisodeService()
             client = FakeSlackClient(
-                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
+                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread", "reply_count": 1}],
                 replies_by_thread={
                     root_ts: [
                         {"ts": root_ts, "user": "U1", "text": "Start thread"},
@@ -131,7 +184,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             second_reply_ts = _ts(4)
             service = FakeEpisodeService()
             client = FakeSlackClient(
-                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
+                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread", "reply_count": 1}],
                 replies_by_thread={
                     root_ts: [
                         {"ts": root_ts, "user": "U1", "text": "Start thread"},
@@ -162,7 +215,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             root_ts = _ts()
             service = FakeEpisodeService(fail=True)
             client = FakeSlackClient(
-                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
+                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread", "reply_count": 1}],
                 replies_by_thread={root_ts: [{"ts": root_ts, "user": "U1", "text": "Start thread"}]},
                 user_names={"U1": "Asha"},
             )
@@ -172,6 +225,26 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 poller.poll_once("C123", backfill_hours=1)
 
             self.assertFalse(state_path.exists())
+
+    def test_unthreaded_history_message_does_not_fetch_replies_or_track_active_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            root_ts = _ts()
+            service = FakeEpisodeService()
+            client = FakeSlackClient(
+                history_messages=[{"ts": root_ts, "user": "U1", "text": "Standalone update"}],
+                user_names={"U1": "Asha"},
+            )
+            poller = SlackMemoryPoller(client, service, state_path)
+
+            result = poller.poll_once("C123", backfill_hours=1)
+
+            self.assertEqual(result.checked_threads, 1)
+            self.assertEqual(result.ingested_threads, 1)
+            self.assertEqual(client.reply_calls, [])
+            self.assertEqual(service.episodes[0].id, f"slack:C123:{root_ts}")
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["channels"]["C123"].get("active_threads"), {})
 
 
 if __name__ == "__main__":

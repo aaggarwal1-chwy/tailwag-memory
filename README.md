@@ -123,7 +123,7 @@ Run continuous polling:
 tailwag slack poll --channel C0123456789 --interval 60
 ```
 
-The Slack app must be invited to the channel. Public channel polling needs `channels:read`, `channels:history`, and `users:read`; private channels also need `groups:read` and `groups:history`.
+The Slack app must be invited to the channel. Public channel polling needs `channels:read`, `channels:history`, `users:read`, and `users:read.email`; private channels also need `groups:read` and `groups:history`.
 
 See [Slack ingestion guide](docs/slack-ingestion.md) for channel ID discovery, polling state, and inspection queries.
 
