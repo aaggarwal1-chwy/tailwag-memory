@@ -33,7 +33,7 @@ Concrete repo-local role cards live in `.agents/`, and the root `AGENTS.md` make
 | Trigger | Agent | Subagents To Consider | Scope Boundary | Handoff |
 | --- | --- | --- | --- | --- |
 | Repo lacks package structure, local run instructions, or environment examples | Project Scaffold Agent | Documentation Agent | Create scaffolding only; do not implement domain logic | Handoff to Schema Agent and CLI Mockup Agent |
-| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `PARTICIPATED_IN`, `OCCURRED_AT`, episode vector indexes, and person biometric vector indexes | Handoff to Ingestion Agent once schema is available |
+| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, episode vector indexes, and person biometric vector indexes | Handoff to Ingestion Agent once schema is available |
 | Need embedding generation or embedding configuration | Mock OpenAI Embeddings Agent | Test Agent, Code Refactor Agent | Mock OpenAI-compatible responses only; no real API calls in the current implementation | Handoff to Ingestion Agent and Retrieval Agent |
 | Need to create or update episode memory records or place events | Ingestion Agent | Neo4j Schema Agent, Mock OpenAI Embeddings Agent, Test Agent | Write path only; no retrieval ranking logic | Handoff to Retrieval Agent for query behavior |
 | Need person participation lookup, place lookup, event lookup, episode vector search, person face recognition, person audio recognition, or hybrid search | Retrieval Agent | Mock OpenAI Embeddings Agent, Test Agent | Read path only; no schema expansion beyond approved scope | Handoff to CLI Mockup Agent for commands |
@@ -410,7 +410,7 @@ Non-goals:
 
 - If a task touches schema and ingestion, start with the Neo4j Schema Agent, then hand off to the Ingestion Agent.
 - If a task touches ingestion and retrieval, keep writes in the Ingestion Agent and reads in the Retrieval Agent.
-- If a change adds a new concept beyond `Person`, `Episode`, or `Place`, pause and update the project scope before implementation.
+- If a change adds a new concept beyond `Person`, `Episode`, `Event`, or `Place`, pause and update the project scope before implementation.
 - If code starts mixing provider logic, Cypher, CLI parsing, and domain models in one file, trigger the Code Refactor Agent.
 - If a feature is difficult to test, trigger the Test Agent before expanding the feature.
 - If a change touches external source polling or source-to-memory mapping, trigger the Source Adapter Agent.

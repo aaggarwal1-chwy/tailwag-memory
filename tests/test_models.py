@@ -61,6 +61,18 @@ class EpisodeInputTest(unittest.TestCase):
 
 
 class EventInputTest(unittest.TestCase):
+    def test_event_input_requires_accepted_attendees_field(self) -> None:
+        with self.assertRaises(KeyError):
+            EventInput.from_dict(
+                {
+                    "id": "event_external_001",
+                    "description": "Room 101 was reserved for a design review.",
+                    "start_time": "2026-06-16T15:00:00+00:00",
+                    "end_time": "2026-06-16T16:00:00+00:00",
+                    "place": {"building_code": "MAIN", "room_id": "101"},
+                }
+            )
+
     def test_event_input_from_dict_links_to_place_without_people(self) -> None:
         event = EventInput.from_dict(
             {
@@ -69,6 +81,7 @@ class EventInputTest(unittest.TestCase):
                 "start_time": "2026-06-16T15:00:00+00:00",
                 "end_time": "2026-06-16T16:00:00+00:00",
                 "place": {"building_code": "MAIN", "room_id": "101"},
+                "accepted_attendees": [],
             }
         )
 
@@ -76,6 +89,39 @@ class EventInputTest(unittest.TestCase):
         self.assertEqual(event.description, "Room 101 was reserved for a design review.")
         self.assertEqual(event.place.building_code, "MAIN")
         self.assertEqual(event.place.room_id, "101")
+        self.assertEqual(event.accepted_attendees, [])
+
+    def test_event_input_from_dict_accepts_attendees(self) -> None:
+        event = EventInput.from_dict(
+            {
+                "id": "event_external_002",
+                "description": "Room 101 was reserved for a design review.",
+                "start_time": "2026-06-16T15:00:00+00:00",
+                "end_time": "2026-06-16T16:00:00+00:00",
+                "place": {"building_code": "MAIN", "room_id": "101"},
+                "accepted_attendees": [
+                    {
+                        "person": {
+                            "id": "person_external_jamie",
+                            "display_name": "Jamie",
+                            "email": "jamie@example.com",
+                        },
+                        "response_time": "2026-06-15T18:00:00+00:00",
+                        "source": "outlook",
+                    }
+                ],
+            }
+        )
+
+        attendee = event.accepted_attendees[0]
+        self.assertEqual(attendee.person.id, "person_external_jamie")
+        self.assertEqual(attendee.person.display_name, "Jamie")
+        self.assertEqual(attendee.person.email, "jamie@example.com")
+        self.assertEqual(attendee.person.role, "attendee")
+        self.assertEqual(attendee.person.source, "outlook")
+        self.assertEqual(attendee.source, "outlook")
+        self.assertEqual(attendee.response, "accepted")
+        self.assertEqual(attendee.response_time, "2026-06-15T18:00:00+00:00")
 
 
 if __name__ == "__main__":

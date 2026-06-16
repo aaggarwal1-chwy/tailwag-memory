@@ -1,7 +1,7 @@
 from tailwag_memory.db import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
 from tailwag_memory.ingestion import EpisodeIngestionService, EventIngestionService
-from tailwag_memory.models import EpisodeInput, EventInput, PersonInput, PlaceInput
+from tailwag_memory.models import EpisodeInput, EventAttendeeInput, EventInput, PersonInput, PlaceInput
 import unittest
 
 
@@ -117,6 +117,7 @@ class EventIngestionServiceTest(unittest.TestCase):
             start_time="2026-06-16T15:00:00+00:00",
             end_time="2026-06-16T16:00:00+00:00",
             place=PlaceInput(building_code="MAIN", room_id="101"),
+            accepted_attendees=[],
         )
 
         event_id = service.ingest(event)
@@ -129,6 +130,67 @@ class EventIngestionServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[1].parameters["room_id"], "101")
         self.assertNotIn("Person", runner.queries[0].query + runner.queries[1].query)
         self.assertNotIn("PARTICIPATED_IN", runner.queries[0].query + runner.queries[1].query)
+        self.assertNotIn("ATTENDED", runner.queries[0].query + runner.queries[1].query)
+
+    def test_ingest_event_writes_accepted_attendees(self) -> None:
+        runner = RecordingQueryRunner()
+        service = EventIngestionService(runner)
+        event = EventInput(
+            id="event_external_002",
+            description="Room 101 was reserved for a design review.",
+            start_time="2026-06-16T15:00:00+00:00",
+            end_time="2026-06-16T16:00:00+00:00",
+            place=PlaceInput(building_code="MAIN", room_id="101"),
+            accepted_attendees=[
+                EventAttendeeInput(
+                    person=PersonInput(
+                        id="person_external_jamie",
+                        display_name="Jamie",
+                        email="jamie@example.com",
+                        consent_status="consented",
+                    ),
+                    response_time="2026-06-15T18:00:00+00:00",
+                    source="outlook",
+                )
+            ],
+        )
+
+        event_id = service.ingest(event)
+
+        self.assertEqual(event_id, "event_external_002")
+        self.assertEqual(len(runner.queries), 3)
+        self.assertEqual(runner.queries[2].parameters["event_id"], "event_external_002")
+        self.assertEqual(runner.queries[2].parameters["person_id"], "person_external_jamie")
+        self.assertEqual(runner.queries[2].parameters["display_name"], "Jamie")
+        self.assertEqual(runner.queries[2].parameters["email"], "jamie@example.com")
+        self.assertEqual(runner.queries[2].parameters["consent_status"], "consented")
+        self.assertEqual(runner.queries[2].parameters["last_seen"], "2026-06-16T16:00:00+00:00")
+        self.assertEqual(runner.queries[2].parameters["source"], "outlook")
+        self.assertEqual(runner.queries[2].parameters["response"], "accepted")
+        self.assertEqual(runner.queries[2].parameters["response_time"], "2026-06-15T18:00:00+00:00")
+        self.assertIn("MERGE (p)-[r:ATTENDED]->(e)", runner.queries[2].query)
+        self.assertIn("p.email = coalesce($email, p.email)", runner.queries[2].query)
+
+    def test_ingest_event_uses_start_time_for_attendee_last_seen_when_end_time_is_missing(self) -> None:
+        runner = RecordingQueryRunner()
+        service = EventIngestionService(runner)
+        event = EventInput(
+            id="event_external_003",
+            description="Room 101 was reserved for a design review.",
+            start_time="2026-06-16T15:00:00+00:00",
+            end_time=None,
+            place=PlaceInput(building_code="MAIN", room_id="101"),
+            accepted_attendees=[
+                EventAttendeeInput(
+                    person=PersonInput(id="person_external_jamie"),
+                    source="outlook",
+                )
+            ],
+        )
+
+        service.ingest(event)
+
+        self.assertEqual(runner.queries[2].parameters["last_seen"], "2026-06-16T15:00:00+00:00")
 
 
 if __name__ == "__main__":

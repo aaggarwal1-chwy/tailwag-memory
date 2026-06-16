@@ -67,5 +67,6 @@ def demo_events() -> list[EventInput]:
             start_time="2026-06-15T15:00:00+00:00",
             end_time="2026-06-15T16:00:00+00:00",
             place=PlaceInput(building_code="MAIN", room_id="101"),
+            accepted_attendees=[],
         )
     ]

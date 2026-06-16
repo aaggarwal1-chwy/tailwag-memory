@@ -20,11 +20,13 @@ Implemented now:
 - `Place`
 - `PARTICIPATED_IN`
 - `OCCURRED_AT`
+- `ATTENDED`
 - mocked OpenAI-style episode embeddings
 - optional `Person.face_embedding`
 - optional `Person.audio_embedding`
 - graph and vector retrieval services
 - Slack channel polling into conversation episodes
+- source-provided event attendees
 
 Delayed intentionally:
 
@@ -35,6 +37,7 @@ Delayed intentionally:
 - `SemanticFact`
 - confidence ratings
 - `org_id`
+- Outlook/Microsoft Graph polling
 
 ## Local Setup
 
@@ -105,7 +108,7 @@ Create a later memory for an existing person by ID:
 tailwag episode create --file examples/existing-person-episode.json
 ```
 
-Create a place event:
+Create a place event with accepted attendees:
 
 ```bash
 tailwag event create --file examples/event.json

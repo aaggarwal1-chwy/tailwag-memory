@@ -129,4 +129,41 @@ class EventIngestionService:
             },
         )
 
+        for attendee in event.accepted_attendees:
+            person = attendee.person
+            self.runner.run(
+                """
+                MATCH (e:Event {id: $event_id})
+                MERGE (p:Person {id: $person_id})
+                SET p.display_name = coalesce($display_name, p.display_name),
+                    p.email = coalesce($email, p.email),
+                    p.consent_status = coalesce($consent_status, p.consent_status),
+                    p.face_embedding = coalesce($face_embedding, p.face_embedding),
+                    p.audio_embedding = coalesce($audio_embedding, p.audio_embedding),
+                    p.created_at = coalesce(p.created_at, $created_at),
+                    p.last_seen = CASE
+                      WHEN p.last_seen IS NULL OR p.last_seen < $last_seen THEN $last_seen
+                      ELSE p.last_seen
+                    END
+                MERGE (p)-[r:ATTENDED]->(e)
+                SET r.source = $source,
+                    r.response = $response,
+                    r.response_time = $response_time
+                """,
+                {
+                    "event_id": event.id,
+                    "person_id": person.id,
+                    "display_name": person.display_name,
+                    "email": person.email,
+                    "consent_status": person.consent_status,
+                    "face_embedding": person.face_embedding,
+                    "audio_embedding": person.audio_embedding,
+                    "created_at": created_at,
+                    "last_seen": event.end_time or event.start_time,
+                    "source": attendee.source,
+                    "response": attendee.response,
+                    "response_time": attendee.response_time,
+                },
+            )
+
         return event.id

@@ -8,7 +8,7 @@ Build a compact Neo4j-only memory service that proves the core loop:
 2. Store each interaction as an `Episode`.
 3. Store place-linked happenings as `Event`.
 4. Connect episodes to participating people and places.
-5. Connect events to places without direct person references.
+5. Connect events to places and accepted attendees.
 6. Generate mocked OpenAI-style embeddings for episode text.
 7. Retrieve memories through graph lookups and Neo4j vector search.
 
@@ -24,6 +24,7 @@ Implemented now:
 - `Place`
 - `PARTICIPATED_IN`
 - `OCCURRED_AT`
+- `ATTENDED`
 - mocked OpenAI embedding responses
 - optional caller-supplied person face embeddings
 - optional caller-supplied person audio embeddings
@@ -34,6 +35,7 @@ Implemented now:
 - tests
 - CLI-first local workflow
 - Slack channel polling as a source adapter into conversation episodes
+- event attendee relationships for source-provided accepted attendees
 
 Deferred for later:
 
@@ -46,6 +48,7 @@ Deferred for later:
 - confidence ratings and confidence properties
 - external vector databases
 - Postgres or other secondary persistence
+- Outlook/Microsoft Graph polling and distribution list expansion
 
 ## Design Decisions
 
@@ -124,7 +127,7 @@ Notes:
 
 - `id` comes from the calling system.
 - Events represent something that happened, is happening, or is scheduled to happen in a place.
-- Events do not directly reference people in the current scope.
+- Events can reference accepted attendees through `ATTENDED`.
 - Events are linked to `Place` through `OCCURRED_AT`.
 
 ### Place
@@ -152,9 +155,17 @@ Notes:
 (:Episode)-[:OCCURRED_AT]->(:Place)
 
 (:Event)-[:OCCURRED_AT]->(:Place)
+
+(:Person)-[:ATTENDED {
+  source,
+  response,
+  response_time
+}]->(:Event)
 ```
 
 `PARTICIPATED_IN.source` records how the calling system decided the person participated in the episode. Example values include `face_recognition`, `speaker_recognition`, `manual`, `caller`, `demo`, or `example`. It is provenance for the relationship, not a confidence score. If multiple signals are used later, the caller can choose a combined value such as `face_and_audio` or the model can be expanded to store richer evidence.
+
+`ATTENDED.source` records how the calling system determined that the person attended or accepted an event. For Outlook-derived events, a later adapter can use `source="outlook"` and `response="accepted"`.
 
 ## Neo4j Browser IDs
 
@@ -281,6 +292,7 @@ tailwag-memory/
 - Attach `PARTICIPATED_IN` and `OCCURRED_AT`.
 - Create or update `Event` nodes.
 - Attach events to places with `OCCURRED_AT`.
+- Attach accepted event attendees with `ATTENDED`.
 
 ### Phase 5: Retrieval
 

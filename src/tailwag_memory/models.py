@@ -28,6 +28,14 @@ class PlaceInput:
 
 
 @dataclass(frozen=True)
+class EventAttendeeInput:
+    person: PersonInput
+    response_time: str | None = None
+    source: str = "caller"
+    response: str = "accepted"
+
+
+@dataclass(frozen=True)
 class EpisodeInput:
     id: str
     episode_type: str
@@ -78,10 +86,12 @@ class EventInput:
     start_time: str
     end_time: str | None
     place: PlaceInput
+    accepted_attendees: list[EventAttendeeInput]
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "EventInput":
         place = payload.get("place") or {}
+        accepted_attendees = payload["accepted_attendees"]
         return cls(
             id=payload["id"],
             description=payload["description"],
@@ -91,6 +101,24 @@ class EventInput:
                 building_code=place["building_code"],
                 room_id=place["room_id"],
             ),
+            accepted_attendees=[
+                EventAttendeeInput(
+                    person=PersonInput(
+                        id=item["person"]["id"],
+                        display_name=item["person"].get("display_name"),
+                        email=item["person"].get("email"),
+                        consent_status=item["person"].get("consent_status"),
+                        face_embedding=item["person"].get("face_embedding"),
+                        audio_embedding=item["person"].get("audio_embedding"),
+                        role=item["person"].get("role", "attendee"),
+                        source=item["person"].get("source", item.get("source", "caller")),
+                    ),
+                    response_time=item.get("response_time"),
+                    source=item.get("source", "caller"),
+                    response=item.get("response", "accepted"),
+                )
+                for item in accepted_attendees
+            ],
         )
 
 

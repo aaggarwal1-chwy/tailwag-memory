@@ -23,6 +23,8 @@ class ExamplePayloadTest(unittest.TestCase):
             "source": "example",
         })
         self.assertEqual(event["place"], {"building_code": "MAIN", "room_id": "101"})
+        self.assertEqual(event["accepted_attendees"][0]["person"]["id"], "person_jamie")
+        self.assertEqual(event["accepted_attendees"][0]["source"], "example")
         self.assertNotIn("participants", event)
 
 

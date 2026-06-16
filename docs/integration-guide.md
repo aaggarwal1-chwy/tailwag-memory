@@ -191,13 +191,13 @@ Public channel polling needs `channels:read`, `channels:history`, `users:read`, 
 
 ## Create A Place Event
 
-Events represent something that happened, is happening, or is scheduled to happen in a place. Events do not directly reference people.
+Events represent something that happened, is happening, or is scheduled to happen in a place. Events include an explicit `accepted_attendees` list; pass an empty list when no attendees are known.
 
 ```python
 from tailwag_memory.config import load_settings
 from tailwag_memory.db import Neo4jQueryRunner
 from tailwag_memory.ingestion import EventIngestionService
-from tailwag_memory.models import EventInput, PlaceInput
+from tailwag_memory.models import EventAttendeeInput, EventInput, PersonInput, PlaceInput
 
 settings = load_settings()
 runner = Neo4jQueryRunner(settings)
@@ -208,6 +208,17 @@ event = EventInput(
     start_time="2026-06-16T15:00:00+00:00",
     end_time="2026-06-16T16:00:00+00:00",
     place=PlaceInput(building_code="MAIN", room_id="101"),
+    accepted_attendees=[
+        EventAttendeeInput(
+            person=PersonInput(
+                id="person_jamie",
+                display_name="Jamie",
+                email="jamie@example.com",
+            ),
+            response_time="2026-06-15T18:00:00+00:00",
+            source="calling-system",
+        )
+    ],
 )
 
 try:
@@ -296,9 +307,22 @@ Expected JSON shape:
   "place": {
     "building_code": "MAIN",
     "room_id": "101"
-  }
+  },
+  "accepted_attendees": [
+    {
+      "person": {
+        "id": "person_jamie",
+        "display_name": "Jamie",
+        "email": "jamie@example.com"
+      },
+      "response_time": "2026-06-15T18:00:00+00:00",
+      "source": "calling-system"
+    }
+  ]
 }
 ```
+
+Use `"accepted_attendees": []` when no attendee people are known. The field is required so event payloads are explicit about whether attendee data was available.
 
 ## Participation Source
 
@@ -313,6 +337,8 @@ Useful values include:
 - `demo`
 
 For example, a camera pipeline might pass `source="face_recognition"`, while an audio pipeline might pass `source="speaker_recognition"`. This is relationship provenance, not a confidence score. The current implementation does not store confidence ratings.
+
+Event attendee entries store their `source`, `response`, and `response_time` on the `ATTENDED` relationship. The default response is `accepted`, which matches the future Outlook RSVP path without requiring Outlook permissions in the current implementation.
 
 ## Neo4j Browser IDs
 
