@@ -1,7 +1,7 @@
 from tailwag_memory.db import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
 from tailwag_memory.models import SearchQuery
-from tailwag_memory.retrieval import EpisodeRetrievalService, PersonRecognitionService
+from tailwag_memory.retrieval import EpisodeRetrievalService, EventRetrievalService, PersonRecognitionService
 import unittest
 
 
@@ -94,6 +94,34 @@ class PersonRecognitionServiceTest(unittest.TestCase):
 
         self.assertEqual(runner.queries[0].parameters["index_name"], "person_audio_embedding")
         self.assertEqual(runner.queries[0].parameters["limit"], 4)
+
+
+class EventRetrievalServiceTest(unittest.TestCase):
+    def test_by_place_returns_events_for_place(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "event_id": "event_1",
+                        "description": "Room 101 was reserved.",
+                        "start_time": "2026-06-16T15:00:00+00:00",
+                        "end_time": "2026-06-16T16:00:00+00:00",
+                        "building_code": "MAIN",
+                        "room_id": "101",
+                    }
+                ]
+            ]
+        )
+        service = EventRetrievalService(runner)
+
+        results = service.by_place("MAIN", "101", limit=5)
+
+        self.assertEqual(results[0].event_id, "event_1")
+        self.assertEqual(results[0].building_code, "MAIN")
+        self.assertEqual(results[0].room_id, "101")
+        self.assertEqual(runner.queries[0].parameters["building_code"], "MAIN")
+        self.assertEqual(runner.queries[0].parameters["room_id"], "101")
+        self.assertEqual(runner.queries[0].parameters["limit"], 5)
 
 
 if __name__ == "__main__":

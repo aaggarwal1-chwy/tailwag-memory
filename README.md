@@ -4,8 +4,11 @@ Neo4j-only hybrid memory mockup with mocked OpenAI-style embeddings.
 
 ## Planning Documents
 
+- [Repository agent instructions](AGENTS.md)
+- [Concrete agent role cards](.agents/README.md)
 - [Mockup implementation plan](docs/mockup-implementation-plan.md)
 - [Agent and subagent trigger matrix](docs/agent-trigger-matrix.md)
+- [Python package integration guide](docs/integration-guide.md)
 
 ## Current Mockup Scope
 
@@ -13,6 +16,7 @@ Implemented now:
 
 - `Person`
 - `Episode`
+- `Event`
 - `Place`
 - `PARTICIPATED_IN`
 - `OCCURRED_AT`
@@ -20,6 +24,7 @@ Implemented now:
 - optional `Person.face_embedding`
 - optional `Person.audio_embedding`
 - graph and vector retrieval services
+- Slack channel polling into conversation episodes
 
 Delayed intentionally:
 
@@ -39,10 +44,35 @@ Start Neo4j:
 docker compose up -d
 ```
 
+Open Neo4j Browser:
+
+```text
+http://localhost:7474
+```
+
+Login with the local demo credentials:
+
+```text
+username: neo4j
+password: tailwag-memory
+```
+
 Install the package in editable mode:
 
 ```bash
 python3 -m pip install -e .
+```
+
+For Slack polling, paste your bot token into the ignored repo-local file:
+
+```text
+/Users/aaggarwal1/Desktop/code/tailwag-memory/.env
+```
+
+Use this line:
+
+```bash
+SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
 Initialize schema:
@@ -63,12 +93,48 @@ Create an episode from JSON:
 tailwag episode create --file examples/episode.json
 ```
 
+Create a later memory for an existing person by ID:
+
+```bash
+tailwag episode create --file examples/existing-person-episode.json
+```
+
+Create a place event:
+
+```bash
+tailwag event create --file examples/event.json
+```
+
+Poll a Slack channel into memories:
+
+```bash
+tailwag slack poll --channel C0123456789 --once
+```
+
+The first run without `--backfill-hours` arms the cursor from the current time and does not import older messages. To test against recent existing channel activity, run:
+
+```bash
+tailwag slack poll --channel C0123456789 --once --backfill-hours 2
+```
+
+Run continuous polling:
+
+```bash
+tailwag slack poll --channel C0123456789 --interval 60
+```
+
+The Slack app must be invited to the channel. Public channel polling needs `channels:read`, `channels:history`, and `users:read`; private channels also need `groups:read` and `groups:history`.
+
+See [Slack ingestion guide](docs/slack-ingestion.md) for channel ID discovery, polling state, and inspection queries.
+
 Search memories:
 
 ```bash
 tailwag search "what did Jamie ask about?"
 tailwag search --person-id person_jamie "chargers"
 tailwag search --building-code MAIN --room-id 101 "projector"
+tailwag search --building-code SLACK --room-id C0123456789 "conversation"
+tailwag event by-place --building-code MAIN --room-id 101
 tailwag person search-face --embedding-file examples/face-embedding.json
 tailwag person search-audio --embedding-file examples/audio-embedding.json
 ```

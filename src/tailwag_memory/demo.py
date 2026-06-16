@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
-from .ingestion import EpisodeIngestionService
-from .models import EpisodeInput, PersonInput, PlaceInput
+from .ingestion import EpisodeIngestionService, EventIngestionService
+from .models import EpisodeInput, EventInput, PersonInput, PlaceInput
 
 
 def demo_episodes() -> list[EpisodeInput]:
@@ -16,7 +16,6 @@ def demo_episodes() -> list[EpisodeInput]:
             summary="Jamie asked where the spare laptop chargers are kept.",
             transcript="Jamie: Do we have spare laptop chargers in this room? Assistant: They are usually near the front desk.",
             retention_class="standard",
-            visibility="team",
             place=PlaceInput(building_code="MAIN", room_id="101"),
             participants=[
                 PersonInput(
@@ -36,7 +35,6 @@ def demo_episodes() -> list[EpisodeInput]:
             summary="Alex discussed projector setup for the afternoon review.",
             transcript="Alex: Can we test the projector before the review? Assistant: Yes, the HDMI cable is already connected.",
             retention_class="standard",
-            visibility="team",
             place=PlaceInput(building_code="MAIN", room_id="101"),
             participants=[
                 PersonInput(
@@ -52,6 +50,22 @@ def demo_episodes() -> list[EpisodeInput]:
 
 
 def seed_demo(runner: QueryRunner, embeddings: EmbeddingProvider) -> None:
-    service = EpisodeIngestionService(runner, embeddings)
+    episode_service = EpisodeIngestionService(runner, embeddings)
     for episode in demo_episodes():
-        service.ingest(episode)
+        episode_service.ingest(episode)
+
+    event_service = EventIngestionService(runner)
+    for event in demo_events():
+        event_service.ingest(event)
+
+
+def demo_events() -> list[EventInput]:
+    return [
+        EventInput(
+            id="event_demo_001",
+            description="Room 101 was reserved for the afternoon design review.",
+            start_time="2026-06-15T15:00:00+00:00",
+            end_time="2026-06-15T16:00:00+00:00",
+            place=PlaceInput(building_code="MAIN", room_id="101"),
+        )
+    ]

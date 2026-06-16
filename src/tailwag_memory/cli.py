@@ -3,15 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import time
 from typing import Sequence
 
 from .config import load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import MockOpenAIEmbeddingProvider
-from .ingestion import EpisodeIngestionService
-from .models import EpisodeInput, SearchQuery
-from .retrieval import EpisodeRetrievalService, PersonRecognitionService
+from .ingestion import EpisodeIngestionService, EventIngestionService
+from .models import EpisodeInput, EventInput, SearchQuery
+from .retrieval import EpisodeRetrievalService, EventRetrievalService, PersonRecognitionService
 from .schema import initialize_schema
+from .slack_ingestion import SlackMemoryPoller, SlackWebApiClient
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -31,6 +33,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     create_parser = episode_subparsers.add_parser("create")
     create_parser.add_argument("--file", required=True)
 
+    event_parser = subparsers.add_parser("event")
+    event_subparsers = event_parser.add_subparsers(dest="event_command", required=True)
+    event_create_parser = event_subparsers.add_parser("create")
+    event_create_parser.add_argument("--file", required=True)
+    event_place_parser = event_subparsers.add_parser("by-place")
+    event_place_parser.add_argument("--building-code", required=True)
+    event_place_parser.add_argument("--room-id", required=True)
+    event_place_parser.add_argument("--limit", type=int, default=10)
+
     person_parser = subparsers.add_parser("person")
     person_subparsers = person_parser.add_subparsers(dest="person_command", required=True)
     face_parser = person_subparsers.add_parser("search-face")
@@ -47,6 +58,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     search_parser.add_argument("--room-id")
     search_parser.add_argument("--target", choices=["summary", "transcript"], default="summary")
     search_parser.add_argument("--limit", type=int, default=10)
+
+    slack_parser = subparsers.add_parser("slack")
+    slack_subparsers = slack_parser.add_subparsers(dest="slack_command", required=True)
+    slack_poll_parser = slack_subparsers.add_parser("poll")
+    slack_poll_parser.add_argument("--channel", required=True)
+    slack_poll_parser.add_argument("--interval", type=float, default=60.0)
+    slack_poll_parser.add_argument("--once", action="store_true")
+    slack_poll_parser.add_argument("--state-file", default=".tailwag/slack-state.json")
+    slack_poll_parser.add_argument("--backfill-hours", type=float)
+    slack_poll_parser.add_argument("--active-thread-hours", type=float, default=24.0)
+    slack_poll_parser.add_argument("--history-limit", type=int, default=200)
+    slack_poll_parser.add_argument("--reply-limit", type=int, default=200)
 
     args = parser.parse_args(argv)
     settings = load_settings()
@@ -71,6 +94,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             service = EpisodeIngestionService(runner, embeddings)
             episode_id = service.ingest(EpisodeInput.from_dict(payload))
             print(f"Episode ingested: {episode_id}")
+            return 0
+
+        if args.command == "event":
+            if args.event_command == "create":
+                payload = json.loads(Path(args.file).read_text())
+                service = EventIngestionService(runner)
+                event_id = service.ingest(EventInput.from_dict(payload))
+                print(f"Event ingested: {event_id}")
+                return 0
+            service = EventRetrievalService(runner)
+            results = service.by_place(args.building_code, args.room_id, limit=args.limit)
+            for result in results:
+                print(json.dumps(result.__dict__, sort_keys=True))
             return 0
 
         if args.command == "person":
@@ -99,6 +135,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             for result in results:
                 print(json.dumps(result.__dict__, sort_keys=True))
             return 0
+
+        if args.command == "slack":
+            if not settings.slack_bot_token:
+                parser.error("SLACK_BOT_TOKEN is required. Add it to .env or export it in your shell.")
+
+            service = EpisodeIngestionService(runner, embeddings)
+            client = SlackWebApiClient(settings.slack_bot_token)
+            poller = SlackMemoryPoller(
+                client,
+                service,
+                Path(args.state_file),
+                active_thread_hours=args.active_thread_hours,
+            )
+
+            while True:
+                result = poller.poll_once(
+                    args.channel,
+                    backfill_hours=args.backfill_hours,
+                    history_limit=args.history_limit,
+                    reply_limit=args.reply_limit,
+                )
+                print(json.dumps(result.__dict__, sort_keys=True))
+                if args.once:
+                    return 0
+                time.sleep(args.interval)
 
         return 2
     finally:

@@ -12,8 +12,8 @@ def utc_now_iso() -> str:
 @dataclass(frozen=True)
 class PersonInput:
     id: str
-    display_name: str
-    consent_status: str
+    display_name: str | None = None
+    consent_status: str | None = None
     face_embedding: list[float] | None = None
     audio_embedding: list[float] | None = None
     role: str = "participant"
@@ -35,7 +35,6 @@ class EpisodeInput:
     summary: str
     transcript: str
     retention_class: str
-    visibility: str
     place: PlaceInput
     participants: list[PersonInput] = field(default_factory=list)
 
@@ -51,7 +50,6 @@ class EpisodeInput:
             summary=payload["summary"],
             transcript=payload["transcript"],
             retention_class=payload["retention_class"],
-            visibility=payload["visibility"],
             place=PlaceInput(
                 building_code=place["building_code"],
                 room_id=place["room_id"],
@@ -59,8 +57,8 @@ class EpisodeInput:
             participants=[
                 PersonInput(
                     id=item["id"],
-                    display_name=item["display_name"],
-                    consent_status=item["consent_status"],
+                    display_name=item.get("display_name"),
+                    consent_status=item.get("consent_status"),
                     face_embedding=item.get("face_embedding"),
                     audio_embedding=item.get("audio_embedding"),
                     role=item.get("role", "participant"),
@@ -68,6 +66,29 @@ class EpisodeInput:
                 )
                 for item in participants
             ],
+        )
+
+
+@dataclass(frozen=True)
+class EventInput:
+    id: str
+    description: str
+    start_time: str
+    end_time: str | None
+    place: PlaceInput
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "EventInput":
+        place = payload.get("place") or {}
+        return cls(
+            id=payload["id"],
+            description=payload["description"],
+            start_time=payload["start_time"],
+            end_time=payload.get("end_time"),
+            place=PlaceInput(
+                building_code=place["building_code"],
+                room_id=place["room_id"],
+            ),
         )
 
 
@@ -88,6 +109,16 @@ class MemoryResult:
     transcript: str
     score: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EventResult:
+    event_id: str
+    description: str
+    start_time: str
+    end_time: str | None = None
+    building_code: str | None = None
+    room_id: str | None = None
 
 
 @dataclass(frozen=True)

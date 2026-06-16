@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
-from .models import MemoryResult, PersonRecognitionResult, SearchQuery
+from .models import EventResult, MemoryResult, PersonRecognitionResult, SearchQuery
 
 
 class EpisodeRetrievalService:
@@ -151,4 +151,39 @@ class PersonRecognitionService:
             consent_status=str(row.get("consent_status") or ""),
             last_seen=str(row["last_seen"]) if row.get("last_seen") is not None else None,
             score=row.get("score") if isinstance(row.get("score"), float) else None,
+        )
+
+
+class EventRetrievalService:
+    def __init__(self, runner: QueryRunner) -> None:
+        self.runner = runner
+
+    def by_place(self, building_code: str, room_id: str, limit: int = 10) -> list[EventResult]:
+        rows = self.runner.run(
+            """
+            MATCH (e:Event)-[:OCCURRED_AT]->(p:Place {
+              building_code: $building_code,
+              room_id: $room_id
+            })
+            RETURN e.id AS event_id,
+                   e.description AS description,
+                   e.start_time AS start_time,
+                   e.end_time AS end_time,
+                   p.building_code AS building_code,
+                   p.room_id AS room_id
+            ORDER BY e.start_time DESC
+            LIMIT $limit
+            """,
+            {"building_code": building_code, "room_id": room_id, "limit": limit},
+        )
+        return [self._row_to_result(row) for row in rows]
+
+    def _row_to_result(self, row: dict[str, object]) -> EventResult:
+        return EventResult(
+            event_id=str(row["event_id"]),
+            description=str(row.get("description") or ""),
+            start_time=str(row.get("start_time") or ""),
+            end_time=str(row["end_time"]) if row.get("end_time") is not None else None,
+            building_code=str(row.get("building_code") or ""),
+            room_id=str(row.get("room_id") or ""),
         )

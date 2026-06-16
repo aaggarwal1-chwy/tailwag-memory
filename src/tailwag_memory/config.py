@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -10,12 +11,29 @@ class Settings:
     neo4j_user: str
     neo4j_password: str
     embedding_dimension: int
+    slack_bot_token: str | None = None
 
 
 def load_settings() -> Settings:
+    load_env_file()
     return Settings(
         neo4j_uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
         neo4j_user=os.getenv("NEO4J_USER", "neo4j"),
         neo4j_password=os.getenv("NEO4J_PASSWORD", "tailwag-memory"),
         embedding_dimension=int(os.getenv("TAILWAG_EMBEDDING_DIMENSION", "64")),
+        slack_bot_token=os.getenv("SLACK_BOT_TOKEN"),
     )
+
+
+def load_env_file(path: Path = Path(".env")) -> None:
+    if not path.exists():
+        return
+
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")

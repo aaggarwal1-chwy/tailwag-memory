@@ -14,6 +14,10 @@ def schema_statements(embedding_dimension: int) -> list[str]:
         FOR (e:Episode) REQUIRE e.id IS UNIQUE
         """,
         """
+        CREATE CONSTRAINT event_id IF NOT EXISTS
+        FOR (e:Event) REQUIRE e.id IS UNIQUE
+        """,
+        """
         CREATE CONSTRAINT place_key IF NOT EXISTS
         FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE
         """,

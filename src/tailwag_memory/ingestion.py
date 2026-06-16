@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
-from .models import EpisodeInput, utc_now_iso
+from .models import EpisodeInput, EventInput, utc_now_iso
 
 
 class EpisodeIngestionService:
@@ -24,7 +24,6 @@ class EpisodeIngestionService:
                 e.summary = $summary,
                 e.transcript = $transcript,
                 e.retention_class = $retention_class,
-                e.visibility = $visibility,
                 e.summary_embedding = $summary_embedding,
                 e.transcript_embedding = $transcript_embedding,
                 e.created_at = coalesce(e.created_at, $created_at)
@@ -37,7 +36,6 @@ class EpisodeIngestionService:
                 "summary": episode.summary,
                 "transcript": episode.transcript,
                 "retention_class": episode.retention_class,
-                "visibility": episode.visibility,
                 "summary_embedding": summary_embedding,
                 "transcript_embedding": transcript_embedding,
                 "created_at": created_at,
@@ -62,8 +60,8 @@ class EpisodeIngestionService:
                 """
                 MATCH (e:Episode {id: $episode_id})
                 MERGE (p:Person {id: $person_id})
-                SET p.display_name = $display_name,
-                    p.consent_status = $consent_status,
+                SET p.display_name = coalesce($display_name, p.display_name),
+                    p.consent_status = coalesce($consent_status, p.consent_status),
                     p.face_embedding = coalesce($face_embedding, p.face_embedding),
                     p.audio_embedding = coalesce($audio_embedding, p.audio_embedding),
                     p.created_at = coalesce(p.created_at, $created_at),
@@ -90,3 +88,43 @@ class EpisodeIngestionService:
             )
 
         return episode.id
+
+
+class EventIngestionService:
+    def __init__(self, runner: QueryRunner) -> None:
+        self.runner = runner
+
+    def ingest(self, event: EventInput) -> str:
+        created_at = utc_now_iso()
+
+        self.runner.run(
+            """
+            MERGE (e:Event {id: $id})
+            SET e.description = $description,
+                e.start_time = $start_time,
+                e.end_time = $end_time,
+                e.created_at = coalesce(e.created_at, $created_at)
+            """,
+            {
+                "id": event.id,
+                "description": event.description,
+                "start_time": event.start_time,
+                "end_time": event.end_time,
+                "created_at": created_at,
+            },
+        )
+
+        self.runner.run(
+            """
+            MATCH (e:Event {id: $event_id})
+            MERGE (p:Place {building_code: $building_code, room_id: $room_id})
+            MERGE (e)-[:OCCURRED_AT]->(p)
+            """,
+            {
+                "event_id": event.id,
+                "building_code": event.place.building_code,
+                "room_id": event.place.room_id,
+            },
+        )
+
+        return event.id

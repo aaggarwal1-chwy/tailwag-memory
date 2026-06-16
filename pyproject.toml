@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "neo4j>=5.20.0",
+  "slack-sdk>=3.27.0",
 ]
 
 [project.optional-dependencies]

@@ -4,11 +4,13 @@
 
 Build a small Neo4j-only memory mockup that proves the core loop:
 
-1. Accept caller-owned people, places, and episode inputs.
+1. Accept caller-owned people, places, episode inputs, and event inputs.
 2. Store each interaction as an `Episode`.
-3. Connect episodes to participating people and places.
-4. Generate mocked OpenAI-style embeddings for episode text.
-5. Retrieve memories through graph lookups and Neo4j vector search.
+3. Store place-linked happenings as `Event`.
+4. Connect episodes to participating people and places.
+5. Connect events to places without direct person references.
+6. Generate mocked OpenAI-style embeddings for episode text.
+7. Retrieve memories through graph lookups and Neo4j vector search.
 
 This mockup should be narrow, inspectable, and easy to extend later.
 
@@ -18,6 +20,7 @@ Implemented now:
 
 - `Person`
 - `Episode`
+- `Event`
 - `Place`
 - `PARTICIPATED_IN`
 - `OCCURRED_AT`
@@ -30,6 +33,7 @@ Implemented now:
 - seed/demo data
 - tests
 - CLI-first local workflow
+- Slack channel polling as a source adapter into conversation episodes
 
 Deferred for later:
 
@@ -49,6 +53,7 @@ Deferred for later:
 - Do not store `org_id` anywhere in the mockup.
 - `Person.id` is supplied by the calling system.
 - `Episode.id` is supplied by the calling system.
+- `Event.id` is supplied by the calling system.
 - `Place` is identified only by `building_code` and `room_id`.
 - Embeddings should use an OpenAI-compatible interface, but the mockup should return deterministic fake embeddings for now.
 - The code should be split early enough to avoid large, tangled modules.
@@ -76,6 +81,7 @@ Notes:
 - `identity_status` is intentionally excluded.
 - `face_embedding` and `audio_embedding` are optional biometric vectors supplied by the calling system or upstream recognition models.
 - Raw face images and raw audio are not stored by this mockup.
+- On first encounter, the caller should provide consent/profile data. Later episode payloads can reference the existing person by `id` only.
 
 ### Episode
 
@@ -88,7 +94,6 @@ Notes:
   summary,
   transcript,
   retention_class,
-  visibility,
   created_at,
   summary_embedding,
   transcript_embedding
@@ -100,6 +105,25 @@ Notes:
 - `id` comes from the calling system.
 - `summary_embedding` and `transcript_embedding` are mocked OpenAI-style vectors in the initial implementation.
 - Raw recordings are not stored.
+
+### Event
+
+```cypher
+(:Event {
+  id,
+  description,
+  start_time,
+  end_time,
+  created_at
+})
+```
+
+Notes:
+
+- `id` comes from the calling system.
+- Events represent something that happened, is happening, or is scheduled to happen in a place.
+- Events do not directly reference people in the current mockup.
+- Events are linked to `Place` through `OCCURRED_AT`.
 
 ### Place
 
@@ -124,7 +148,21 @@ Notes:
 }]->(:Episode)
 
 (:Episode)-[:OCCURRED_AT]->(:Place)
+
+(:Event)-[:OCCURRED_AT]->(:Place)
 ```
+
+`PARTICIPATED_IN.source` records how the calling system decided the person participated in the episode. Example values include `face_recognition`, `speaker_recognition`, `manual`, `caller`, `demo`, or `example`. It is provenance for the relationship, not a confidence score. If multiple signals are used later, the caller can choose a combined value such as `face_and_audio` or the model can be expanded to store richer evidence.
+
+## Neo4j Browser IDs
+
+Neo4j Browser shows internal identity fields such as `<id>` and `<elementId>` in addition to this project's `id` property.
+
+- `<id>` is Neo4j's legacy internal numeric node or relationship ID.
+- `<elementId>` is Neo4j's internal string identifier for a graph element.
+- `id` is the application-level identifier supplied by the calling system.
+
+Application code should use the `id` property for `Person` and `Episode`. Do not store or depend on Neo4j internal IDs, because they are database implementation details and are not good cross-system identifiers.
 
 ## Constraints
 
@@ -134,6 +172,9 @@ FOR (p:Person) REQUIRE p.id IS UNIQUE;
 
 CREATE CONSTRAINT episode_id IF NOT EXISTS
 FOR (e:Episode) REQUIRE e.id IS UNIQUE;
+
+CREATE CONSTRAINT event_id IF NOT EXISTS
+FOR (e:Event) REQUIRE e.id IS UNIQUE;
 
 CREATE CONSTRAINT place_key IF NOT EXISTS
 FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE;
@@ -230,17 +271,20 @@ tailwag-memory/
 
 ### Phase 4: Ingestion
 
-- Accept caller-provided person IDs and episode IDs.
+- Accept caller-provided person IDs, episode IDs, and event IDs.
 - Upsert `Person` nodes.
 - Update `Person.last_seen`.
 - Upsert `Place` nodes by `building_code` and `room_id`.
 - Create or update `Episode` nodes.
 - Attach `PARTICIPATED_IN` and `OCCURRED_AT`.
+- Create or update `Event` nodes.
+- Attach events to places with `OCCURRED_AT`.
 
 ### Phase 5: Retrieval
 
 - Retrieve episodes by person.
 - Retrieve episodes by place.
+- Retrieve events by place.
 - Retrieve episodes by summary vector similarity.
 - Retrieve episodes by transcript vector similarity.
 - Add a hybrid query path that combines optional graph filters with vector search.
@@ -275,9 +319,11 @@ Target command shape:
 tailwag schema init
 tailwag seed demo
 tailwag episode create --file examples/episode.json
+tailwag event create --file examples/event.json
 tailwag search "what did Jamie ask about?"
 tailwag search --person-id person_jamie "charger"
 tailwag search --building-code MAIN --room-id 101 "projector"
+tailwag event by-place --building-code MAIN --room-id 101
 tailwag person search-face --embedding-file examples/face-embedding.json
 tailwag person search-audio --embedding-file examples/audio-embedding.json
 ```

@@ -21,6 +21,7 @@ class SchemaTest(unittest.TestCase):
 
         self.assertIn("CONSTRAINT person_id", text)
         self.assertIn("CONSTRAINT episode_id", text)
+        self.assertIn("CONSTRAINT event_id", text)
         self.assertIn("CONSTRAINT place_key", text)
         self.assertIn("episode_summary_embedding", text)
         self.assertIn("episode_transcript_embedding", text)

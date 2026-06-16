@@ -10,6 +10,7 @@ setup(
     python_requires=">=3.11",
     install_requires=[
         "neo4j>=5.20.0",
+        "slack-sdk>=3.27.0",
     ],
     extras_require={
         "dev": [
