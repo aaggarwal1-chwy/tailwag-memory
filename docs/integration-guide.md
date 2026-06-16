@@ -423,6 +423,6 @@ The consuming repo should depend on the `EmbeddingProvider` behavior rather than
 - Use caller-owned IDs for people, episodes, and events.
 - Send consent/profile information on the first encounter, then reference existing people by ID on later memories.
 - Use only `building_code` and `room_id` for places in the current mockup.
-- Use `Event` for place-linked happenings that should not directly reference people.
+- Use `Event` for place-linked happenings that may reference people as attendees/participants.
 - Do not pass raw face images or raw audio into this package.
 - Keep biometric vector usage tied to consent and retention policies in the calling system.
