@@ -112,5 +112,6 @@ LIMIT 20;
 
 - The poller creates one episode per Slack root message or thread.
 - Replies update the same stable episode ID instead of creating a new episode.
+- Newly seen standalone root messages stay in the active-thread watchlist for `--active-thread-hours` so a later first reply can refresh the same episode. The default watch window is 24 hours.
 - Deleted, join, and leave system messages are skipped.
 - The state cursor advances only after discovered threads are ingested successfully.

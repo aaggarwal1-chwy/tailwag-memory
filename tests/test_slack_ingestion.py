@@ -257,7 +257,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
 
             self.assertFalse(state_path.exists())
 
-    def test_unthreaded_history_message_does_not_fetch_replies_or_track_active_thread(self) -> None:
+    def test_unthreaded_history_message_is_tracked_without_fetching_replies_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
             root_ts = _ts()
@@ -274,6 +274,65 @@ class SlackMemoryPollerTest(unittest.TestCase):
             self.assertEqual(result.ingested_threads, 1)
             self.assertEqual(client.reply_calls, [])
             self.assertEqual(service.episodes[0].id, f"slack:C123:{root_ts}")
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["channels"]["C123"]["active_threads"], {root_ts: {"latest_ts": root_ts}})
+
+    def test_late_first_reply_updates_previously_unthreaded_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            root_ts = _ts(-3600)
+            reply_ts = _ts()
+            service = FakeEpisodeService()
+            client = FakeSlackClient(
+                history_messages=[{"ts": root_ts, "user": "U1", "text": "Can someone review this?"}],
+                user_names={"U1": "Asha", "U2": "Ben"},
+            )
+            poller = SlackMemoryPoller(client, service, state_path)
+            poller.poll_once("C123", backfill_hours=2)
+
+            client.history_messages = []
+            client.replies_by_thread[root_ts] = [
+                {"ts": root_ts, "user": "U1", "text": "Can someone review this?"},
+                {"ts": reply_ts, "thread_ts": root_ts, "user": "U2", "text": "I can take it."},
+            ]
+            result = poller.poll_once("C123", backfill_hours=2)
+
+            self.assertEqual(result.checked_threads, 1)
+            self.assertEqual(result.ingested_threads, 1)
+            self.assertEqual(client.reply_calls[-1]["thread_ts"], root_ts)
+            self.assertEqual(len(service.episodes), 2)
+            self.assertEqual(service.episodes[-1].id, f"slack:C123:{root_ts}")
+            self.assertIn("I can take it.", service.episodes[-1].transcript)
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["channels"]["C123"]["active_threads"], {root_ts: {"latest_ts": reply_ts}})
+
+    def test_stale_active_thread_is_removed_after_active_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            root_ts = _ts(-7200)
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "channels": {
+                            "C123": {
+                                "active_threads": {root_ts: {"latest_ts": root_ts}},
+                                "latest_history_ts": root_ts,
+                            }
+                        }
+                    }
+                )
+            )
+            service = FakeEpisodeService()
+            client = FakeSlackClient(
+                replies_by_thread={root_ts: [{"ts": root_ts, "user": "U1", "text": "Old standalone"}]},
+                user_names={"U1": "Asha"},
+            )
+            poller = SlackMemoryPoller(client, service, state_path, active_thread_hours=1)
+
+            result = poller.poll_once("C123")
+
+            self.assertEqual(result.checked_threads, 1)
+            self.assertEqual(result.ingested_threads, 0)
             state = json.loads(state_path.read_text())
             self.assertEqual(state["channels"]["C123"].get("active_threads"), {})
 

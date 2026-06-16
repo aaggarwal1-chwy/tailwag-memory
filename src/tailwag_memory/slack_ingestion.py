@@ -226,7 +226,7 @@ class SlackMemoryPoller:
                 ingested_threads += 1
 
             latest_thread_time = _slack_ts_to_datetime(latest_thread_ts)
-            if should_fetch_replies and latest_thread_time >= thread_cutoff:
+            if latest_thread_time >= thread_cutoff:
                 active_threads[thread_ts] = {"latest_ts": latest_thread_ts}
             else:
                 active_threads.pop(thread_ts, None)
