@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
+class PersonInput:
+    id: str
+    display_name: str
+    consent_status: str
+    face_embedding: list[float] | None = None
+    audio_embedding: list[float] | None = None
+    role: str = "participant"
+    source: str = "caller"
+
+
+@dataclass(frozen=True)
+class PlaceInput:
+    building_code: str
+    room_id: str
+
+
+@dataclass(frozen=True)
+class EpisodeInput:
+    id: str
+    episode_type: str
+    start_time: str
+    end_time: str | None
+    summary: str
+    transcript: str
+    retention_class: str
+    visibility: str
+    place: PlaceInput
+    participants: list[PersonInput] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "EpisodeInput":
+        place = payload.get("place") or {}
+        participants = payload.get("participants") or []
+        return cls(
+            id=payload["id"],
+            episode_type=payload["episode_type"],
+            start_time=payload["start_time"],
+            end_time=payload.get("end_time"),
+            summary=payload["summary"],
+            transcript=payload["transcript"],
+            retention_class=payload["retention_class"],
+            visibility=payload["visibility"],
+            place=PlaceInput(
+                building_code=place["building_code"],
+                room_id=place["room_id"],
+            ),
+            participants=[
+                PersonInput(
+                    id=item["id"],
+                    display_name=item["display_name"],
+                    consent_status=item["consent_status"],
+                    face_embedding=item.get("face_embedding"),
+                    audio_embedding=item.get("audio_embedding"),
+                    role=item.get("role", "participant"),
+                    source=item.get("source", "caller"),
+                )
+                for item in participants
+            ],
+        )
+
+
+@dataclass(frozen=True)
+class SearchQuery:
+    text: str
+    person_id: str | None = None
+    building_code: str | None = None
+    room_id: str | None = None
+    limit: int = 10
+    target: str = "summary"
+
+
+@dataclass(frozen=True)
+class MemoryResult:
+    episode_id: str
+    summary: str
+    transcript: str
+    score: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PersonRecognitionResult:
+    person_id: str
+    display_name: str
+    consent_status: str
+    last_seen: str | None = None
+    score: float | None = None

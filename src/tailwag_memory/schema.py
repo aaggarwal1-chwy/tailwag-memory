@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+from .db import QueryRunner
+
+
+def schema_statements(embedding_dimension: int) -> list[str]:
+    return [
+        """
+        CREATE CONSTRAINT person_id IF NOT EXISTS
+        FOR (p:Person) REQUIRE p.id IS UNIQUE
+        """,
+        """
+        CREATE CONSTRAINT episode_id IF NOT EXISTS
+        FOR (e:Episode) REQUIRE e.id IS UNIQUE
+        """,
+        """
+        CREATE CONSTRAINT place_key IF NOT EXISTS
+        FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE
+        """,
+        f"""
+        CREATE VECTOR INDEX episode_summary_embedding IF NOT EXISTS
+        FOR (e:Episode) ON (e.summary_embedding)
+        OPTIONS {{
+          indexConfig: {{
+            `vector.dimensions`: {embedding_dimension},
+            `vector.similarity_function`: 'cosine'
+          }}
+        }}
+        """,
+        f"""
+        CREATE VECTOR INDEX episode_transcript_embedding IF NOT EXISTS
+        FOR (e:Episode) ON (e.transcript_embedding)
+        OPTIONS {{
+          indexConfig: {{
+            `vector.dimensions`: {embedding_dimension},
+            `vector.similarity_function`: 'cosine'
+          }}
+        }}
+        """,
+        f"""
+        CREATE VECTOR INDEX person_face_embedding IF NOT EXISTS
+        FOR (p:Person) ON (p.face_embedding)
+        OPTIONS {{
+          indexConfig: {{
+            `vector.dimensions`: {embedding_dimension},
+            `vector.similarity_function`: 'cosine'
+          }}
+        }}
+        """,
+        f"""
+        CREATE VECTOR INDEX person_audio_embedding IF NOT EXISTS
+        FOR (p:Person) ON (p.audio_embedding)
+        OPTIONS {{
+          indexConfig: {{
+            `vector.dimensions`: {embedding_dimension},
+            `vector.similarity_function`: 'cosine'
+          }}
+        }}
+        """,
+    ]
+
+
+def initialize_schema(runner: QueryRunner, embedding_dimension: int) -> None:
+    for statement in schema_statements(embedding_dimension):
+        runner.run(statement)
