@@ -161,6 +161,13 @@ class PersonRecognitionResult:
 
 
 @dataclass(frozen=True)
+class PersonContextTranscriptLine:
+    timestamp: str
+    speaker: str
+    text: str
+
+
+@dataclass(frozen=True)
 class PersonContextItem:
     item_id: str
     item_type: str
@@ -171,6 +178,7 @@ class PersonContextItem:
     room_id: str | None = None
     role: str | None = None
     source: str | None = None
+    transcript_lines: list[PersonContextTranscriptLine] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

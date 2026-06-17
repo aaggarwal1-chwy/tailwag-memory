@@ -172,7 +172,47 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         self.assertEqual([item.item_id for item in source.items], ["event_1", "episode_1"])
         self.assertIn("Transcript", runner.queries[1].query)
         self.assertIn("PARTICIPATED_IN", runner.queries[1].query)
-        self.assertIn("ATTENDED", runner.queries[2].query)
+        self.assertIn("type(r) = 'ATTENDED'", runner.queries[2].query)
+        self.assertIn("properties(r) AS rel_props", runner.queries[2].query)
+
+    def test_source_for_person_parses_timestamped_transcript_lines(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie", "display_name": "Jamie"}],
+                [
+                    {
+                        "item_id": "episode_1",
+                        "item_type": "episode",
+                        "text": (
+                            "Summary: Asha: Can someone review this?\n"
+                            "Transcript:\n"
+                            "[2026-06-16T14:00:00+00:00] Asha: Can someone review this today?\n"
+                            "[2026-06-16T14:05:00+00:00] Jamie: I reviewed it."
+                        ),
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "end_time": "2026-06-16T14:05:00+00:00",
+                        "building_code": "SLACK",
+                        "room_id": "C123",
+                        "role": "speaker",
+                        "source": "slack",
+                    }
+                ],
+                [],
+            ]
+        )
+        service = PersonContextRetrievalService(runner)
+
+        source = service.source_for_person("person_jamie")
+
+        self.assertIsNotNone(source)
+        assert source is not None
+        self.assertEqual(
+            [(line.timestamp, line.speaker, line.text) for line in source.items[0].transcript_lines],
+            [
+                ("2026-06-16T14:00:00+00:00", "Asha", "Can someone review this today?"),
+                ("2026-06-16T14:05:00+00:00", "Jamie", "I reviewed it."),
+            ],
+        )
 
     def test_source_for_person_semantic_scope_uses_vector_episode_evidence_only(self) -> None:
         runner = RecordingQueryRunner(
@@ -234,7 +274,7 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[1].parameters["candidate_limit"], 50)
         self.assertEqual(runner.queries[1].parameters["embedding"], runner.queries[2].parameters["embedding"])
         self.assertTrue(all("db.index.vector.queryNodes" in query.query for query in runner.queries[1:]))
-        self.assertTrue(all("ATTENDED" not in query.query for query in runner.queries))
+        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
 
     def test_source_for_person_whitespace_semantic_scope_uses_unscoped_context(self) -> None:
         runner = RecordingQueryRunner(

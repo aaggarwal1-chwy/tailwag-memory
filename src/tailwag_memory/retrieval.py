@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+import re
+
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
-from .models import EventResult, MemoryResult, PersonContextItem, PersonContextSource, PersonRecognitionResult, SearchQuery
+from .models import (
+    EventResult,
+    MemoryResult,
+    PersonContextItem,
+    PersonContextSource,
+    PersonContextTranscriptLine,
+    PersonRecognitionResult,
+    SearchQuery,
+)
+
+
+_TRANSCRIPT_LINE_RE = re.compile(r"^\[(?P<timestamp>[^\]]+)\]\s+(?P<speaker>[^:]+):\s*(?P<text>.*)$")
 
 
 class EpisodeRetrievalService:
@@ -241,8 +254,10 @@ class PersonContextRetrievalService:
         )
         event_rows = self.runner.run(
             """
-            MATCH (:Person {id: $person_id})-[r:ATTENDED]->(e:Event)
+            MATCH (:Person {id: $person_id})-[r]->(e:Event)
+            WHERE type(r) = 'ATTENDED'
             OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
+            WITH e, place, properties(r) AS rel_props
             RETURN e.id AS item_id,
                    'event' AS item_type,
                    e.description AS text,
@@ -250,8 +265,8 @@ class PersonContextRetrievalService:
                    e.end_time AS end_time,
                    place.building_code AS building_code,
                    place.room_id AS room_id,
-                   r.response AS role,
-                   r.source AS source
+                   rel_props.response AS role,
+                   rel_props.source AS source
             ORDER BY e.start_time DESC
             LIMIT $limit
             """,
@@ -336,14 +351,31 @@ class PersonContextRetrievalService:
         return score if isinstance(score, float) else 0.0
 
     def _row_to_context_item(self, row: dict[str, object]) -> PersonContextItem:
+        text = str(row.get("text") or "")
         return PersonContextItem(
             item_id=str(row["item_id"]),
             item_type=str(row["item_type"]),
-            text=str(row.get("text") or ""),
+            text=text,
             start_time=str(row.get("start_time") or ""),
             end_time=str(row["end_time"]) if row.get("end_time") is not None else None,
             building_code=str(row["building_code"]) if row.get("building_code") is not None else None,
             room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
             role=str(row["role"]) if row.get("role") is not None else None,
             source=str(row["source"]) if row.get("source") is not None else None,
+            transcript_lines=self._parse_transcript_lines(text),
         )
+
+    def _parse_transcript_lines(self, text: str) -> list[PersonContextTranscriptLine]:
+        lines: list[PersonContextTranscriptLine] = []
+        for raw_line in text.splitlines():
+            match = _TRANSCRIPT_LINE_RE.match(raw_line.strip())
+            if not match:
+                continue
+            lines.append(
+                PersonContextTranscriptLine(
+                    timestamp=match.group("timestamp"),
+                    speaker=match.group("speaker").strip(),
+                    text=match.group("text").strip(),
+                )
+            )
+        return lines

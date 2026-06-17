@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 from typing import Any, Protocol
 
@@ -18,6 +19,7 @@ class PersonContextProvider(Protocol):
         person_id: str,
         display_name: str | None,
         items: list[PersonContextItem],
+        current_time: str,
     ) -> str:
         ...
 
@@ -39,6 +41,7 @@ class OpenAIPersonContextProvider:
         person_id: str,
         display_name: str | None,
         items: list[PersonContextItem],
+        current_time: str,
     ) -> str:
         response = self._openai_client().responses.create(
             model=self.model,
@@ -48,7 +51,16 @@ class OpenAIPersonContextProvider:
                     "content": (
                         "You write one concise natural-language paragraph for a social agent "
                         "that is about to interact with a person. Use only the supplied evidence. "
-                        "Mention a follow-up naturally only if the evidence suggests one. "
+                        "Temporal grounding rules: Treat current_time as now. Resolve relative "
+                        "time words such as today, tomorrow, yesterday, later this week, and this "
+                        "afternoon relative to the evidence timestamp or transcript line timestamp, "
+                        "not your assumptions. Before writing, classify each possible follow-up as "
+                        "past, current, future, or ambiguous relative to current_time. Only recommend "
+                        "future or current follow-ups. Do not suggest following up on meetings or "
+                        "events whose resolved date/time is before current_time; describe them as "
+                        "already happened unless evidence says otherwise. If timing is ambiguous, "
+                        "avoid future-tense suggestions. Prefer transcript evidence over summaries "
+                        "when assigning actions or questions to a person. "
                         "Do not use bullet points, JSON, markdown, or headings."
                     ),
                 },
@@ -56,22 +68,10 @@ class OpenAIPersonContextProvider:
                     "role": "user",
                     "content": json.dumps(
                         {
+                            "current_time": current_time,
                             "person_id": person_id,
                             "display_name": display_name,
-                            "recent_items": [
-                                {
-                                    "id": item.item_id,
-                                    "type": item.item_type,
-                                    "text": item.text,
-                                    "start_time": item.start_time,
-                                    "end_time": item.end_time,
-                                    "building_code": item.building_code,
-                                    "room_id": item.room_id,
-                                    "role": item.role,
-                                    "source": item.source,
-                                }
-                                for item in items
-                            ],
+                            "recent_items": [self._item_payload(item) for item in items],
                         },
                         sort_keys=True,
                     ),
@@ -79,6 +79,37 @@ class OpenAIPersonContextProvider:
             ],
         )
         return self._extract_text(response)
+
+    def _item_payload(self, item: PersonContextItem) -> dict[str, Any]:
+        return {
+            "id": item.item_id,
+            "type": item.item_type,
+            "text": item.text,
+            "temporal_note": self._temporal_note(item),
+            "start_time": item.start_time,
+            "end_time": item.end_time,
+            "building_code": item.building_code,
+            "room_id": item.room_id,
+            "role": item.role,
+            "source_type": item.source,
+            "transcript_lines": [
+                {
+                    "timestamp": line.timestamp,
+                    "speaker": line.speaker,
+                    "text": line.text,
+                }
+                for line in item.transcript_lines
+            ],
+        }
+
+    def _temporal_note(self, item: PersonContextItem) -> str:
+        evidence_date = item.start_time[:10] if len(item.start_time) >= 10 else item.start_time
+        if not evidence_date:
+            return "This evidence has no timestamp. Treat relative time references as ambiguous."
+        return (
+            f'This evidence occurred on {evidence_date}. Interpret "today" in this item as '
+            f"{evidence_date} unless a transcript line has its own timestamp."
+        )
 
     def _openai_client(self) -> Any:
         if self._client is not None:
@@ -131,4 +162,9 @@ class PersonContextSynthesisService:
             person_id=source.person_id,
             display_name=source.display_name,
             items=source.items,
+            current_time=_current_time_iso(),
         )
+
+
+def _current_time_iso() -> str:
+    return datetime.now().astimezone().isoformat()

@@ -14,7 +14,7 @@ The adapter does not add Slack-specific Neo4j labels or relationships. It maps S
 
 Slack-created people do not include face or audio embeddings. Email is identity evidence for a future linking agent; it does not replace the Slack-owned `Person.id`.
 
-Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. Episode summaries include the root speaker name so person context synthesis does not mistake a reply participant for the person who asked the root question.
+Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. Episode summaries include the root speaker name so person context synthesis does not mistake a reply participant for the person who asked the root question. Person context synthesis also receives those timestamped transcript lines as structured evidence so relative words like `today` can be resolved against the message date.
 
 ## Slack App Setup
 

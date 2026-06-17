@@ -432,6 +432,8 @@ the database does not have a record of this person
 
 If the person exists but has no related recent events or episodes, the method returns a local deterministic paragraph without calling OpenAI.
 
+Person context synthesis sends OpenAI an explicit `current_time`, evidence timestamps, and structured Slack transcript lines when available. The synthesis prompt tells the model to resolve relative phrases like `today`, `tomorrow`, and `later this week` against the evidence timestamp before suggesting a follow-up, so already elapsed meetings are not treated as upcoming.
+
 Scoped person context is episode-only in the current model. If no vector-matched episodes are found for the person and semantic scope, the method returns a local deterministic paragraph without calling OpenAI. It does not fall back to unrelated recent history or event descriptions.
 
 ## Search Events By Place
