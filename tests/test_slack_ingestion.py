@@ -283,6 +283,35 @@ class SlackMemoryPollerTest(unittest.TestCase):
 
             self.assertFalse(state_path.exists())
 
+    def test_empty_history_poll_advances_saved_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            prior_ts = _ts(-300)
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "channels": {
+                            "C123": {
+                                "latest_history_ts": prior_ts,
+                            }
+                        }
+                    }
+                )
+            )
+            service = FakeEpisodeService()
+            client = FakeSlackClient(history_messages=[])
+            poller = SlackMemoryPoller(client, service, state_path)
+
+            result = poller.poll_once("C123")
+
+            self.assertEqual(result.checked_threads, 0)
+            self.assertEqual(result.ingested_threads, 0)
+            self.assertEqual(service.episodes, [])
+            state = json.loads(state_path.read_text())
+            latest_history_ts = state["channels"]["C123"]["latest_history_ts"]
+            self.assertEqual(result.latest_history_ts, latest_history_ts)
+            self.assertGreater(float(latest_history_ts), float(prior_ts))
+
     def test_unthreaded_history_message_is_tracked_without_fetching_replies_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
