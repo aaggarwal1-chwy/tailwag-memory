@@ -48,6 +48,60 @@ The embedding dimension must match every vector index and vector payload used by
 `OPENAI_API_KEY` is required for production episode embeddings, vector search, and person context synthesis. Tests should inject `MockOpenAIEmbeddingProvider` or fake synthesis providers instead of calling OpenAI.
 `SLACK_BOT_TOKEN` is only required when polling Slack.
 
+## CLI Workflows
+
+The package installs a `tailwag` command for local schema setup, demo data, ingestion, retrieval, and Slack polling.
+
+Initialize schema:
+
+```bash
+tailwag schema init
+```
+
+Seed demo data:
+
+```bash
+tailwag seed demo
+```
+
+Wipe all Neo4j data before re-seeding:
+
+```bash
+tailwag db wipe --yes
+```
+
+Create an episode from JSON:
+
+```bash
+tailwag episode create --file examples/episode.json
+```
+
+Create a later memory for an existing person by ID:
+
+```bash
+tailwag episode create --file examples/existing-person-episode.json
+```
+
+Create a place event with accepted attendees:
+
+```bash
+tailwag event create --file examples/event.json
+```
+
+Search memories and related records:
+
+```bash
+tailwag search "what did Jamie ask about?"
+tailwag search --person-id person_jamie "chargers"
+tailwag search --building-code MAIN --room-id 101 "projector"
+tailwag search --building-code SLACK --room-id C0123456789 "conversation"
+tailwag event by-place --building-code MAIN --room-id 101
+tailwag person context --person-id person_jamie
+tailwag person context --person-id person_jamie --semantic-scope "chargers"
+tailwag person search-face --embedding-file examples/face-embedding.json
+tailwag person search-audio --embedding-file examples/audio-embedding.json
+```
+
 ## Initialize Schema
 
 Run this once per Neo4j database:
