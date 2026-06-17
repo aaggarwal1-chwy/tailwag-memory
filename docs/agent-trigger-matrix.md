@@ -14,7 +14,7 @@ Concrete repo-local role cards live in `.agents/`, and the root `AGENTS.md` make
 | --- | --- | --- |
 | Project Scaffold Agent | Repo structure and local developer workflow | package files, Docker Compose, `.env.example`, folders |
 | Neo4j Schema Agent | Database schema, constraints, vector indexes | idempotent schema setup code |
-| Mock OpenAI Embeddings Agent | Embedding interface and deterministic mock provider | provider interface, mock vectors, embedding tests |
+| OpenAI Embeddings Agent | Embedding interface, OpenAI runtime provider, and deterministic mock provider | provider interface, OpenAI embeddings, mock vectors, embedding tests |
 | Ingestion Agent | Episode and event write paths | ingestion services, Cypher writes, ingestion tests |
 | Retrieval Agent | Graph and vector read paths | retrieval services, hybrid search, retrieval tests |
 | Demo Seed Agent | Local demo data and reset workflow | seed script, sample episode payloads |
@@ -34,9 +34,9 @@ Concrete repo-local role cards live in `.agents/`, and the root `AGENTS.md` make
 | --- | --- | --- | --- | --- |
 | Repo lacks package structure, local run instructions, or environment examples | Project Scaffold Agent | Documentation Agent | Create scaffolding only; do not implement domain logic | Handoff to Schema Agent and CLI Mockup Agent |
 | Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, episode vector indexes, and person biometric vector indexes | Handoff to Ingestion Agent once schema is available |
-| Need embedding generation or embedding configuration | Mock OpenAI Embeddings Agent | Test Agent, Code Refactor Agent | Mock OpenAI-compatible responses only; no real API calls in the current implementation | Handoff to Ingestion Agent and Retrieval Agent |
-| Need to create or update episode memory records or place events | Ingestion Agent | Neo4j Schema Agent, Mock OpenAI Embeddings Agent, Test Agent | Write path only; no retrieval ranking logic | Handoff to Retrieval Agent for query behavior |
-| Need person participation lookup, place lookup, event lookup, episode vector search, person face recognition, person audio recognition, or hybrid search | Retrieval Agent | Mock OpenAI Embeddings Agent, Test Agent | Read path only; no schema expansion beyond approved scope | Handoff to CLI Mockup Agent for commands |
+| Need embedding generation or embedding configuration | OpenAI Embeddings Agent | Test Agent, Code Refactor Agent | Runtime embeddings use OpenAI; tests use deterministic mocks and no network calls | Handoff to Ingestion Agent and Retrieval Agent |
+| Need to create or update episode memory records or place events | Ingestion Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Test Agent | Write path only; no retrieval ranking logic | Handoff to Retrieval Agent for query behavior |
+| Need person participation lookup, place lookup, event lookup, episode vector search, person face recognition, person audio recognition, or hybrid search | Retrieval Agent | OpenAI Embeddings Agent, Test Agent | Read path only; no schema expansion beyond approved scope | Handoff to CLI Mockup Agent for commands |
 | Need sample local data or repeatable demo state | Demo Seed Agent | Ingestion Agent, Documentation Agent | Demo records only; no production import pipeline | Handoff to Test Agent for fixture reuse |
 | Need a developer command, shellable workflow, or local demo entry point | CLI Mockup Agent | Ingestion Agent, Retrieval Agent, Source Adapter Agent, Documentation Agent | CLI-first; no API surface | Handoff to Documentation Agent for usage docs |
 | Need to ingest Slack or another external source into `EpisodeInput` or `EventInput` | Source Adapter Agent | Ingestion Agent, CLI Mockup Agent, Privacy/Biometric Review Agent, Test Agent | Adapter and mapping behavior only; core writes stay in ingestion services | Handoff to Ingestion Agent for write behavior |
@@ -95,7 +95,7 @@ Non-goals:
 - adding confidence fields
 - adding `org_id`
 
-### Mock OpenAI Embeddings Agent
+### OpenAI Embeddings Agent
 
 Owns embedding provider boundaries.
 
@@ -106,13 +106,13 @@ Inputs:
 
 Outputs:
 
-- deterministic fake embeddings
+- OpenAI-backed production embeddings
+- deterministic fake embeddings for tests
 - provider interface
 - tests proving stable dimensions and deterministic outputs
 
 Non-goals:
 
-- calling the OpenAI API
 - choosing a production model
 - adding non-episode embedding targets
 

@@ -11,6 +11,9 @@ class Settings:
     neo4j_user: str
     neo4j_password: str
     embedding_dimension: int
+    embedding_model: str = "text-embedding-3-small"
+    openai_api_key: str | None = None
+    synthesis_model: str = "gpt-5.5"
     slack_bot_token: str | None = None
 
 
@@ -21,6 +24,9 @@ def load_settings() -> Settings:
         neo4j_user=os.getenv("NEO4J_USER", "neo4j"),
         neo4j_password=os.getenv("NEO4J_PASSWORD", "tailwag-memory"),
         embedding_dimension=int(os.getenv("TAILWAG_EMBEDDING_DIMENSION", "64")),
+        embedding_model=os.getenv("TAILWAG_EMBEDDING_MODEL", "text-embedding-3-small"),
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        synthesis_model=os.getenv("TAILWAG_SYNTHESIS_MODEL", "gpt-5.5"),
         slack_bot_token=os.getenv("SLACK_BOT_TOKEN"),
     )
 

@@ -1,6 +1,6 @@
 # tailwag-memory
 
-Neo4j-only hybrid memory service with mocked OpenAI-style embeddings.
+Neo4j-only hybrid memory service with OpenAI-backed embeddings and person context synthesis.
 
 ## Planning Documents
 
@@ -21,7 +21,8 @@ Implemented now:
 - `PARTICIPATED_IN`
 - `OCCURRED_AT`
 - `ATTENDED`
-- mocked OpenAI-style episode embeddings
+- OpenAI-backed episode embeddings
+- OpenAI-backed natural-language person context synthesis
 - optional `Person.face_embedding`
 - optional `Person.audio_embedding`
 - graph and vector retrieval services
@@ -66,13 +67,19 @@ Install the package in editable mode:
 python3 -m pip install -e .
 ```
 
-For Slack polling, paste your bot token into the ignored repo-local file:
+For OpenAI-backed embeddings and person context synthesis, add your API key to the ignored repo-local file:
 
 ```text
 /Users/aaggarwal1/Desktop/code/tailwag-memory/.env
 ```
 
 Use this line:
+
+```bash
+OPENAI_API_KEY=sk-your-token-here
+```
+
+For Slack polling, also add your bot token:
 
 ```bash
 SLACK_BOT_TOKEN=xoxb-your-token-here
@@ -150,11 +157,13 @@ tailwag search --person-id person_jamie "chargers"
 tailwag search --building-code MAIN --room-id 101 "projector"
 tailwag search --building-code SLACK --room-id C0123456789 "conversation"
 tailwag event by-place --building-code MAIN --room-id 101
+tailwag person context --person-id person_jamie
 tailwag person search-face --embedding-file examples/face-embedding.json
 tailwag person search-audio --embedding-file examples/audio-embedding.json
 ```
 
 Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
+Episode summaries and transcripts are sent to OpenAI for text embeddings. Recent event and episode context is sent to OpenAI when generating a natural-language person context paragraph.
 
 ## Tests
 

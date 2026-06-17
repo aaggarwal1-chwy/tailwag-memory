@@ -145,6 +145,38 @@ class CliTest(unittest.TestCase):
         )
         self.assertEqual(json.loads(stdout.getvalue())["channel"], "C123")
 
+    def test_person_context_prints_synthesized_paragraph(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            openai_api_key="test-key",
+        )
+        runner = FakeRunner(settings)
+        calls = []
+
+        class FakeContextService:
+            def __init__(self, retrieval, provider) -> None:
+                self.retrieval = retrieval
+                self.provider = provider
+
+            def context_for_person(self, person_id: str, limit: int = 10) -> str:
+                calls.append({"person_id": person_id, "limit": limit})
+                return "Jamie recently asked about chargers."
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                with patch("tailwag_memory.cli.PersonContextSynthesisService", FakeContextService):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = main(["person", "context", "--person-id", "person_jamie", "--limit", "3"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, [{"person_id": "person_jamie", "limit": 3}])
+        self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
+        self.assertTrue(runner.closed)
+
 
 if __name__ == "__main__":
     unittest.main()

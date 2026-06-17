@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+import re
 from typing import Any, Protocol
 
 from .ingestion import EpisodeIngestionService
@@ -280,9 +281,15 @@ def build_episode_from_slack_thread(
             )
             seen_users.add(user_id)
 
-        transcript_lines.append(f"{display_name}: {_clean_text(str(message.get('text') or ''))}")
+        message_time = _slack_ts_to_datetime(str(message["ts"])).isoformat()
+        text = _format_slack_text(str(message.get("text") or ""), client=client, user_profiles=user_profiles)
+        transcript_lines.append(f"[{message_time}] {display_name}: {text}")
 
-    summary = _summarize(ordered[0])
+    root_user_id = str(ordered[0]["user"])
+    root_profile = user_profiles.get(root_user_id) or client.user_profile(root_user_id)
+    user_profiles[root_user_id] = root_profile
+    root_display_name = root_profile.display_name or f"slack:{root_user_id}"
+    summary = _summarize(ordered[0], speaker_name=root_display_name, client=client, user_profiles=user_profiles)
     return EpisodeInput(
         id=f"slack:{channel}:{thread_ts}",
         episode_type="conversation",
@@ -316,6 +323,32 @@ def _clean_text(text: str) -> str:
     return " ".join(text.split())
 
 
+def _format_slack_text(
+    text: str,
+    *,
+    client: SlackConversationClient,
+    user_profiles: dict[str, SlackUserProfile],
+) -> str:
+    return _clean_text(_replace_user_mentions(text, client=client, user_profiles=user_profiles))
+
+
+def _replace_user_mentions(
+    text: str,
+    *,
+    client: SlackConversationClient,
+    user_profiles: dict[str, SlackUserProfile],
+) -> str:
+    def replace(match: re.Match[str]) -> str:
+        user_id = match.group("user_id")
+        label = match.group("label")
+        if user_id not in user_profiles:
+            user_profiles[user_id] = client.user_profile(user_id)
+        display_name = user_profiles[user_id].display_name or label or f"slack:{user_id}"
+        return f"@{display_name}"
+
+    return re.sub(r"<@(?P<user_id>[A-Z0-9]+)(?:\|(?P<label>[^>]+))?>", replace, text)
+
+
 def _normalize_email(email: Any) -> str | None:
     if not isinstance(email, str):
         return None
@@ -323,8 +356,19 @@ def _normalize_email(email: Any) -> str | None:
     return normalized or None
 
 
-def _summarize(message: dict[str, Any]) -> str:
-    text = _clean_text(str(message.get("text") or "Slack conversation"))
+def _summarize(
+    message: dict[str, Any],
+    *,
+    speaker_name: str,
+    client: SlackConversationClient,
+    user_profiles: dict[str, SlackUserProfile],
+) -> str:
+    text = _format_slack_text(
+        str(message.get("text") or "Slack conversation"),
+        client=client,
+        user_profiles=user_profiles,
+    )
+    text = f"{speaker_name}: {text}"
     if len(text) <= 160:
         return text
     return text[:157].rstrip() + "..."

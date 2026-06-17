@@ -1,11 +1,11 @@
 ---
-name: Mock OpenAI Embeddings Agent
-slug: mock-openai-embeddings
-primary_scope: Embedding interface and deterministic mock provider
-main_outputs: provider interface, mock vectors, embedding tests
+name: OpenAI Embeddings Agent
+slug: openai-embeddings
+primary_scope: Embedding interface, OpenAI runtime provider, and deterministic mock provider
+main_outputs: provider interface, OpenAI embeddings, mock vectors, embedding tests
 ---
 
-# Mock OpenAI Embeddings Agent
+# OpenAI Embeddings Agent
 
 Use this agent when embedding generation, embedding dimensions, or provider boundaries change.
 
@@ -22,13 +22,13 @@ Use this agent when embedding generation, embedding dimensions, or provider boun
 
 ## Outputs
 
-- Deterministic fake embeddings
+- OpenAI-backed production embeddings
+- Deterministic fake embeddings for tests
 - Provider interface
 - Tests proving stable dimensions and deterministic outputs
 
 ## Non-goals
 
-- Calling the OpenAI API
 - Choosing a production model
 - Adding non-episode embedding targets
 

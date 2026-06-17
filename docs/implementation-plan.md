@@ -9,7 +9,7 @@ Build a compact Neo4j-only memory service that proves the core loop:
 3. Store place-linked happenings as `Event`.
 4. Connect episodes to participating people and places.
 5. Connect events to places and accepted attendees.
-6. Generate mocked OpenAI-style embeddings for episode text.
+6. Generate OpenAI-backed embeddings for episode text while keeping tests mocked.
 7. Retrieve memories through graph lookups and Neo4j vector search.
 
 This project should remain narrow, inspectable, and easy to extend.
@@ -25,7 +25,8 @@ Implemented now:
 - `PARTICIPATED_IN`
 - `OCCURRED_AT`
 - `ATTENDED`
-- mocked OpenAI embedding responses
+- OpenAI-backed episode embeddings
+- OpenAI-backed natural-language person context synthesis
 - optional caller-supplied person face embeddings
 - optional caller-supplied person audio embeddings
 - Neo4j constraints and vector indexes
@@ -108,7 +109,7 @@ Notes:
 Notes:
 
 - `id` comes from the calling system.
-- `summary_embedding` and `transcript_embedding` are mocked OpenAI-style vectors in the initial implementation.
+- `summary_embedding` and `transcript_embedding` are OpenAI-backed vectors in production and deterministic mock vectors in tests.
 - Raw recordings are not stored.
 
 ### Event
@@ -202,7 +203,7 @@ Create vector indexes for:
 - `Person.face_embedding`
 - `Person.audio_embedding`
 
-The embedding dimension should be configurable so the mock provider and future OpenAI provider can share the same retrieval code.
+The embedding dimension should be configurable so the OpenAI provider and deterministic mock provider can share the same retrieval code.
 
 ## Embedding Interface
 
@@ -214,18 +215,18 @@ class EmbeddingProvider:
         ...
 ```
 
-Initial implementation:
+Production implementation:
 
 ```text
-MockOpenAIEmbeddingProvider
+OpenAIEmbeddingProvider
 ```
 
 Requirements:
 
-- deterministic for repeatable tests
+- deterministic mock provider for repeatable tests
 - same vector dimension as configured for the service
-- no network calls
-- shaped so a future `OpenAIEmbeddingProvider` can replace it without changing ingestion or retrieval
+- no network calls in tests
+- OpenAI-backed runtime embeddings without changing ingestion or retrieval service APIs
 
 ## Proposed Project Layout
 
@@ -276,11 +277,12 @@ tailwag-memory/
 - Add uniqueness constraints.
 - Add vector indexes.
 
-### Phase 3: Mock Embeddings
+### Phase 3: Embeddings
 
 - Add the embedding provider interface.
-- Add deterministic mocked OpenAI embeddings.
-- Add tests that verify stable output shape and deterministic behavior.
+- Add OpenAI-backed production embeddings.
+- Keep deterministic mocked OpenAI embeddings for tests.
+- Add tests that verify stable output shape, dimensions, and mock determinism.
 
 ### Phase 4: Ingestion
 

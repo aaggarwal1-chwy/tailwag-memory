@@ -17,7 +17,7 @@ They are repo-local instructions for Codex or human contributors, not runtime ap
 | --- | --- | --- |
 | Project Scaffold Agent | `project-scaffold.md` | Repo structure, package metadata, Docker, env examples, folders |
 | Neo4j Schema Agent | `neo4j-schema.md` | Constraints, labels, vector indexes, schema init |
-| Mock OpenAI Embeddings Agent | `mock-openai-embeddings.md` | Embedding provider interface or deterministic mock vectors |
+| OpenAI Embeddings Agent | `openai-embeddings.md` | Embedding provider interface, OpenAI runtime embeddings, or deterministic mock vectors |
 | Ingestion Agent | `ingestion.md` | Episode/event write paths, people/place upserts, relationships |
 | Retrieval Agent | `retrieval.md` | Graph lookups, vector reads, hybrid search, biometric search |
 | Demo Seed Agent | `demo-seed.md` | Sample payloads, seed/reset workflows, repeatable demo data |

@@ -8,12 +8,13 @@ from typing import Sequence
 
 from .config import load_settings
 from .db import Neo4jQueryRunner
-from .embeddings import MockOpenAIEmbeddingProvider
+from .embeddings import OpenAIEmbeddingProvider
 from .ingestion import EpisodeIngestionService, EventIngestionService
 from .models import EpisodeInput, EventInput, SearchQuery
-from .retrieval import EpisodeRetrievalService, EventRetrievalService, PersonRecognitionService
+from .retrieval import EpisodeRetrievalService, EventRetrievalService, PersonContextRetrievalService, PersonRecognitionService
 from .schema import initialize_schema
 from .slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+from .synthesis import OpenAIPersonContextProvider, PersonContextSynthesisService
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -59,6 +60,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     audio_parser = person_subparsers.add_parser("search-audio")
     audio_parser.add_argument("--embedding-file", required=True)
     audio_parser.add_argument("--limit", type=int, default=10)
+    context_parser = person_subparsers.add_parser("context")
+    context_parser.add_argument("--person-id", required=True)
+    context_parser.add_argument("--limit", type=int, default=10)
 
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("text")
@@ -93,7 +97,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     settings = load_settings()
     runner = Neo4jQueryRunner(settings)
-    embeddings = MockOpenAIEmbeddingProvider(settings.embedding_dimension)
 
     try:
         if args.command == "schema":
@@ -109,12 +112,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "seed":
             from .demo import seed_demo
 
+            embeddings = OpenAIEmbeddingProvider(
+                api_key=settings.openai_api_key,
+                model=settings.embedding_model,
+                dimension=settings.embedding_dimension,
+            )
             seed_demo(runner, embeddings)
             print("Demo data seeded.")
             return 0
 
         if args.command == "episode":
             payload = json.loads(Path(args.file).read_text())
+            embeddings = OpenAIEmbeddingProvider(
+                api_key=settings.openai_api_key,
+                model=settings.embedding_model,
+                dimension=settings.embedding_dimension,
+            )
             service = EpisodeIngestionService(runner, embeddings)
             episode_id = service.ingest(EpisodeInput.from_dict(payload))
             print(f"Episode ingested: {episode_id}")
@@ -134,6 +147,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "person":
+            if args.person_command == "context":
+                retrieval = PersonContextRetrievalService(runner)
+                provider = OpenAIPersonContextProvider(
+                    api_key=settings.openai_api_key,
+                    model=settings.synthesis_model,
+                )
+                service = PersonContextSynthesisService(retrieval, provider)
+                print(service.context_for_person(args.person_id, limit=args.limit))
+                return 0
+
             embedding = json.loads(Path(args.embedding_file).read_text())
             service = PersonRecognitionService(runner)
             if args.person_command == "search-face":
@@ -145,6 +168,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "search":
+            embeddings = OpenAIEmbeddingProvider(
+                api_key=settings.openai_api_key,
+                model=settings.embedding_model,
+                dimension=settings.embedding_dimension,
+            )
             service = EpisodeRetrievalService(runner, embeddings)
             results = service.hybrid_search(
                 SearchQuery(
@@ -164,6 +192,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not settings.slack_bot_token:
                 parser.error("SLACK_BOT_TOKEN is required. Add it to .env or export it in your shell.")
 
+            embeddings = OpenAIEmbeddingProvider(
+                api_key=settings.openai_api_key,
+                model=settings.embedding_model,
+                dimension=settings.embedding_dimension,
+            )
             service = EpisodeIngestionService(runner, embeddings)
             client = SlackWebApiClient(settings.slack_bot_token)
             poller = SlackMemoryPoller(

@@ -158,3 +158,23 @@ class PersonRecognitionResult:
     consent_status: str
     last_seen: str | None = None
     score: float | None = None
+
+
+@dataclass(frozen=True)
+class PersonContextItem:
+    item_id: str
+    item_type: str
+    text: str
+    start_time: str
+    end_time: str | None = None
+    building_code: str | None = None
+    room_id: str | None = None
+    role: str | None = None
+    source: str | None = None
+
+
+@dataclass(frozen=True)
+class PersonContextSource:
+    person_id: str
+    display_name: str | None
+    items: list[PersonContextItem] = field(default_factory=list)

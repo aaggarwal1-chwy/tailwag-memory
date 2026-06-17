@@ -77,7 +77,7 @@ class SlackThreadConversionTest(unittest.TestCase):
 
         self.assertEqual(episode.id, f"slack:C123:{root_ts}")
         self.assertEqual(episode.episode_type, "conversation")
-        self.assertEqual(episode.summary, "Can someone review the deck?")
+        self.assertEqual(episode.summary, "Asha: Can someone review the deck?")
         self.assertEqual(episode.place.building_code, "SLACK")
         self.assertEqual(episode.place.room_id, "C123")
         self.assertEqual([person.id for person in episode.participants], ["slack:U1", "slack:U2"])
@@ -86,7 +86,15 @@ class SlackThreadConversionTest(unittest.TestCase):
         self.assertIsNone(episode.participants[0].face_embedding)
         self.assertIsNone(episode.participants[0].audio_embedding)
         self.assertEqual(episode.participants[0].source, "slack")
-        self.assertEqual(episode.transcript, "Asha: Can someone review the deck?\nBen: Yes, I can help.")
+        self.assertEqual(
+            episode.transcript,
+            "\n".join(
+                [
+                    f"[{datetime.fromtimestamp(float(root_ts), tz=timezone.utc).isoformat()}] Asha: Can someone review the deck?",
+                    f"[{datetime.fromtimestamp(float(reply_ts), tz=timezone.utc).isoformat()}] Ben: Yes, I can help.",
+                ]
+            ),
+        )
 
     def test_thread_keeps_slack_person_id_and_stores_email_metadata(self) -> None:
         root_ts = _ts()
@@ -102,6 +110,24 @@ class SlackThreadConversionTest(unittest.TestCase):
 
         self.assertEqual(episode.participants[0].id, "slack:U1")
         self.assertEqual(episode.participants[0].email, "asha.example@example.com")
+
+    def test_thread_replaces_slack_user_mentions_with_display_names(self) -> None:
+        root_ts = _ts()
+        reply_ts = _ts(2)
+        client = FakeSlackClient(user_names={"U1": "Asha", "U2": "Ben", "U3": "Chandra"})
+        episode = build_episode_from_slack_thread(
+            channel="C123",
+            messages=[
+                {"ts": root_ts, "user": "U1", "text": "Can <@U2> and <@U3|fallback> review this?"},
+                {"ts": reply_ts, "thread_ts": root_ts, "user": "U2", "text": "Looping <@U3> in."},
+            ],
+            client=client,
+        )
+
+        self.assertEqual(episode.summary, "Asha: Can @Ben and @Chandra review this?")
+        self.assertIn("Asha: Can @Ben and @Chandra review this?", episode.transcript)
+        self.assertIn("Ben: Looping @Chandra in.", episode.transcript)
+        self.assertEqual([person.id for person in episode.participants], ["slack:U1", "slack:U2"])
 
 
 class SlackWebApiClientTest(unittest.TestCase):

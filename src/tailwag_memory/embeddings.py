@@ -3,12 +3,60 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import hashlib
 import math
+from typing import Any
 
 
 class EmbeddingProvider(ABC):
     @abstractmethod
     def embed(self, text: str) -> list[float]:
         """Return one embedding vector for the supplied text."""
+
+
+class OpenAIConfigurationError(RuntimeError):
+    """Raised when an OpenAI-backed provider is used without configuration."""
+
+
+class OpenAIEmbeddingProvider(EmbeddingProvider):
+    """OpenAI-backed embedding provider used by production services."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "text-embedding-3-small",
+        dimension: int = 64,
+        client: Any | None = None,
+    ) -> None:
+        if dimension <= 0:
+            raise ValueError("dimension must be positive")
+        self.api_key = api_key
+        self.model = model
+        self.dimension = dimension
+        self._client = client
+
+    def embed(self, text: str) -> list[float]:
+        response = self._openai_client().embeddings.create(
+            model=self.model,
+            input=text,
+            dimensions=self.dimension,
+        )
+        return list(self._extract_embedding(response))
+
+    def _openai_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        if not self.api_key:
+            raise OpenAIConfigurationError("OPENAI_API_KEY is required for OpenAI embeddings.")
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise OpenAIConfigurationError("Install the openai package to use OpenAI embeddings.") from exc
+        self._client = OpenAI(api_key=self.api_key)
+        return self._client
+
+    def _extract_embedding(self, response: Any) -> list[float]:
+        if isinstance(response, dict):
+            return response["data"][0]["embedding"]
+        return response.data[0].embedding
 
 
 class MockOpenAIEmbeddingProvider(EmbeddingProvider):

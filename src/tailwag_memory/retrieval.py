@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
-from .models import EventResult, MemoryResult, PersonRecognitionResult, SearchQuery
+from .models import EventResult, MemoryResult, PersonContextItem, PersonContextSource, PersonRecognitionResult, SearchQuery
 
 
 class EpisodeRetrievalService:
@@ -186,4 +186,80 @@ class EventRetrievalService:
             end_time=str(row["end_time"]) if row.get("end_time") is not None else None,
             building_code=str(row.get("building_code") or ""),
             room_id=str(row.get("room_id") or ""),
+        )
+
+
+class PersonContextRetrievalService:
+    def __init__(self, runner: QueryRunner) -> None:
+        self.runner = runner
+
+    def source_for_person(self, person_id: str, limit: int = 10) -> PersonContextSource | None:
+        person_rows = self.runner.run(
+            """
+            MATCH (p:Person {id: $person_id})
+            RETURN p.id AS person_id,
+                   p.display_name AS display_name
+            LIMIT 1
+            """,
+            {"person_id": person_id},
+        )
+        if not person_rows:
+            return None
+
+        episode_rows = self.runner.run(
+            """
+            MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(e:Episode)
+            OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
+            RETURN e.id AS item_id,
+                   'episode' AS item_type,
+                   ('Summary: ' + coalesce(e.summary, '') + '\nTranscript:\n' + coalesce(e.transcript, '')) AS text,
+                   e.start_time AS start_time,
+                   e.end_time AS end_time,
+                   place.building_code AS building_code,
+                   place.room_id AS room_id,
+                   r.role AS role,
+                   r.source AS source
+            ORDER BY e.start_time DESC
+            LIMIT $limit
+            """,
+            {"person_id": person_id, "limit": limit},
+        )
+        event_rows = self.runner.run(
+            """
+            MATCH (:Person {id: $person_id})-[r:ATTENDED]->(e:Event)
+            OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
+            RETURN e.id AS item_id,
+                   'event' AS item_type,
+                   e.description AS text,
+                   e.start_time AS start_time,
+                   e.end_time AS end_time,
+                   place.building_code AS building_code,
+                   place.room_id AS room_id,
+                   r.response AS role,
+                   r.source AS source
+            ORDER BY e.start_time DESC
+            LIMIT $limit
+            """,
+            {"person_id": person_id, "limit": limit},
+        )
+
+        items = [self._row_to_context_item(row) for row in episode_rows + event_rows]
+        items.sort(key=lambda item: item.start_time, reverse=True)
+        return PersonContextSource(
+            person_id=str(person_rows[0]["person_id"]),
+            display_name=str(person_rows[0]["display_name"]) if person_rows[0].get("display_name") else None,
+            items=items[:limit],
+        )
+
+    def _row_to_context_item(self, row: dict[str, object]) -> PersonContextItem:
+        return PersonContextItem(
+            item_id=str(row["item_id"]),
+            item_type=str(row["item_type"]),
+            text=str(row.get("text") or ""),
+            start_time=str(row.get("start_time") or ""),
+            end_time=str(row["end_time"]) if row.get("end_time") is not None else None,
+            building_code=str(row["building_code"]) if row.get("building_code") is not None else None,
+            room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
+            role=str(row["role"]) if row.get("role") is not None else None,
+            source=str(row["source"]) if row.get("source") is not None else None,
         )

@@ -13,6 +13,7 @@ The package connects to Neo4j through environment variables and stores:
 - episode text embeddings
 - optional person face embeddings
 - optional person audio embeddings
+- natural-language person context generated from recent related episodes and accepted-attendee events
 
 ## Install From Another Local Repo
 
@@ -36,11 +37,15 @@ Set these environment variables in the consuming repo or process:
 export NEO4J_URI=bolt://localhost:7687
 export NEO4J_USER=neo4j
 export NEO4J_PASSWORD=tailwag-memory
+export OPENAI_API_KEY=sk-your-token-here
+export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
+export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
 The embedding dimension must match every vector index and vector payload used by the service.
+`OPENAI_API_KEY` is required for production episode embeddings, vector search, and person context synthesis. Tests should inject `MockOpenAIEmbeddingProvider` or fake synthesis providers instead of calling OpenAI.
 `SLACK_BOT_TOKEN` is only required when polling Slack.
 
 ## Initialize Schema
@@ -72,13 +77,17 @@ On the first interaction with a person, include their display name, consent stat
 ```python
 from tailwag_memory.config import load_settings
 from tailwag_memory.db import Neo4jQueryRunner
-from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
+from tailwag_memory.embeddings import OpenAIEmbeddingProvider
 from tailwag_memory.ingestion import EpisodeIngestionService
 from tailwag_memory.models import EpisodeInput, PersonInput, PlaceInput
 
 settings = load_settings()
 runner = Neo4jQueryRunner(settings)
-embeddings = MockOpenAIEmbeddingProvider(settings.embedding_dimension)
+embeddings = OpenAIEmbeddingProvider(
+    api_key=settings.openai_api_key,
+    model=settings.embedding_model,
+    dimension=settings.embedding_dimension,
+)
 
 episode = EpisodeInput(
     id="episode_external_001",
@@ -155,7 +164,7 @@ When `display_name`, `email`, `consent_status`, `face_embedding`, or `audio_embe
 
 ## Poll Slack Into Episodes
 
-Slack channel polling creates normal conversation episodes. The channel is stored as a virtual place with `building_code="SLACK"` and `room_id` set to the Slack channel ID. Slack users become people with IDs such as `slack:U0123456789`; email is stored separately on `Person.email` when Slack provides it, and face and audio embeddings are left unset.
+Slack channel polling creates normal conversation episodes. The channel is stored as a virtual place with `building_code="SLACK"` and `room_id` set to the Slack channel ID. Slack users become people with IDs such as `slack:U0123456789`; email is stored separately on `Person.email` when Slack provides it, and face and audio embeddings are left unset. Slack transcripts resolve user mentions to display names and include timestamped speaker lines. Slack episode summaries include the root speaker name to preserve attribution when a person context paragraph is synthesized later.
 
 ```bash
 tailwag slack poll --channel C0123456789 --once
@@ -355,13 +364,17 @@ Other repos should use the `id` property, not Neo4j's internal IDs.
 ```python
 from tailwag_memory.config import load_settings
 from tailwag_memory.db import Neo4jQueryRunner
-from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
+from tailwag_memory.embeddings import OpenAIEmbeddingProvider
 from tailwag_memory.models import SearchQuery
 from tailwag_memory.retrieval import EpisodeRetrievalService
 
 settings = load_settings()
 runner = Neo4jQueryRunner(settings)
-embeddings = MockOpenAIEmbeddingProvider(settings.embedding_dimension)
+embeddings = OpenAIEmbeddingProvider(
+    api_key=settings.openai_api_key,
+    model=settings.embedding_model,
+    dimension=settings.embedding_dimension,
+)
 
 try:
     service = EpisodeRetrievalService(runner, embeddings)
@@ -390,6 +403,27 @@ service.by_place("MAIN", "101")
 service.vector_search("chargers", target="summary")
 service.vector_search("chargers", target="transcript")
 ```
+
+## Generate Person Context
+
+For a social agent that needs natural-language context about a person, use the high-level client and pass only the caller-owned person ID:
+
+```python
+from tailwag_memory.client import TailwagMemoryClient
+
+with TailwagMemoryClient.from_env() as memory:
+    paragraph = memory.person_context("person_jamie")
+
+print(paragraph)
+```
+
+The paragraph combines recent episodes where the person participated and recent events where the person is an accepted attendee. If no `Person` node exists, the method returns exactly:
+
+```text
+the database does not have a record of this person
+```
+
+If the person exists but has no related recent events or episodes, the method returns a local deterministic paragraph without calling OpenAI.
 
 ## Search Events By Place
 
@@ -432,23 +466,31 @@ for match in face_matches:
     print(match.person_id, match.display_name, match.score)
 ```
 
-## Swapping Embedding Providers Later
+## Embedding Providers
 
-The current embedding provider is:
+Production code should use:
+
+```python
+OpenAIEmbeddingProvider
+```
+
+Tests and offline fixtures should use:
 
 ```python
 MockOpenAIEmbeddingProvider
 ```
 
-The consuming repo should depend on the `EmbeddingProvider` behavior rather than on the mock implementation. A future provider can call OpenAI embeddings while keeping ingestion and retrieval service usage the same.
+The consuming repo should depend on the `EmbeddingProvider` behavior rather than on either concrete provider.
 
 ## Operational Notes
 
 - Start Neo4j before calling services.
 - Run schema initialization before ingestion or retrieval.
 - Use caller-owned IDs for people, episodes, and events.
+- Set `OPENAI_API_KEY` before production ingestion, vector search, or person context synthesis.
 - Send consent/profile information on the first encounter, then reference existing people by ID on later memories.
 - Use only `building_code` and `room_id` for places in the current scope.
 - Use `Event` for place-linked happenings that may reference people as attendees/participants.
 - Do not pass raw face images or raw audio into this package.
 - Keep biometric vector usage tied to consent and retention policies in the calling system.
+- Episode text is sent to OpenAI for embeddings, and recent person-related evidence is sent to OpenAI for context synthesis.

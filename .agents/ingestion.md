@@ -56,5 +56,5 @@ Use this agent when creating or updating episode memory records, place events, p
 ## Handoff
 
 Hand off to the Neo4j Schema Agent when writes require graph shape changes.
-Hand off to the Mock OpenAI Embeddings Agent when embedding behavior changes.
+Hand off to the OpenAI Embeddings Agent when embedding behavior changes.
 Hand off to the Retrieval Agent for query behavior created by new writes.

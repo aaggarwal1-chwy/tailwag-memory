@@ -1,6 +1,7 @@
 """Tailwag memory package."""
 
 __all__ = [
+    "client",
     "config",
     "db",
     "embeddings",
@@ -8,4 +9,5 @@ __all__ = [
     "models",
     "retrieval",
     "schema",
+    "synthesis",
 ]

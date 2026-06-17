@@ -1,7 +1,12 @@
 from tailwag_memory.db import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
 from tailwag_memory.models import SearchQuery
-from tailwag_memory.retrieval import EpisodeRetrievalService, EventRetrievalService, PersonRecognitionService
+from tailwag_memory.retrieval import (
+    EpisodeRetrievalService,
+    EventRetrievalService,
+    PersonContextRetrievalService,
+    PersonRecognitionService,
+)
 import unittest
 
 
@@ -122,6 +127,57 @@ class EventRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters["building_code"], "MAIN")
         self.assertEqual(runner.queries[0].parameters["room_id"], "101")
         self.assertEqual(runner.queries[0].parameters["limit"], 5)
+
+
+class PersonContextRetrievalServiceTest(unittest.TestCase):
+    def test_source_for_person_combines_recent_episodes_and_events(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie", "display_name": "Jamie"}],
+                [
+                    {
+                        "item_id": "episode_1",
+                        "item_type": "episode",
+                        "text": "Jamie asked about chargers.",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "end_time": None,
+                        "building_code": "MAIN",
+                        "room_id": "101",
+                        "role": "speaker",
+                        "source": "caller",
+                    }
+                ],
+                [
+                    {
+                        "item_id": "event_1",
+                        "item_type": "event",
+                        "text": "Design review in room 101.",
+                        "start_time": "2026-06-16T15:00:00+00:00",
+                        "end_time": "2026-06-16T16:00:00+00:00",
+                        "building_code": "MAIN",
+                        "room_id": "101",
+                        "role": "accepted",
+                        "source": "outlook",
+                    }
+                ],
+            ]
+        )
+        service = PersonContextRetrievalService(runner)
+
+        source = service.source_for_person("person_jamie", limit=10)
+
+        self.assertIsNotNone(source)
+        assert source is not None
+        self.assertEqual(source.person_id, "person_jamie")
+        self.assertEqual([item.item_id for item in source.items], ["event_1", "episode_1"])
+        self.assertIn("Transcript", runner.queries[1].query)
+        self.assertIn("PARTICIPATED_IN", runner.queries[1].query)
+        self.assertIn("ATTENDED", runner.queries[2].query)
+
+    def test_source_for_person_returns_none_when_person_is_unknown(self) -> None:
+        service = PersonContextRetrievalService(RecordingQueryRunner(results=[[]]))
+
+        self.assertIsNone(service.source_for_person("person_missing"))
 
 
 if __name__ == "__main__":
