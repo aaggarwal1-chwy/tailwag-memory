@@ -174,6 +174,99 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         self.assertIn("PARTICIPATED_IN", runner.queries[1].query)
         self.assertIn("ATTENDED", runner.queries[2].query)
 
+    def test_source_for_person_semantic_scope_uses_vector_episode_evidence_only(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie", "display_name": "Jamie"}],
+                [
+                    {
+                        "item_id": "episode_1",
+                        "item_type": "episode",
+                        "text": "Summary: Jamie asked about chargers.\nTranscript:\nJamie: Any chargers?",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "end_time": None,
+                        "building_code": "MAIN",
+                        "room_id": "101",
+                        "role": "speaker",
+                        "source": "caller",
+                        "score": 0.72,
+                    },
+                    {
+                        "item_id": "episode_2",
+                        "item_type": "episode",
+                        "text": "Summary: Jamie found USB-C adapters.\nTranscript:\nJamie: I found the adapters.",
+                        "start_time": "2026-06-16T15:00:00+00:00",
+                        "end_time": None,
+                        "building_code": "MAIN",
+                        "room_id": "101",
+                        "role": "speaker",
+                        "source": "caller",
+                        "score": 0.88,
+                    },
+                ],
+                [
+                    {
+                        "item_id": "episode_1",
+                        "item_type": "episode",
+                        "text": "Summary: Jamie asked about chargers.\nTranscript:\nJamie: Any chargers?",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "end_time": None,
+                        "building_code": "MAIN",
+                        "room_id": "101",
+                        "role": "speaker",
+                        "source": "caller",
+                        "score": 0.96,
+                    }
+                ],
+            ]
+        )
+        service = PersonContextRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        source = service.source_for_person("person_jamie", limit=10, semantic_scope="chargers")
+
+        self.assertIsNotNone(source)
+        assert source is not None
+        self.assertEqual([item.item_id for item in source.items], ["episode_1", "episode_2"])
+        self.assertEqual(runner.queries[1].parameters["index_name"], "episode_summary_embedding")
+        self.assertEqual(runner.queries[2].parameters["index_name"], "episode_transcript_embedding")
+        self.assertEqual(runner.queries[1].parameters["person_id"], "person_jamie")
+        self.assertEqual(runner.queries[1].parameters["limit"], 10)
+        self.assertEqual(runner.queries[1].parameters["candidate_limit"], 50)
+        self.assertEqual(runner.queries[1].parameters["embedding"], runner.queries[2].parameters["embedding"])
+        self.assertTrue(all("db.index.vector.queryNodes" in query.query for query in runner.queries[1:]))
+        self.assertTrue(all("ATTENDED" not in query.query for query in runner.queries))
+
+    def test_source_for_person_whitespace_semantic_scope_uses_unscoped_context(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie", "display_name": "Jamie"}],
+                [
+                    {
+                        "item_id": "episode_1",
+                        "item_type": "episode",
+                        "text": "Jamie asked about chargers.",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                    }
+                ],
+                [],
+            ]
+        )
+        service = PersonContextRetrievalService(runner)
+
+        source = service.source_for_person("person_jamie", semantic_scope="   ")
+
+        self.assertIsNotNone(source)
+        self.assertEqual(len(runner.queries), 3)
+        self.assertIn("ATTENDED", runner.queries[2].query)
+
+    def test_source_for_person_semantic_scope_requires_embeddings(self) -> None:
+        service = PersonContextRetrievalService(
+            RecordingQueryRunner(results=[[{"person_id": "person_jamie", "display_name": "Jamie"}]])
+        )
+
+        with self.assertRaisesRegex(ValueError, "semantic_scope"):
+            service.source_for_person("person_jamie", semantic_scope="chargers")
+
     def test_source_for_person_returns_none_when_person_is_unknown(self) -> None:
         service = PersonContextRetrievalService(RecordingQueryRunner(results=[[]]))
 

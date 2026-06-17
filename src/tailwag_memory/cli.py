@@ -63,6 +63,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     context_parser = person_subparsers.add_parser("context")
     context_parser.add_argument("--person-id", required=True)
     context_parser.add_argument("--limit", type=int, default=10)
+    context_parser.add_argument("--semantic-scope")
 
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("text")
@@ -148,13 +149,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "person":
             if args.person_command == "context":
-                retrieval = PersonContextRetrievalService(runner)
+                embeddings = OpenAIEmbeddingProvider(
+                    api_key=settings.openai_api_key,
+                    model=settings.embedding_model,
+                    dimension=settings.embedding_dimension,
+                )
+                retrieval = PersonContextRetrievalService(runner, embeddings)
                 provider = OpenAIPersonContextProvider(
                     api_key=settings.openai_api_key,
                     model=settings.synthesis_model,
                 )
                 service = PersonContextSynthesisService(retrieval, provider)
-                print(service.context_for_person(args.person_id, limit=args.limit))
+                print(service.context_for_person(args.person_id, limit=args.limit, semantic_scope=args.semantic_scope))
                 return 0
 
             embedding = json.loads(Path(args.embedding_file).read_text())

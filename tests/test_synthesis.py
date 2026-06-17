@@ -1,4 +1,5 @@
 from tailwag_memory.db import RecordingQueryRunner
+from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
 from tailwag_memory.models import PersonContextItem
 from tailwag_memory.retrieval import PersonContextRetrievalService
 from tailwag_memory.synthesis import (
@@ -86,6 +87,26 @@ class PersonContextSynthesisServiceTest(unittest.TestCase):
         self.assertEqual(provider.calls[0]["person_id"], "person_jamie")
         self.assertEqual(provider.calls[0]["items"][0].item_id, "episode_1")
         self.assertIn("Jamie: I found them.", provider.calls[0]["items"][0].text)
+
+    def test_person_with_semantic_scope_no_matches_returns_local_paragraph(self) -> None:
+        provider = FakeProvider()
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie", "display_name": "Jamie"}],
+                [],
+                [],
+            ]
+        )
+        service = PersonContextSynthesisService(
+            PersonContextRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8)),
+            provider,
+        )
+
+        result = service.context_for_person("person_jamie", semantic_scope="chargers")
+
+        self.assertIn("Jamie", result)
+        self.assertIn("no episodes matched the semantic scope: chargers", result)
+        self.assertEqual(provider.calls, [])
 
 
 class FakeResponses:

@@ -190,10 +190,16 @@ class EventRetrievalService:
 
 
 class PersonContextRetrievalService:
-    def __init__(self, runner: QueryRunner) -> None:
+    def __init__(self, runner: QueryRunner, embeddings: EmbeddingProvider | None = None) -> None:
         self.runner = runner
+        self.embeddings = embeddings
 
-    def source_for_person(self, person_id: str, limit: int = 10) -> PersonContextSource | None:
+    def source_for_person(
+        self,
+        person_id: str,
+        limit: int = 10,
+        semantic_scope: str | None = None,
+    ) -> PersonContextSource | None:
         person_rows = self.runner.run(
             """
             MATCH (p:Person {id: $person_id})
@@ -205,6 +211,15 @@ class PersonContextRetrievalService:
         )
         if not person_rows:
             return None
+
+        scope = self._normalize_semantic_scope(semantic_scope)
+        if scope is not None:
+            items = self._scoped_items_for_person(person_id, scope, limit)
+            return PersonContextSource(
+                person_id=str(person_rows[0]["person_id"]),
+                display_name=str(person_rows[0]["display_name"]) if person_rows[0].get("display_name") else None,
+                items=items,
+            )
 
         episode_rows = self.runner.run(
             """
@@ -250,6 +265,75 @@ class PersonContextRetrievalService:
             display_name=str(person_rows[0]["display_name"]) if person_rows[0].get("display_name") else None,
             items=items[:limit],
         )
+
+    def _normalize_semantic_scope(self, semantic_scope: str | None) -> str | None:
+        if semantic_scope is None:
+            return None
+        scope = semantic_scope.strip()
+        return scope or None
+
+    def _scoped_items_for_person(self, person_id: str, semantic_scope: str, limit: int) -> list[PersonContextItem]:
+        if self.embeddings is None:
+            raise ValueError("semantic_scope requires an embedding provider")
+
+        embedding = self.embeddings.embed(semantic_scope)
+        rows = []
+        for index_name in ("episode_summary_embedding", "episode_transcript_embedding"):
+            rows.extend(self._scoped_episode_rows(person_id, index_name, embedding, limit))
+
+        best_rows: dict[str, dict[str, object]] = {}
+        for row in rows:
+            item_id = str(row["item_id"])
+            existing = best_rows.get(item_id)
+            if existing is None or self._row_score(row) > self._row_score(existing):
+                best_rows[item_id] = row
+
+        ordered_rows = sorted(
+            best_rows.values(),
+            key=lambda row: (self._row_score(row), str(row.get("start_time") or "")),
+            reverse=True,
+        )
+        return [self._row_to_context_item(row) for row in ordered_rows[:limit]]
+
+    def _scoped_episode_rows(
+        self,
+        person_id: str,
+        index_name: str,
+        embedding: list[float],
+        limit: int,
+    ) -> list[dict[str, object]]:
+        candidate_limit = max(limit * 5, 25)
+        return self.runner.run(
+            """
+            CALL db.index.vector.queryNodes($index_name, $candidate_limit, $embedding)
+            YIELD node, score
+            MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(node)
+            OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
+            RETURN node.id AS item_id,
+                   'episode' AS item_type,
+                   ('Summary: ' + coalesce(node.summary, '') + '\nTranscript:\n' + coalesce(node.transcript, '')) AS text,
+                   node.start_time AS start_time,
+                   node.end_time AS end_time,
+                   place.building_code AS building_code,
+                   place.room_id AS room_id,
+                   r.role AS role,
+                   r.source AS source,
+                   score AS score
+            ORDER BY score DESC, node.start_time DESC
+            LIMIT $limit
+            """,
+            {
+                "index_name": index_name,
+                "candidate_limit": candidate_limit,
+                "embedding": embedding,
+                "person_id": person_id,
+                "limit": limit,
+            },
+        )
+
+    def _row_score(self, row: dict[str, object]) -> float:
+        score = row.get("score")
+        return score if isinstance(score, float) else 0.0
 
     def _row_to_context_item(self, row: dict[str, object]) -> PersonContextItem:
         return PersonContextItem(

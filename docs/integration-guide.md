@@ -417,6 +417,13 @@ with TailwagMemoryClient.from_env() as memory:
 print(paragraph)
 ```
 
+To forcibly narrow the evidence by topic, pass `semantic_scope`. This runs vector search over episode summaries and transcripts for that person before synthesis:
+
+```python
+with TailwagMemoryClient.from_env() as memory:
+    paragraph = memory.person_context("person_jamie", semantic_scope="chargers")
+```
+
 The paragraph combines recent episodes where the person participated and recent events where the person is an accepted attendee. If no `Person` node exists, the method returns exactly:
 
 ```text
@@ -424,6 +431,8 @@ the database does not have a record of this person
 ```
 
 If the person exists but has no related recent events or episodes, the method returns a local deterministic paragraph without calling OpenAI.
+
+Scoped person context is episode-only in the current model. If no vector-matched episodes are found for the person and semantic scope, the method returns a local deterministic paragraph without calling OpenAI. It does not fall back to unrelated recent history or event descriptions.
 
 ## Search Events By Place
 

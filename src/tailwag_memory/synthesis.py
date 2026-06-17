@@ -112,12 +112,20 @@ class PersonContextSynthesisService:
         self.retrieval = retrieval
         self.provider = provider
 
-    def context_for_person(self, person_id: str, limit: int = 10) -> str:
-        source = self.retrieval.source_for_person(person_id, limit=limit)
+    def context_for_person(
+        self,
+        person_id: str,
+        limit: int = 10,
+        semantic_scope: str | None = None,
+    ) -> str:
+        source = self.retrieval.source_for_person(person_id, limit=limit, semantic_scope=semantic_scope)
         if source is None:
             return UNKNOWN_PERSON_MESSAGE
         if not source.items:
             name = source.display_name or person_id
+            scope = semantic_scope.strip() if semantic_scope is not None else None
+            if scope:
+                return f"The database has a record for {name}, but no episodes matched the semantic scope: {scope}."
             return f"The database has a record for {name}, but no recent related events or episodes are available."
         return self.provider.synthesize(
             person_id=source.person_id,

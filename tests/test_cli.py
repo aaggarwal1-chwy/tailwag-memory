@@ -161,8 +161,13 @@ class CliTest(unittest.TestCase):
                 self.retrieval = retrieval
                 self.provider = provider
 
-            def context_for_person(self, person_id: str, limit: int = 10) -> str:
-                calls.append({"person_id": person_id, "limit": limit})
+            def context_for_person(
+                self,
+                person_id: str,
+                limit: int = 10,
+                semantic_scope: str | None = None,
+            ) -> str:
+                calls.append({"person_id": person_id, "limit": limit, "semantic_scope": semantic_scope})
                 return "Jamie recently asked about chargers."
 
         with patch("tailwag_memory.cli.load_settings", return_value=settings):
@@ -173,7 +178,55 @@ class CliTest(unittest.TestCase):
                         exit_code = main(["person", "context", "--person-id", "person_jamie", "--limit", "3"])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(calls, [{"person_id": "person_jamie", "limit": 3}])
+        self.assertEqual(calls, [{"person_id": "person_jamie", "limit": 3, "semantic_scope": None}])
+        self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
+        self.assertTrue(runner.closed)
+
+    def test_person_context_passes_semantic_scope(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            openai_api_key="test-key",
+        )
+        runner = FakeRunner(settings)
+        calls = []
+
+        class FakeContextService:
+            def __init__(self, retrieval, provider) -> None:
+                self.retrieval = retrieval
+                self.provider = provider
+
+            def context_for_person(
+                self,
+                person_id: str,
+                limit: int = 10,
+                semantic_scope: str | None = None,
+            ) -> str:
+                calls.append({"person_id": person_id, "limit": limit, "semantic_scope": semantic_scope})
+                return "Jamie recently asked about chargers."
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                with patch("tailwag_memory.cli.PersonContextSynthesisService", FakeContextService):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "person",
+                                "context",
+                                "--person-id",
+                                "person_jamie",
+                                "--limit",
+                                "3",
+                                "--semantic-scope",
+                                "chargers",
+                            ]
+                        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, [{"person_id": "person_jamie", "limit": 3, "semantic_scope": "chargers"}])
         self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
         self.assertTrue(runner.closed)
 
