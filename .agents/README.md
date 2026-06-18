@@ -19,11 +19,13 @@ They are repo-local instructions for Codex or human contributors, not runtime ap
 | Neo4j Schema Agent | `neo4j-schema.md` | Constraints, labels, vector indexes, schema init |
 | OpenAI Embeddings Agent | `openai-embeddings.md` | Embedding provider interface, OpenAI runtime embeddings, or deterministic mock vectors |
 | Ingestion Agent | `ingestion.md` | Episode/event write paths, people/place upserts, relationships |
+| Memory Item Agent | `memory-item.md` | Durable transcript-derived memory items, extraction contracts, and memory item context |
 | Retrieval Agent | `retrieval.md` | Graph lookups, vector reads, hybrid search, biometric search |
 | Demo Seed Agent | `demo-seed.md` | Sample payloads, seed/reset workflows, repeatable demo data |
 | CLI Mockup Agent | `cli-mockup.md` | CLI commands, help text, local entry points |
 | Source Adapter Agent | `source-adapter.md` | External source adapters such as Slack polling |
 | Integration Contract Agent | `integration-contract.md` | Package-consumer APIs, examples, env vars, install workflow |
+| Argos Migration Agent | `argos-migration.md` | Tailwag compatibility and migration planning for replacing `argos-agent` memory |
 | Privacy/Biometric Review Agent | `privacy-biometric-review.md` | Consent, biometric vectors, retention, raw media boundaries |
 | Scope Guard Agent | `scope-guard.md` | Deferred concept and scope boundary checks |
 | Release Quality Gate Agent | `release-quality-gate.md` | Final pre-merge or pre-release verification |
@@ -35,8 +37,12 @@ They are repo-local instructions for Codex or human contributors, not runtime ap
 
 - Schema before ingestion when graph shape changes.
 - Ingestion before retrieval when write behavior creates new read behavior.
+- Memory Item before retrieval when durable transcript-derived memory behavior changes.
+- Memory Item before schema, embeddings, or retrieval handoffs when those changes are driven by memory item semantics.
 - Implementation before CLI when commands wrap existing services.
 - Source adapters before ingestion when external payloads need normalization.
+- Argos Migration after integration contract review when public package behavior is being shaped for `argos-agent`.
+- Argos Migration coordinates with Source Adapter when Argos-owned Slack memory is replaced by Tailwag-owned Slack memory.
 - Privacy review when changes touch consent, biometrics, retention, or raw media boundaries.
 - Scope guard when changes approach deferred concepts or out-of-scope storage systems.
 - Integration contract review when public package usage changes.

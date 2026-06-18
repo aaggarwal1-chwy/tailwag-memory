@@ -10,7 +10,8 @@ Build a compact Neo4j-only memory service that proves the core loop:
 4. Connect episodes to participating people and places.
 5. Connect events to places and accepted attendees.
 6. Generate OpenAI-backed embeddings for episode text while keeping tests mocked.
-7. Retrieve memories through graph lookups and Neo4j vector search.
+7. Extract durable transcript-derived person memory items when requested.
+8. Retrieve memories through graph lookups and Neo4j vector search.
 
 This project should remain narrow, inspectable, and easy to extend.
 
@@ -22,11 +23,16 @@ Implemented now:
 - `Episode`
 - `Event`
 - `Place`
+- `MemoryItem`
 - `PARTICIPATED_IN`
 - `OCCURRED_AT`
 - `ATTENDED`
+- `HAS_MEMORY`
+- `SUPPORTED_BY`
 - OpenAI-backed episode embeddings
+- OpenAI-backed memory item embeddings
 - OpenAI-backed natural-language person context synthesis
+- transcript-derived person memory extraction and markdown context formatting
 - optional caller-supplied person face embeddings
 - optional caller-supplied person audio embeddings
 - Neo4j constraints and vector indexes
@@ -59,8 +65,9 @@ Deferred for later:
 - `Episode.id` is supplied by the calling system.
 - `Event.id` is supplied by the calling system.
 - `Place` is identified only by `building_code` and `room_id`.
-- Embeddings should use an OpenAI-compatible interface, while the current implementation returns deterministic fake embeddings.
+- Production embeddings use the OpenAI-compatible provider; tests use deterministic mock embeddings with the same provider interface.
 - The code should be split early enough to avoid large, tangled modules.
+- `MemoryItem` is the approved narrow path for transcript-derived person memory. It does not open scope for a broad `SemanticFact` ontology or triple store.
 
 ## Initial Graph Model
 
@@ -145,6 +152,37 @@ Notes:
 - The system uses only `building_code` and `room_id`.
 - Later place enrichment can add properties such as names, maps, floors, and coordinates without changing the episode-to-place relationship.
 
+### MemoryItem
+
+```cypher
+(:MemoryItem {
+  id,
+  kind,
+  key,
+  summary,
+  source,
+  source_ref,
+  status,
+  observed_at,
+  due_at,
+  expires_at,
+  metadata_json,
+  created_at,
+  updated_at,
+  summary_embedding
+})
+```
+
+Notes:
+
+- Memory items are person-scoped durable or short-lived prompt memories extracted from transcripts.
+- Durable memory identity is deterministic by `(person_id, kind, key)`, so the same memory extracted from live chat and Slack converges into one item; `source` and `source_ref` remain provenance fields, not identity fields.
+- Allowed kinds are `preference`, `boundary`, `pet`, `fact`, and `followup`.
+- `note` is intentionally excluded; durable ongoing person-prompt context belongs in `fact`.
+- `fact` must stay narrow: no ontology triples, inferred traits, directory attributes, or general world knowledge.
+- `followup` items require `expires_at` and are visible when the current time is between `due_at` and `expires_at`, inclusive. Missing `due_at` means immediately visible.
+- Identity-owned directory facts such as title, team, manager, cost center, and leadership org are intentionally excluded.
+
 ## Initial Relationships
 
 ```cypher
@@ -162,6 +200,10 @@ Notes:
   response,
   response_time
 }]->(:Event)
+
+(:Person)-[:HAS_MEMORY]->(:MemoryItem)
+
+(:MemoryItem)-[:SUPPORTED_BY]->(:Episode)
 ```
 
 `PARTICIPATED_IN.source` records how the calling system decided the person participated in the episode. Example values include `face_recognition`, `speaker_recognition`, `manual`, `caller`, `demo`, or `example`. It is provenance for the relationship, not a confidence score. If multiple signals are used later, the caller can choose a combined value such as `face_and_audio` or the model can be expanded to store richer evidence.
@@ -190,6 +232,9 @@ FOR (e:Episode) REQUIRE e.id IS UNIQUE;
 CREATE CONSTRAINT event_id IF NOT EXISTS
 FOR (e:Event) REQUIRE e.id IS UNIQUE;
 
+CREATE CONSTRAINT memory_item_id IF NOT EXISTS
+FOR (m:MemoryItem) REQUIRE m.id IS UNIQUE;
+
 CREATE CONSTRAINT place_key IF NOT EXISTS
 FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE;
 ```
@@ -200,6 +245,7 @@ Create vector indexes for:
 
 - `Episode.summary_embedding`
 - `Episode.transcript_embedding`
+- `MemoryItem.summary_embedding`
 - `Person.face_embedding`
 - `Person.audio_embedding`
 
@@ -335,7 +381,10 @@ Target command shape:
 tailwag schema init
 tailwag seed demo
 tailwag episode create --file examples/episode.json
+tailwag episode create --file examples/episode.json --skip-memory-extraction
 tailwag event create --file examples/event.json
+tailwag memory extract --episode-id episode_external_001
+tailwag memory extract --episode-id episode_external_001 --person-id person_jamie
 tailwag search "what did Jamie ask about?"
 tailwag search --person-id person_jamie "charger"
 tailwag search --building-code MAIN --room-id 101 "projector"

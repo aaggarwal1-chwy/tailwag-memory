@@ -3,11 +3,14 @@ from __future__ import annotations
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from tailwag_memory.cli import main
 from tailwag_memory.config import Settings
+from tailwag_memory.models import EpisodeMemoryExtractionResult, EpisodeRecordResult, PersonMemoryExtractionResult
 from tailwag_memory.slack_ingestion import SlackPollResult
 
 
@@ -26,6 +29,25 @@ class FakeRunner:
 
 
 class CliTest(unittest.TestCase):
+    def _episode_file(self, tmp: str) -> str:
+        path = Path(tmp) / "episode.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "id": "episode_1",
+                    "episode_type": "conversation",
+                    "start_time": "2026-06-18T10:00:00+00:00",
+                    "end_time": None,
+                    "summary": "Jamie likes robot demos.",
+                    "transcript": "Jamie: I like robot demos.",
+                    "retention_class": "standard",
+                    "place": {"building_code": "MAIN", "room_id": "101"},
+                    "participants": [{"id": "person_jamie", "role": "speaker"}],
+                }
+            )
+        )
+        return str(path)
+
     def test_db_wipe_requires_confirmation(self) -> None:
         with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
             stderr = StringIO()
@@ -229,6 +251,131 @@ class CliTest(unittest.TestCase):
         self.assertEqual(calls, [{"person_id": "person_jamie", "limit": 3, "semantic_scope": "chargers"}])
         self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
         self.assertTrue(runner.closed)
+
+    def test_episode_create_extracts_memory_by_default(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            openai_api_key="test-key",
+        )
+        runner = FakeRunner(settings)
+        calls = []
+
+        class FakeClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                self.runner = runner_arg
+                self.settings = settings_arg
+
+            def record_episode(self, episode, *, extract_memory: bool = True):
+                calls.append({"episode_id": episode.id, "extract_memory": extract_memory})
+                return EpisodeRecordResult(
+                    episode_id=episode.id,
+                    memory_results=[PersonMemoryExtractionResult(person_id="person_jamie", created_memory_ids=["mem_1"])],
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._episode_file(tmp)
+            with patch("tailwag_memory.cli.load_settings", return_value=settings):
+                with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                    with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
+                        stdout = StringIO()
+                        with redirect_stdout(stdout):
+                            exit_code = main(["episode", "create", "--file", path])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, [{"episode_id": "episode_1", "extract_memory": True}])
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["episode_id"], "episode_1")
+        self.assertEqual(output["memory_results"][0]["created_memory_ids"], ["mem_1"])
+        self.assertTrue(runner.closed)
+
+    def test_episode_create_can_skip_memory_extraction(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+        runner = FakeRunner(settings)
+        calls = []
+
+        class FakeClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
+
+            def record_episode(self, episode, *, extract_memory: bool = True):
+                calls.append(extract_memory)
+                return EpisodeRecordResult(episode_id=episode.id)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._episode_file(tmp)
+            with patch("tailwag_memory.cli.load_settings", return_value=settings):
+                with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                    with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
+                        stdout = StringIO()
+                        with redirect_stdout(stdout):
+                            exit_code = main(["episode", "create", "--file", path, "--skip-memory-extraction"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, [False])
+        self.assertEqual(json.loads(stdout.getvalue())["memory_results"], [])
+
+    def test_memory_extract_outputs_episode_memory_result(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            openai_api_key="test-key",
+        )
+        runner = FakeRunner(settings)
+        calls = []
+
+        class FakeClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
+
+            def extract_memory_for_episode(self, episode_id: str, person_id: str | None = None):
+                calls.append({"episode_id": episode_id, "person_id": person_id})
+                return EpisodeMemoryExtractionResult(
+                    episode_id=episode_id,
+                    memory_results=[PersonMemoryExtractionResult(person_id=person_id or "person_jamie")],
+                )
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "memory",
+                                "extract",
+                                "--episode-id",
+                                "episode_1",
+                                "--person-id",
+                                "person_jamie",
+                            ]
+                        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, [{"episode_id": "episode_1", "person_id": "person_jamie"}])
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["episode_id"], "episode_1")
+        self.assertEqual(output["memory_results"][0]["person_id"], "person_jamie")
+
+    def test_memory_extract_missing_episode_id_exits_before_runner(self) -> None:
+        with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["memory", "extract"])
+
+        self.assertEqual(raised.exception.code, 2)
+        runner_class.assert_not_called()
+        self.assertIn("--episode-id", stderr.getvalue())
 
 
 if __name__ == "__main__":

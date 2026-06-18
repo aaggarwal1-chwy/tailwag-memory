@@ -8,12 +8,15 @@ The package connects to Neo4j through environment variables and stores:
 
 - episodes
 - events
+- memory items
 - people
 - places
 - episode text embeddings
+- memory item summary embeddings
 - optional person face embeddings
 - optional person audio embeddings
 - natural-language person context generated from recent related episodes and accepted-attendee events
+- markdown person memory context generated from durable memory items, visible follow-ups, and recent episodes
 
 ## Install From Another Local Repo
 
@@ -98,6 +101,8 @@ tailwag search --building-code SLACK --room-id C0123456789 "conversation"
 tailwag event by-place --building-code MAIN --room-id 101
 tailwag person context --person-id person_jamie
 tailwag person context --person-id person_jamie --semantic-scope "chargers"
+tailwag memory extract --episode-id episode_external_001
+tailwag memory extract --episode-id episode_external_001 --person-id person_jamie
 tailwag person search-face --embedding-file examples/face-embedding.json
 tailwag person search-audio --embedding-file examples/audio-embedding.json
 ```
@@ -531,6 +536,107 @@ for match in face_matches:
     print(match.person_id, match.display_name, match.score)
 ```
 
+## Record Episodes With Internal Memory Extraction
+
+For an Argos-style runtime, the caller should send normal episodes to the high-level Tailwag client. Tailwag stores the episode and internally checks whether transcript-derived memory items should be created, updated, or archived. Argos should not call low-level memory item services directly.
+
+```python
+from tailwag_memory.client import TailwagMemoryClient
+from tailwag_memory.models import EpisodeInput, PersonInput, PlaceInput
+
+episode = EpisodeInput(
+    id="episode_external_001",
+    episode_type="conversation",
+    start_time="2026-06-16T14:00:00+00:00",
+    end_time=None,
+    summary="Jamie prefers Spanish and likes hands-on robot demos.",
+    transcript="Jamie: I prefer Spanish and like hands-on robot demos.",
+    retention_class="standard",
+    place=PlaceInput(building_code="MAIN", room_id="101"),
+    participants=[
+        PersonInput(
+            id="person_jamie",
+            display_name="Jamie",
+            role="speaker",
+            source="live_chat",
+        )
+    ],
+)
+
+with TailwagMemoryClient.from_env() as memory:
+    result = memory.record_episode(episode)
+
+print(result.episode_id)
+print(result.memory_results)
+print(result.memory_errors)
+```
+
+`record_episode(..., extract_memory=True)` is the default. If episode storage should run without OpenAI-backed memory extraction, pass `extract_memory=False`.
+
+To backfill or debug memory extraction for an episode that is already in Neo4j:
+
+```python
+with TailwagMemoryClient.from_env() as memory:
+    result = memory.extract_memory_for_episode(
+        "episode_external_001",
+        person_id="person_jamie",
+    )
+```
+
+The record result includes `episode_id`, `memory_results`, and `memory_errors`. Each per-person memory result includes `person_id`, `update_requested`, `created_memory_ids`, `updated_memory_ids`, `archived_memory_ids`, `skipped_ops`, and `error`. `update_requested` reflects extractor intent; actual changes are the non-empty created, updated, or archived lists.
+
+High-level episode recording checks every participant. Existing-episode CLI backfills default to speaker participants, falling back to all participants when no speaker role is present. Use `--person-id` or `person_id=` to narrow extraction for debugging.
+
+Memory extraction supports these person-scoped memory item kinds:
+
+- `preference`: stable likes, dislikes, preferred language/name, and interaction preferences.
+- `boundary`: explicit comfort or behavior constraints. These should be included before other memory in prompt context.
+- `pet`: named pet records and durable pet updates.
+- `fact`: narrow person-prompt context that helps future conversation, such as durable personal projects or recurring personal context. Do not use it for ontology triples, inferred traits, directory attributes, or general world knowledge. `note` is intentionally not a separate kind.
+- `followup`: short-lived conversational opportunities. These require `expires_at` and are visible while the current time is between `due_at` and `expires_at`, inclusive. Missing `due_at` means immediately visible.
+
+Memory item identity is person-scoped by `(person_id, kind, key)`, so the same preference or fact extracted from live chat and Slack-derived source adapters converges into one durable memory item. This package does not add Slack polling; Slack-specific ingestion remains Source Adapter work. The extractor rejects identity-owned directory facts such as title, team, manager, cost center, business function, and leadership org. Those should stay in the calling system's identity or directory layer.
+
+## Render Markdown Person Memory Context
+
+To inject memory into an agent prompt, request a deterministic markdown-style block. Empty sections are omitted, and the method returns an empty string when there are no active memory items or recent episode lines.
+
+```python
+from tailwag_memory.client import TailwagMemoryClient
+
+with TailwagMemoryClient.from_env() as memory:
+    context = memory.person_memory_context(
+        "person_jamie",
+        current_text="robot demo later today",
+    )
+
+print(context)
+```
+
+Example output:
+
+```text
+[PERSON MEMORY]
+Boundaries:
+- boundary: avoid loud surprise greetings
+
+Preferences:
+- preferred language: Spanish
+- likes: hands-on robot demos
+
+Pets:
+- pet: Luna (dog): recovering well after surgery
+
+Facts:
+- working on robot social memory extraction
+
+Potential Follow-Ups:
+- Cape Cod trip with their parents planned for the weekend of 2026-06-20.
+
+Recent Episodes:
+- 2026-06-16: Jamie mentioned Luna had a vet visit tomorrow.
+```
+
 ## Embedding Providers
 
 Production code should use:
@@ -553,9 +659,11 @@ The consuming repo should depend on the `EmbeddingProvider` behavior rather than
 - Run schema initialization before ingestion or retrieval.
 - Use caller-owned IDs for people, episodes, and events.
 - Set `OPENAI_API_KEY` before production ingestion, vector search, or person context synthesis.
+- Set `OPENAI_API_KEY` before production transcript memory extraction.
 - Send consent/profile information on the first encounter, then reference existing people by ID on later memories.
 - Use only `building_code` and `room_id` for places in the current scope.
 - Use `Event` for place-linked happenings that may reference people as attendees/participants.
 - Do not pass raw face images or raw audio into this package.
 - Keep biometric vector usage tied to consent and retention policies in the calling system.
 - Episode text is sent to OpenAI for embeddings, and recent person-related evidence is sent to OpenAI for context synthesis.
+- Transcript memory extraction sends transcripts and selected existing memory item candidates to OpenAI.

@@ -18,6 +18,10 @@ def schema_statements(embedding_dimension: int) -> list[str]:
         FOR (e:Event) REQUIRE e.id IS UNIQUE
         """,
         """
+        CREATE CONSTRAINT memory_item_id IF NOT EXISTS
+        FOR (m:MemoryItem) REQUIRE m.id IS UNIQUE
+        """,
+        """
         CREATE CONSTRAINT place_key IF NOT EXISTS
         FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE
         """,
@@ -34,6 +38,16 @@ def schema_statements(embedding_dimension: int) -> list[str]:
         f"""
         CREATE VECTOR INDEX episode_transcript_embedding IF NOT EXISTS
         FOR (e:Episode) ON (e.transcript_embedding)
+        OPTIONS {{
+          indexConfig: {{
+            `vector.dimensions`: {embedding_dimension},
+            `vector.similarity_function`: 'cosine'
+          }}
+        }}
+        """,
+        f"""
+        CREATE VECTOR INDEX memory_item_summary_embedding IF NOT EXISTS
+        FOR (m:MemoryItem) ON (m.summary_embedding)
         OPTIONS {{
           indexConfig: {{
             `vector.dimensions`: {embedding_dimension},

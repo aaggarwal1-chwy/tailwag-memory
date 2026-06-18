@@ -3,6 +3,9 @@ from __future__ import annotations
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
+from .ingestion import EpisodeIngestionService
+from .memory_items import EpisodeMemoryExtractionService, OpenAIMemoryExtractionProvider, PersonMarkdownContextService
+from .models import EpisodeInput, EpisodeMemoryExtractionResult, EpisodeRecordResult
 from .retrieval import PersonContextRetrievalService
 from .synthesis import OpenAIPersonContextProvider, PersonContextSynthesisService
 
@@ -15,6 +18,7 @@ class TailwagMemoryClient:
     ) -> None:
         self.runner = runner
         self.settings = settings
+        self._embedding_provider: OpenAIEmbeddingProvider | None = None
 
     @classmethod
     def from_env(cls) -> "TailwagMemoryClient":
@@ -31,11 +35,7 @@ class TailwagMemoryClient:
         self.close()
 
     def person_context(self, person_id: str, limit: int = 10, semantic_scope: str | None = None) -> str:
-        embeddings = OpenAIEmbeddingProvider(
-            api_key=self.settings.openai_api_key,
-            model=self.settings.embedding_model,
-            dimension=self.settings.embedding_dimension,
-        )
+        embeddings = self._embeddings()
         retrieval = PersonContextRetrievalService(self.runner, embeddings)
         provider = OpenAIPersonContextProvider(
             api_key=self.settings.openai_api_key,
@@ -45,4 +45,51 @@ class TailwagMemoryClient:
             person_id,
             limit=limit,
             semantic_scope=semantic_scope,
+        )
+
+    def person_memory_context(self, person_id: str, current_text: str | None = None) -> str:
+        return PersonMarkdownContextService(self.runner, self._embeddings()).markdown_for_person(
+            person_id,
+            current_text=current_text,
+        )
+
+    def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
+        episode_id = EpisodeIngestionService(self.runner, self._embeddings()).ingest(episode)
+        if not extract_memory:
+            return EpisodeRecordResult(episode_id=episode_id)
+        extraction = self._memory_extraction_service().extract_for_episode(episode, speaker_only=False)
+        return EpisodeRecordResult(
+            episode_id=episode_id,
+            memory_results=extraction.memory_results,
+            memory_errors=extraction.memory_errors,
+        )
+
+    def extract_memory_for_episode(
+        self,
+        episode_id: str,
+        person_id: str | None = None,
+    ) -> EpisodeMemoryExtractionResult:
+        return self._memory_extraction_service().extract_for_stored_episode(
+            episode_id,
+            person_id=person_id,
+            speaker_only=True,
+        )
+
+    def _embeddings(self) -> OpenAIEmbeddingProvider:
+        if self._embedding_provider is None:
+            self._embedding_provider = OpenAIEmbeddingProvider(
+                api_key=self.settings.openai_api_key,
+                model=self.settings.embedding_model,
+                dimension=self.settings.embedding_dimension,
+            )
+        return self._embedding_provider
+
+    def _memory_extraction_service(self) -> EpisodeMemoryExtractionService:
+        return EpisodeMemoryExtractionService(
+            self.runner,
+            self._embeddings(),
+            OpenAIMemoryExtractionProvider(
+                api_key=self.settings.openai_api_key,
+                model=self.settings.synthesis_model,
+            ),
         )

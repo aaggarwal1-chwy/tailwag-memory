@@ -186,3 +186,62 @@ class PersonContextSource:
     person_id: str
     display_name: str | None
     items: list[PersonContextItem] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class MemoryItemInput:
+    kind: str
+    key: str
+    summary: str
+    source: str = "caller"
+    source_ref: str = ""
+    status: str = "active"
+    observed_at: str = ""
+    due_at: str = ""
+    expires_at: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+    memory_id: str | None = None
+
+
+@dataclass(frozen=True)
+class MemoryItemResult:
+    memory_id: str
+    person_id: str
+    kind: str
+    key: str
+    summary: str
+    source: str
+    source_ref: str = ""
+    status: str = "active"
+    observed_at: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    due_at: str = ""
+    expires_at: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+    score: float | None = None
+
+
+@dataclass(frozen=True)
+class PersonMemoryExtractionResult:
+    person_id: str
+    update_requested: bool = False
+    created_memory_ids: list[str] = field(default_factory=list)
+    updated_memory_ids: list[str] = field(default_factory=list)
+    archived_memory_ids: list[str] = field(default_factory=list)
+    skipped_ops: list[dict[str, Any]] = field(default_factory=list)
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class EpisodeMemoryExtractionResult:
+    episode_id: str
+    memory_results: list[PersonMemoryExtractionResult] = field(default_factory=list)
+    memory_errors: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class EpisodeRecordResult:
+    episode_id: str
+    memory_results: list[PersonMemoryExtractionResult] = field(default_factory=list)
+    memory_errors: list[dict[str, str]] = field(default_factory=list)

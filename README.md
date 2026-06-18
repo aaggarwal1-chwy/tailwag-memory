@@ -19,11 +19,16 @@ Implemented now:
 - `Episode`
 - `Event`
 - `Place`
+- `MemoryItem`
 - `PARTICIPATED_IN`
 - `OCCURRED_AT`
 - `ATTENDED`
+- `HAS_MEMORY`
+- `SUPPORTED_BY`
 - OpenAI-backed episode embeddings
+- OpenAI-backed memory item embeddings
 - OpenAI-backed natural-language person context synthesis
+- transcript-derived person memory items and markdown context formatting
 - optional `Person.face_embedding`
 - optional `Person.audio_embedding`
 - graph and vector retrieval services
@@ -68,7 +73,7 @@ Install the package in editable mode:
 python3 -m pip install -e .
 ```
 
-For OpenAI-backed embeddings and person context synthesis, add your API key to the ignored repo-local `.env` file:
+For OpenAI-backed embeddings, person context synthesis, and transcript memory extraction, add your API key to the ignored repo-local `.env` file:
 
 ```bash
 OPENAI_API_KEY=sk-your-token-here
@@ -84,6 +89,7 @@ For package usage, JSON payload shapes, retrieval examples, and command workflow
 
 Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
 Episode summaries and transcripts are sent to OpenAI for text embeddings. Recent event and episode context is sent to OpenAI when generating a natural-language person context paragraph. When `--semantic-scope` is provided for person context, the package first narrows evidence to vector-matched episodes for that person; unrelated recent history and events are not included.
+Memory item extraction sends caller-provided transcripts and a small set of existing candidate memory items to OpenAI when high-level episode recording or explicit memory backfill is used. `MemoryItem` is the narrow approved semantic-memory path for durable person preferences, boundaries, pets, facts, and follow-ups; it is not a broad ontology or triple store.
 
 ## Tests
 

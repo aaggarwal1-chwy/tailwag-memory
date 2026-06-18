@@ -6,6 +6,7 @@ __all__ = [
     "db",
     "embeddings",
     "ingestion",
+    "memory_items",
     "models",
     "retrieval",
     "schema",

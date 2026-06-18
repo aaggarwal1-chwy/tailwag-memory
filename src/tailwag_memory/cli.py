@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import json
 from pathlib import Path
 import time
 from typing import Sequence
 
+from .client import TailwagMemoryClient
 from .config import load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
@@ -42,6 +44,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     episode_subparsers = episode_parser.add_subparsers(dest="episode_command", required=True)
     create_parser = episode_subparsers.add_parser("create")
     create_parser.add_argument("--file", required=True)
+    create_parser.add_argument("--skip-memory-extraction", action="store_true")
 
     event_parser = subparsers.add_parser("event")
     event_subparsers = event_parser.add_subparsers(dest="event_command", required=True)
@@ -90,6 +93,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     slack_poll_parser.add_argument("--history-limit", type=int, default=200)
     slack_poll_parser.add_argument("--reply-limit", type=int, default=200)
 
+    memory_parser = subparsers.add_parser("memory")
+    memory_subparsers = memory_parser.add_subparsers(dest="memory_command", required=True)
+    memory_extract_parser = memory_subparsers.add_parser("extract")
+    memory_extract_parser.add_argument("--episode-id", required=True)
+    memory_extract_parser.add_argument("--person-id")
+
     args = parser.parse_args(argv)
     if args.command == "db" and args.db_command == "wipe" and not args.yes:
         parser.error("db wipe requires --yes because it deletes all Neo4j data.")
@@ -124,14 +133,24 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "episode":
             payload = json.loads(Path(args.file).read_text())
-            embeddings = OpenAIEmbeddingProvider(
-                api_key=settings.openai_api_key,
-                model=settings.embedding_model,
-                dimension=settings.embedding_dimension,
+            client = TailwagMemoryClient(runner, settings)
+            result = client.record_episode(
+                EpisodeInput.from_dict(payload),
+                extract_memory=not args.skip_memory_extraction,
             )
-            service = EpisodeIngestionService(runner, embeddings)
-            episode_id = service.ingest(EpisodeInput.from_dict(payload))
-            print(f"Episode ingested: {episode_id}")
+            print(json.dumps(asdict(result), sort_keys=True))
+            return 0
+
+        if args.command == "memory":
+            client = TailwagMemoryClient(runner, settings)
+            try:
+                result = client.extract_memory_for_episode(
+                    args.episode_id,
+                    person_id=args.person_id,
+                )
+            except ValueError as exc:
+                parser.error(str(exc))
+            print(json.dumps(asdict(result), sort_keys=True))
             return 0
 
         if args.command == "event":
