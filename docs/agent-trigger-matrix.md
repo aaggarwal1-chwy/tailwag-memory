@@ -6,7 +6,7 @@ This document defines the project agents and subagents for the Neo4j-only memory
 
 Each agent owns a clear scope, trigger conditions, expected outputs, and handoff points. The goal is to prevent broad, tangled implementation passes.
 
-Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS.md` makes agent selection part of the repository workflow. Use this matrix to decide which custom agent applies, then record material work in `.agents/usage-log.md`.
+Concrete repo-local custom agents and their usage log live in `.codex/agents/`, and the root `AGENTS.md` makes agent selection part of the repository workflow. Use this matrix to decide which custom agent applies, then record material work in `.codex/agents/usage-log.md`.
 
 ## Agent Roster
 
@@ -35,7 +35,7 @@ Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS
 | Trigger | Agent | Subagents To Consider | Scope Boundary | Handoff |
 | --- | --- | --- | --- | --- |
 | Repo lacks package structure, local run instructions, or environment examples | Project Scaffold Agent | Documentation Agent | Create scaffolding only; do not implement domain logic | Handoff to Schema Agent and CLI Mockup Agent |
-| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, `HAS_MEMORY`, `SUPPORTED_BY`, episode vector indexes, and person biometric vector indexes | Handoff to Ingestion Agent once schema is available |
+| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, `HAS_MEMORY`, `SUPPORTED_BY`, episode vector indexes, person biometric vector indexes, and the `MemoryItem.summary_embedding` vector index | Handoff to Ingestion Agent once schema is available |
 | Need embedding generation or embedding configuration | OpenAI Embeddings Agent | Test Agent, Code Refactor Agent | Runtime embeddings use OpenAI; tests use deterministic mocks and no network calls | Handoff to Ingestion Agent and Retrieval Agent |
 | Need to create or update episode memory records or place events | Ingestion Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Test Agent | Write path only; no retrieval ranking logic | Handoff to Retrieval Agent for query behavior |
 | Need durable transcript-derived memory items, memory item extraction, memory item context formatting, or memory item vector retrieval | Memory Item Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Retrieval Agent, Integration Contract Agent, Test Agent, Scope Guard Agent | Memory item semantics only; do not expand into a broad ontology, triple store, or open-ended semantic fact graph | Handoff to Retrieval Agent for context selection and Integration Contract Agent for public APIs |
@@ -90,7 +90,7 @@ Inputs:
 Outputs:
 
 - constraints for `Person.id`, `Episode.id`, `Event.id`, `MemoryItem.id`, and `(Place.building_code, Place.room_id)`
-- vector indexes for `Episode.summary_embedding`, `Episode.transcript_embedding`, `Person.face_embedding`, and `Person.audio_embedding`
+- vector indexes for `Episode.summary_embedding`, `Episode.transcript_embedding`, `Person.face_embedding`, `Person.audio_embedding`, and `MemoryItem.summary_embedding`
 - schema initialization command support
 
 Non-goals:
@@ -287,7 +287,7 @@ Inputs:
 
 - intended consumer workflow
 - changed public types, service methods, env vars, or examples
-- backwards-compatibility expectations
+- compatibility expectations when the task explicitly states them
 
 Outputs:
 
@@ -311,7 +311,7 @@ Inputs:
 - current Argos memory, identity, Slack, and prompt-context behavior
 - Tailwag package APIs and runtime configuration
 - required Argos prompt-context shape
-- migration constraints, rollout sequence, and backwards-compatibility expectations
+- migration constraints, rollout sequence, and explicitly stated compatibility expectations
 
 Outputs:
 

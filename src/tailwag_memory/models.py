@@ -133,12 +133,11 @@ class SearchQuery:
 
 
 @dataclass(frozen=True)
-class MemoryResult:
+class EpisodeMemoryResult:
     episode_id: str
     summary: str
     transcript: str
     score: float | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

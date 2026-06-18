@@ -8,6 +8,7 @@ import unittest
 
 from tailwag_memory.slack_ingestion import (
     SlackMemoryPoller,
+    SlackPollState,
     SlackWebApiClient,
     SlackUserProfile,
     build_episode_from_slack_thread,
@@ -27,20 +28,28 @@ class FakeSlackClient:
         replies_by_thread: dict[str, list[dict]] | None = None,
         user_names: dict[str, str] | None = None,
         user_emails: dict[str, str] | None = None,
+        history_error: Exception | None = None,
+        replies_error: Exception | None = None,
     ) -> None:
         self.history_messages = history_messages or []
         self.replies_by_thread = replies_by_thread or {}
         self.user_names = user_names or {}
         self.user_emails = user_emails or {}
+        self.history_error = history_error
+        self.replies_error = replies_error
         self.history_calls: list[dict] = []
         self.reply_calls: list[dict] = []
 
     def history(self, channel: str, oldest: str | None, limit: int) -> list[dict]:
         self.history_calls.append({"channel": channel, "oldest": oldest, "limit": limit})
+        if self.history_error is not None:
+            raise self.history_error
         return self.history_messages
 
     def replies(self, channel: str, thread_ts: str, limit: int) -> list[dict]:
         self.reply_calls.append({"channel": channel, "thread_ts": thread_ts, "limit": limit})
+        if self.replies_error is not None:
+            raise self.replies_error
         return self.replies_by_thread.get(thread_ts, [])
 
     def user_profile(self, user_id: str) -> SlackUserProfile:
@@ -141,6 +150,24 @@ class SlackThreadConversionTest(unittest.TestCase):
         self.assertIn("Ben: Looping @Chandra in.", episode.transcript)
         self.assertEqual([person.id for person in episode.participants], ["slack:U1", "slack:U2"])
 
+    def test_thread_formats_slack_channel_special_link_and_mail_entities(self) -> None:
+        root_ts = _ts()
+        client = FakeSlackClient(user_names={"U1": "Asha"})
+        episode = build_episode_from_slack_thread(
+            channel="C123",
+            messages=[
+                {
+                    "ts": root_ts,
+                    "user": "U1",
+                    "text": "See <#C999|proj-alpha>, <!here>, <https://example.com/brief?x=1&amp;y=2|the brief>, and <mailto:asha@example.com|Asha>.",
+                }
+            ],
+            client=client,
+        )
+
+        self.assertEqual(episode.summary, "Asha: See #proj-alpha, @here, the brief, and Asha.")
+        self.assertIn("Asha: See #proj-alpha, @here, the brief, and Asha.", episode.transcript)
+
 
 class SlackWebApiClientTest(unittest.TestCase):
     def test_user_profile_omits_email_by_default(self) -> None:
@@ -239,6 +266,20 @@ class SlackWebApiClientTest(unittest.TestCase):
 
 
 class SlackMemoryPollerTest(unittest.TestCase):
+    def test_corrupt_state_file_fails_before_slack_or_ingest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            state_path.write_text("{not json")
+            service = FakeEpisodeRecorder()
+            client = FakeSlackClient()
+            poller = SlackMemoryPoller(client, service, state_path)
+
+            with self.assertRaisesRegex(ValueError, "not valid JSON"):
+                poller.poll_once("C123", backfill_hours=1)
+
+            self.assertEqual(client.history_calls, [])
+            self.assertEqual(service.episodes, [])
+
     def test_first_poll_without_backfill_arms_state_without_ingesting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
@@ -509,6 +550,86 @@ class SlackMemoryPollerTest(unittest.TestCase):
             self.assertEqual(result.ingested_threads, 0)
             state = json.loads(state_path.read_text())
             self.assertEqual(state["channels"]["C123"].get("active_threads"), {})
+
+    def test_slack_history_api_error_does_not_advance_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            service = FakeEpisodeRecorder()
+            client = FakeSlackClient(history_error=RuntimeError("slack api unavailable"))
+            poller = SlackMemoryPoller(client, service, state_path)
+
+            with self.assertRaisesRegex(RuntimeError, "slack api unavailable"):
+                poller.poll_once("C123", backfill_hours=1)
+
+            self.assertFalse(state_path.exists())
+            self.assertEqual(service.episodes, [])
+
+    def test_slack_reply_rate_limit_does_not_advance_state(self) -> None:
+        class RateLimitedSlackError(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            root_ts = _ts()
+            original_state = {
+                "channels": {
+                    "C123": {
+                        "active_threads": {root_ts: {"latest_ts": root_ts}},
+                        "latest_history_ts": root_ts,
+                    }
+                }
+            }
+            state_path.write_text(json.dumps(original_state))
+            service = FakeEpisodeRecorder()
+            client = FakeSlackClient(replies_error=RateLimitedSlackError("rate_limited"))
+            poller = SlackMemoryPoller(client, service, state_path)
+
+            with self.assertRaisesRegex(RateLimitedSlackError, "rate_limited"):
+                poller.poll_once("C123")
+
+            self.assertEqual(json.loads(state_path.read_text()), original_state)
+            self.assertEqual(service.episodes, [])
+
+    def test_bot_and_file_only_messages_are_skipped_but_edited_user_messages_ingest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            root_ts = _ts()
+            bot_ts = _ts(1)
+            file_ts = _ts(2)
+            service = FakeEpisodeRecorder()
+            client = FakeSlackClient(
+                history_messages=[
+                    {"ts": bot_ts, "user": "Ubot", "bot_id": "B123", "subtype": "bot_message", "text": "system update"},
+                    {"ts": file_ts, "user": "U2", "text": "", "files": [{"id": "F1", "name": "brief.pdf"}]},
+                    {"ts": root_ts, "user": "U1", "text": "Edited plan is ready.", "edited": {"user": "U1", "ts": _ts(3)}},
+                ],
+                user_names={"U1": "Asha", "U2": "Ben", "Ubot": "Build Bot"},
+            )
+            poller = SlackMemoryPoller(client, service, state_path)
+
+            result = poller.poll_once("C123", backfill_hours=1)
+
+            self.assertEqual(result.checked_threads, 1)
+            self.assertEqual(result.ingested_threads, 1)
+            self.assertEqual(service.episodes[0].id, f"slack:C123:{root_ts}")
+            self.assertIn("Asha: Edited plan is ready.", service.episodes[0].transcript)
+            self.assertNotIn("system update", service.episodes[0].transcript)
+            self.assertNotIn("brief.pdf", service.episodes[0].transcript)
+
+    def test_stale_state_handles_preserve_other_channel_cursor_updates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            first = SlackPollState(state_path)
+            second = SlackPollState(state_path)
+
+            first.set_latest_history_ts("C123", "100.000000")
+            first.save()
+            second.set_latest_history_ts("C999", "200.000000")
+            second.save()
+
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["channels"]["C123"]["latest_history_ts"], "100.000000")
+            self.assertEqual(state["channels"]["C999"]["latest_history_ts"], "200.000000")
 
 
 if __name__ == "__main__":

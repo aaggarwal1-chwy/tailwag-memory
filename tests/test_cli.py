@@ -97,6 +97,26 @@ class CliTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--force-backfill requires --once", stderr.getvalue())
 
+    def test_slack_poll_missing_token_exits_before_db_runner(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            slack_bot_token=None,
+        )
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    with self.assertRaises(SystemExit) as raised:
+                        main(["slack", "poll", "--channel", "C123", "--once"])
+
+        self.assertEqual(raised.exception.code, 2)
+        runner_class.assert_not_called()
+        self.assertIn("SLACK_BOT_TOKEN is required", stderr.getvalue())
+
     def test_slack_force_backfill_is_passed_to_poller(self) -> None:
         settings = Settings(
             neo4j_uri="bolt://example.test:7687",
@@ -314,7 +334,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(client_calls, [{"token": "xoxb-test-token", "include_email": True}])
 
-    def test_person_context_prints_synthesized_paragraph(self) -> None:
+    def test_person_context_prints_unified_context(self) -> None:
         settings = Settings(
             neo4j_uri="bolt://example.test:7687",
             neo4j_user="neo4j",
@@ -325,29 +345,69 @@ class CliTest(unittest.TestCase):
         runner = FakeRunner(settings)
         calls = []
 
-        class FakeContextService:
-            def __init__(self, retrieval, provider) -> None:
-                self.retrieval = retrieval
-                self.provider = provider
+        class FakeClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
 
-            def context_for_person(
+            def person_context(
                 self,
                 person_id: str,
                 limit: int = 10,
                 semantic_scope: str | None = None,
+                *,
+                current_text: str | None = None,
+                memory_limit: int = 12,
+                recent_episode_limit: int = 5,
             ) -> str:
-                calls.append({"person_id": person_id, "limit": limit, "semantic_scope": semantic_scope})
-                return "Jamie recently asked about chargers."
+                calls.append(
+                    {
+                        "person_id": person_id,
+                        "limit": limit,
+                        "semantic_scope": semantic_scope,
+                        "current_text": current_text,
+                        "memory_limit": memory_limit,
+                        "recent_episode_limit": recent_episode_limit,
+                    }
+                )
+                return "[PERSON MEMORY]\nPreferences:\n- likes robot demos\n\nJamie recently asked about chargers."
 
         with patch("tailwag_memory.cli.load_settings", return_value=settings):
             with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                with patch("tailwag_memory.cli.PersonContextSynthesisService", FakeContextService):
+                with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
                     stdout = StringIO()
                     with redirect_stdout(stdout):
-                        exit_code = main(["person", "context", "--person-id", "person_jamie", "--limit", "3"])
+                        exit_code = main(
+                            [
+                                "person",
+                                "context",
+                                "--person-id",
+                                "person_jamie",
+                                "--limit",
+                                "3",
+                                "--current-text",
+                                "robot demo",
+                                "--memory-limit",
+                                "4",
+                                "--recent-episode-limit",
+                                "2",
+                            ]
+                        )
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(calls, [{"person_id": "person_jamie", "limit": 3, "semantic_scope": None}])
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "person_id": "person_jamie",
+                    "limit": 3,
+                    "semantic_scope": None,
+                    "current_text": "robot demo",
+                    "memory_limit": 4,
+                    "recent_episode_limit": 2,
+                }
+            ],
+        )
+        self.assertIn("[PERSON MEMORY]", stdout.getvalue())
         self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
         self.assertTrue(runner.closed)
 
@@ -400,23 +460,23 @@ class CliTest(unittest.TestCase):
         runner = FakeRunner(settings)
         calls = []
 
-        class FakeContextService:
-            def __init__(self, retrieval, provider) -> None:
-                self.retrieval = retrieval
-                self.provider = provider
+        class FakeClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
 
-            def context_for_person(
+            def person_context(
                 self,
                 person_id: str,
                 limit: int = 10,
                 semantic_scope: str | None = None,
+                **kwargs,
             ) -> str:
                 calls.append({"person_id": person_id, "limit": limit, "semantic_scope": semantic_scope})
                 return "Jamie recently asked about chargers."
 
         with patch("tailwag_memory.cli.load_settings", return_value=settings):
             with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                with patch("tailwag_memory.cli.PersonContextSynthesisService", FakeContextService):
+                with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
                     stdout = StringIO()
                     with redirect_stdout(stdout):
                         exit_code = main(
@@ -436,6 +496,77 @@ class CliTest(unittest.TestCase):
         self.assertEqual(calls, [{"person_id": "person_jamie", "limit": 3, "semantic_scope": "chargers"}])
         self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
         self.assertTrue(runner.closed)
+
+    def test_memory_context_command_uses_unified_context(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            openai_api_key="test-key",
+        )
+        runner = FakeRunner(settings)
+        calls = []
+
+        class FakeClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
+
+            def person_context(
+                self,
+                person_id: str,
+                limit: int = 10,
+                semantic_scope: str | None = None,
+                *,
+                current_text: str | None = None,
+                memory_limit: int = 12,
+                recent_episode_limit: int = 5,
+            ) -> str:
+                calls.append(
+                    {
+                        "person_id": person_id,
+                        "limit": limit,
+                        "semantic_scope": semantic_scope,
+                        "current_text": current_text,
+                        "memory_limit": memory_limit,
+                        "recent_episode_limit": recent_episode_limit,
+                    }
+                )
+                return "[PERSON MEMORY]\nFacts:\n- working on robot memory"
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "memory",
+                                "context",
+                                "--person-id",
+                                "person_jamie",
+                                "--semantic-scope",
+                                "chargers",
+                                "--current-text",
+                                "robot demo",
+                            ]
+                        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "person_id": "person_jamie",
+                    "limit": 10,
+                    "semantic_scope": "chargers",
+                    "current_text": "robot demo",
+                    "memory_limit": 12,
+                    "recent_episode_limit": 5,
+                }
+            ],
+        )
+        self.assertIn("[PERSON MEMORY]", stdout.getvalue())
 
     def test_episode_create_extracts_memory_by_default(self) -> None:
         settings = Settings(

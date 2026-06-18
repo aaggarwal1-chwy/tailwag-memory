@@ -101,6 +101,8 @@ The default polling state file is:
 
 Use `--state-file` to override it.
 
+Polling state is written by serializing to a temporary file in the state directory and then replacing the target file. If the existing state file is corrupt or has the wrong JSON shape, polling fails before calling Slack or ingesting episodes. When saving, the poller reloads the current on-disk state and merges the channels touched by this poll so progress for other channels is preserved. The state file is not a file-locking protocol and does not claim concurrent same-channel polling safety.
+
 ## Inspect Generated Memories
 
 Search generated Slack memories through the CLI:

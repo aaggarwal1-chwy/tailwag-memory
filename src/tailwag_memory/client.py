@@ -6,7 +6,8 @@ from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
 from .ingestion import EpisodeIngestionService
-from .memory_items import EpisodeMemoryExtractionService, OpenAIMemoryExtractionProvider, PersonMarkdownContextService
+from .memory_context import PersonMemoryContextService
+from .memory_items import EpisodeMemoryExtractionService, OpenAIMemoryExtractionProvider
 from .models import EpisodeInput, EpisodeMemoryExtractionResult, EpisodeRecordResult
 from .retrieval import PersonContextRetrievalService
 from .synthesis import OpenAIPersonContextProvider, PersonContextSynthesisService
@@ -36,35 +37,36 @@ class TailwagMemoryClient:
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.close()
 
-    def person_context(self, person_id: str, limit: int = 10, semantic_scope: str | None = None) -> str:
+    def person_context(
+        self,
+        person_id: str,
+        limit: int = 10,
+        semantic_scope: str | None = None,
+        *,
+        current_text: str | None = None,
+        now: datetime | None = None,
+        memory_limit: int = 12,
+        recent_episode_limit: int = 5,
+    ) -> str:
+        memory_context = PersonMemoryContextService(self.runner, self._embeddings()).markdown_for_person(
+            person_id,
+            current_text=current_text or semantic_scope,
+            now=now,
+            memory_limit=memory_limit,
+            recent_episode_limit=recent_episode_limit,
+        )
         embeddings = self._embeddings()
         retrieval = PersonContextRetrievalService(self.runner, embeddings)
         provider = OpenAIPersonContextProvider(
             api_key=self.settings.openai_api_key,
             model=self.settings.synthesis_model,
         )
-        return PersonContextSynthesisService(retrieval, provider).context_for_person(
+        synthesized_context = PersonContextSynthesisService(retrieval, provider).context_for_person(
             person_id,
             limit=limit,
             semantic_scope=semantic_scope,
         )
-
-    def person_memory_context(
-        self,
-        person_id: str,
-        current_text: str | None = None,
-        *,
-        now: datetime | None = None,
-        memory_limit: int = 12,
-        recent_episode_limit: int = 5,
-    ) -> str:
-        return PersonMarkdownContextService(self.runner, self._embeddings()).markdown_for_person(
-            person_id,
-            current_text=current_text,
-            now=now,
-            memory_limit=memory_limit,
-            recent_episode_limit=recent_episode_limit,
-        )
+        return "\n\n".join(part for part in [memory_context, synthesized_context] if part)
 
     def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
         episode_id = EpisodeIngestionService(self.runner, self._embeddings()).ingest(episode)

@@ -67,6 +67,16 @@ def schema_statements(embedding_dimension: int) -> list[str]:
           }}
         }}
         """,
+        f"""
+        CREATE VECTOR INDEX memory_item_summary_embedding IF NOT EXISTS
+        FOR (m:MemoryItem) ON (m.summary_embedding)
+        OPTIONS {{
+          indexConfig: {{
+            `vector.dimensions`: {embedding_dimension},
+            `vector.similarity_function`: 'cosine'
+          }}
+        }}
+        """,
     ]
 
 

@@ -32,7 +32,7 @@ Non-goals:
 Verification:
 - PYTHONPATH=src python3 -m unittest discover -s tests
 - review git status --short so unrelated dirty files are not mistaken for release changes
-- check .agents/usage-log.md has an entry for material work
+- check .codex/agents/usage-log.md has an entry for material work
 - check README and integration examples still point to existing files and commands
 
 Handoff:

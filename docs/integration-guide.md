@@ -15,8 +15,7 @@ The package connects to Neo4j through environment variables and stores:
 - memory item summary embeddings
 - optional person face embeddings
 - optional person audio embeddings
-- natural-language person context generated from recent related episodes and accepted-attendee events
-- markdown person memory context generated from durable memory items, visible follow-ups, and recent episodes
+- unified person context generated from durable memory items, visible follow-ups, recent episodes, related episodes, and accepted-attendee events
 
 ## Install From Another Local Repo
 
@@ -103,6 +102,7 @@ tailwag search --building-code SLACK --room-id C0123456789 "conversation"
 tailwag event by-place --building-code MAIN --room-id 101
 tailwag person context --person-id person_jamie
 tailwag person context --person-id person_jamie --semantic-scope "chargers"
+tailwag memory context --person-id person_jamie --current-text "robot demo later today"
 tailwag memory extract --episode-id episode_example_001
 tailwag memory extract --episode-id episode_example_001 --person-id person_jamie
 tailwag person search-face --embedding-file examples/face-embedding.json
@@ -114,9 +114,7 @@ tailwag person search-audio --embedding-file examples/audio-embedding.json
 Run this once per Neo4j database:
 
 ```python
-from tailwag_memory.config import load_settings
-from tailwag_memory.db import Neo4jQueryRunner
-from tailwag_memory.schema import initialize_schema
+from tailwag_memory import Neo4jQueryRunner, initialize_schema, load_settings
 
 settings = load_settings()
 runner = Neo4jQueryRunner(settings)
@@ -136,11 +134,15 @@ The calling system provides `Person.id` and `Episode.id`.
 On the first interaction with a person, include their display name, consent status, and any available recognition vectors. On later interactions, the participant can be referenced by ID only.
 
 ```python
-from tailwag_memory.config import load_settings
-from tailwag_memory.db import Neo4jQueryRunner
-from tailwag_memory.embeddings import OpenAIEmbeddingProvider
-from tailwag_memory.ingestion import EpisodeIngestionService
-from tailwag_memory.models import EpisodeInput, PersonInput, PlaceInput
+from tailwag_memory import (
+    EpisodeIngestionService,
+    EpisodeInput,
+    Neo4jQueryRunner,
+    OpenAIEmbeddingProvider,
+    PersonInput,
+    PlaceInput,
+    load_settings,
+)
 
 settings = load_settings()
 runner = Neo4jQueryRunner(settings)
@@ -257,7 +259,7 @@ Run continuous polling:
 tailwag slack poll --channel C0123456789 --interval 60
 ```
 
-Polling state is stored in `.tailwag/slack-state.json` by default. The poller refreshes active threads so new replies update the same stable episode ID: `slack:<channel_id>:<thread_ts>`.
+Polling state is stored in `.tailwag/slack-state.json` by default. The poller refreshes active threads so new replies update the same stable episode ID: `slack:<channel_id>:<thread_ts>`. State saves use a temporary file and replace the target state file atomically. A corrupt or invalid state file fails before Slack calls or episode ingestion, and stale saves merge touched channel progress with the latest on-disk state so other channel cursors are preserved. The state file is not a file-locking protocol and does not guarantee concurrent polling of the same channel.
 
 To inspect generated Slack memories through retrieval, search the Slack virtual place:
 
@@ -272,10 +274,15 @@ Public channel polling needs `channels:read`, `channels:history`, and `users:rea
 Events represent something that happened, is happening, or is scheduled to happen in a place. Events include an explicit `accepted_attendees` list; pass an empty list when no attendees are known.
 
 ```python
-from tailwag_memory.config import load_settings
-from tailwag_memory.db import Neo4jQueryRunner
-from tailwag_memory.ingestion import EventIngestionService
-from tailwag_memory.models import EventAttendeeInput, EventInput, PersonInput, PlaceInput
+from tailwag_memory import (
+    EventAttendeeInput,
+    EventIngestionService,
+    EventInput,
+    Neo4jQueryRunner,
+    PersonInput,
+    PlaceInput,
+    load_settings,
+)
 
 settings = load_settings()
 runner = Neo4jQueryRunner(settings)
@@ -314,7 +321,7 @@ If the calling repo already has JSON payloads:
 import json
 from pathlib import Path
 
-from tailwag_memory.models import EpisodeInput
+from tailwag_memory import EpisodeInput
 
 payload = json.loads(Path("episode.json").read_text())
 episode = EpisodeInput.from_dict(payload)
@@ -368,7 +375,7 @@ For an existing person, the participant can be just:
 import json
 from pathlib import Path
 
-from tailwag_memory.models import EventInput
+from tailwag_memory import EventInput
 
 payload = json.loads(Path("event.json").read_text())
 event = EventInput.from_dict(payload)
@@ -431,11 +438,13 @@ Other repos should use the `id` property, not Neo4j's internal IDs.
 ## Search Episodes
 
 ```python
-from tailwag_memory.config import load_settings
-from tailwag_memory.db import Neo4jQueryRunner
-from tailwag_memory.embeddings import OpenAIEmbeddingProvider
-from tailwag_memory.models import SearchQuery
-from tailwag_memory.retrieval import EpisodeRetrievalService
+from tailwag_memory import (
+    EpisodeRetrievalService,
+    Neo4jQueryRunner,
+    OpenAIEmbeddingProvider,
+    SearchQuery,
+    load_settings,
+)
 
 settings = load_settings()
 runner = Neo4jQueryRunner(settings)
@@ -475,25 +484,37 @@ service.vector_search("chargers", target="transcript")
 
 ## Generate Person Context
 
-For a social agent that needs natural-language context about a person, use the high-level client and pass only the caller-owned person ID:
+For a social agent that needs prompt context about a person, use the high-level client and pass only the caller-owned person ID:
 
 ```python
-from tailwag_memory.client import TailwagMemoryClient
+from tailwag_memory import TailwagMemoryClient
 
 with TailwagMemoryClient.from_env() as memory:
-    paragraph = memory.person_context("person_jamie")
+    context = memory.person_context("person_jamie")
 
-print(paragraph)
+print(context)
 ```
 
-To forcibly narrow the evidence by topic, pass `semantic_scope`. This runs vector search over episode summaries and transcripts for that person before synthesis:
+`person_context()` returns one context surface. It starts with deterministic durable memory sections when active memory items or recent episode lines exist, then appends the synthesized natural-language person context.
+
+To retrieve memory items against the user's current utterance or task, pass `current_text`:
 
 ```python
 with TailwagMemoryClient.from_env() as memory:
-    paragraph = memory.person_context("person_jamie", semantic_scope="chargers")
+    context = memory.person_context(
+        "person_jamie",
+        current_text="robot demo later today",
+    )
 ```
 
-The paragraph combines recent episodes where the person participated and recent events where the person is an accepted attendee. If no `Person` node exists, the method returns exactly:
+To forcibly narrow synthesized episode evidence by topic, pass `semantic_scope`. This runs vector search over episode summaries and transcripts for that person before synthesis. When `current_text` is omitted, `semantic_scope` is also used to retrieve semantically related durable memory items:
+
+```python
+with TailwagMemoryClient.from_env() as memory:
+    context = memory.person_context("person_jamie", semantic_scope="chargers")
+```
+
+The synthesized paragraph combines recent episodes where the person participated and recent events where the person is an accepted attendee. If no `Person` node exists and there are no memory items, the method returns exactly:
 
 ```text
 the database does not have a record of this person
@@ -508,9 +529,7 @@ Scoped person context is episode-only in the current model. If no vector-matched
 ## Search Events By Place
 
 ```python
-from tailwag_memory.config import load_settings
-from tailwag_memory.db import Neo4jQueryRunner
-from tailwag_memory.retrieval import EventRetrievalService
+from tailwag_memory import EventRetrievalService, Neo4jQueryRunner, load_settings
 
 settings = load_settings()
 runner = Neo4jQueryRunner(settings)
@@ -528,9 +547,7 @@ for event in events:
 ## Search People By Face Or Audio Embedding
 
 ```python
-from tailwag_memory.config import load_settings
-from tailwag_memory.db import Neo4jQueryRunner
-from tailwag_memory.retrieval import PersonRecognitionService
+from tailwag_memory import Neo4jQueryRunner, PersonRecognitionService, load_settings
 
 settings = load_settings()
 runner = Neo4jQueryRunner(settings)
@@ -551,8 +568,7 @@ for match in face_matches:
 For an Argos-style runtime, the caller should send normal episodes to the high-level Tailwag client. Tailwag stores the episode and internally checks whether transcript-derived memory items should be created, updated, or archived. Argos should not call low-level memory item services directly.
 
 ```python
-from tailwag_memory.client import TailwagMemoryClient
-from tailwag_memory.models import EpisodeInput, PersonInput, PlaceInput
+from tailwag_memory import EpisodeInput, PersonInput, PlaceInput, TailwagMemoryClient
 
 episode = EpisodeInput(
     id="episode_external_001",
@@ -607,15 +623,15 @@ Memory extraction supports these person-scoped memory item kinds:
 
 Memory item identity is person-scoped by `(person_id, kind, key)`, so the same preference or fact extracted from live chat and Slack-derived source adapters converges into one durable memory item. Slack polling is available through the built-in Source Adapter CLI path and writes the same episode and memory item shapes as caller-supplied records. The extractor rejects identity-owned directory facts such as title, team, manager, cost center, business function, and leadership org. Those should stay in the calling system's identity or directory layer.
 
-## Render Markdown Person Memory Context
+## Unified Context Shape
 
-To inject memory into an agent prompt, request a deterministic markdown-style block. Empty sections are omitted, and the method returns an empty string when there are no active memory items or recent episode lines.
+The durable memory portion is a deterministic markdown-style block. Empty sections are omitted, and the block is omitted when there are no active memory items or recent episode lines.
 
 ```python
-from tailwag_memory.client import TailwagMemoryClient
+from tailwag_memory import TailwagMemoryClient
 
 with TailwagMemoryClient.from_env() as memory:
-    context = memory.person_memory_context(
+    context = memory.person_context(
         "person_jamie",
         current_text="robot demo later today",
     )

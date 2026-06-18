@@ -127,10 +127,11 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(result.episode_id, "episode_1")
         self.assertEqual(calls, [{"episode_id": "episode_1", "person_id": "person_jamie", "speaker_only": True}])
 
-    def test_person_memory_context_returns_markdown_context(self) -> None:
-        calls = []
+    def test_person_context_returns_unified_memory_and_synthesis_context(self) -> None:
+        memory_calls = []
+        synthesis_calls = []
 
-        class FakeMarkdownContext:
+        class FakeMemoryContext:
             def __init__(self, runner_arg, embeddings) -> None:
                 pass
 
@@ -143,21 +144,41 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 memory_limit: int = 12,
                 recent_episode_limit: int = 5,
             ) -> str:
-                calls.append((person_id, current_text, now, memory_limit, recent_episode_limit))
-                return f"{person_id}: {current_text}"
+                memory_calls.append((person_id, current_text, now, memory_limit, recent_episode_limit))
+                return "[PERSON MEMORY]\nPreferences:\n- likes robot demos"
+
+        class FakeSynthesis:
+            def __init__(self, retrieval, provider) -> None:
+                pass
+
+            def context_for_person(
+                self,
+                person_id: str,
+                limit: int = 10,
+                semantic_scope: str | None = None,
+            ) -> str:
+                synthesis_calls.append((person_id, limit, semantic_scope))
+                return "Jamie recently asked about chargers."
 
         now = datetime(2026, 6, 18, tzinfo=timezone.utc)
-        with patch("tailwag_memory.client.PersonMarkdownContextService", FakeMarkdownContext):
-            context = TailwagMemoryClient(FakeRunner(), _settings()).person_memory_context(
-                "person_jamie",
-                current_text="robot demo",
-                now=now,
-                memory_limit=4,
-                recent_episode_limit=2,
-            )
+        with patch("tailwag_memory.client.PersonMemoryContextService", FakeMemoryContext):
+            with patch("tailwag_memory.client.PersonContextSynthesisService", FakeSynthesis):
+                context = TailwagMemoryClient(FakeRunner(), _settings()).person_context(
+                    "person_jamie",
+                    limit=3,
+                    semantic_scope="chargers",
+                    current_text="robot demo",
+                    now=now,
+                    memory_limit=4,
+                    recent_episode_limit=2,
+                )
 
-        self.assertEqual(context, "person_jamie: robot demo")
-        self.assertEqual(calls, [("person_jamie", "robot demo", now, 4, 2)])
+        self.assertEqual(
+            context,
+            "[PERSON MEMORY]\nPreferences:\n- likes robot demos\n\nJamie recently asked about chargers.",
+        )
+        self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4, 2)])
+        self.assertEqual(synthesis_calls, [("person_jamie", 3, "chargers")])
 
     def test_context_manager_closes_runner(self) -> None:
         runner = FakeRunner()

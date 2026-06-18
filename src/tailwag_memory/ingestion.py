@@ -5,13 +5,35 @@ from .embeddings import EmbeddingProvider
 from .models import EpisodeInput, EventInput, utc_now_iso
 
 
+def _person_upsert_cypher(person_variable: str, id_property: str) -> str:
+    return f"""
+                MERGE (p:Person {{id: {person_variable}.{id_property}}})
+                SET p.display_name = coalesce({person_variable}.display_name, p.display_name),
+                    p.email = coalesce({person_variable}.email, p.email),
+                    p.consent_status = coalesce({person_variable}.consent_status, p.consent_status),
+                    p.face_embedding = CASE
+                      WHEN {person_variable}.consent_status IS NOT NULL AND {person_variable}.consent_status <> 'consented' THEN NULL
+                      ELSE coalesce({person_variable}.face_embedding, p.face_embedding)
+                    END,
+                    p.audio_embedding = CASE
+                      WHEN {person_variable}.consent_status IS NOT NULL AND {person_variable}.consent_status <> 'consented' THEN NULL
+                      ELSE coalesce({person_variable}.audio_embedding, p.audio_embedding)
+                    END,
+                    p.created_at = coalesce(p.created_at, $created_at),
+                    p.last_seen = CASE
+                      WHEN p.last_seen IS NULL OR datetime(p.last_seen) < datetime($last_seen) THEN $last_seen
+                      ELSE p.last_seen
+                    END
+                """
+
+
 class EpisodeIngestionService:
     def __init__(self, runner: QueryRunner, embeddings: EmbeddingProvider) -> None:
         self.runner = runner
         self.embeddings = embeddings
 
     def ingest(self, episode: EpisodeInput) -> str:
-        created_at = utc_now_iso()
+        written_at = utc_now_iso()
         summary_embedding = self.embeddings.embed(episode.summary)
         transcript_embedding = self.embeddings.embed(episode.transcript)
         participants = [
@@ -39,7 +61,8 @@ class EpisodeIngestionService:
                 e.retention_class = $retention_class,
                 e.summary_embedding = $summary_embedding,
                 e.transcript_embedding = $transcript_embedding,
-                e.created_at = coalesce(e.created_at, $created_at)
+                e.created_at = coalesce(e.created_at, $created_at),
+                e.updated_at = $updated_at
             WITH e
             OPTIONAL MATCH (e)-[old_place:OCCURRED_AT]->(:Place)
             FOREACH (_ IN CASE WHEN old_place IS NULL THEN [] ELSE [1] END | DELETE old_place)
@@ -52,23 +75,9 @@ class EpisodeIngestionService:
             FOREACH (_ IN CASE WHEN old_person IS NOT NULL AND NOT old_person.id IN $participant_ids THEN [1] ELSE [] END | DELETE old_rel)
             WITH DISTINCT e
             UNWIND $participants AS person
-                MERGE (p:Person {id: person.id})
-                SET p.display_name = coalesce(person.display_name, p.display_name),
-                    p.email = coalesce(person.email, p.email),
-                    p.consent_status = coalesce(person.consent_status, p.consent_status),
-                    p.face_embedding = CASE
-                      WHEN person.consent_status IS NOT NULL AND person.consent_status <> 'consented' THEN NULL
-                      ELSE coalesce(person.face_embedding, p.face_embedding)
-                    END,
-                    p.audio_embedding = CASE
-                      WHEN person.consent_status IS NOT NULL AND person.consent_status <> 'consented' THEN NULL
-                      ELSE coalesce(person.audio_embedding, p.audio_embedding)
-                    END,
-                    p.created_at = coalesce(p.created_at, $created_at),
-                    p.last_seen = CASE
-                      WHEN p.last_seen IS NULL OR datetime(p.last_seen) < datetime($last_seen) THEN $last_seen
-                      ELSE p.last_seen
-                    END
+            """
+            + _person_upsert_cypher("person", "id")
+            + """
                 MERGE (p)-[r:PARTICIPATED_IN]->(e)
                 SET r.role = person.role,
                     r.source = person.source
@@ -87,7 +96,8 @@ class EpisodeIngestionService:
                     "room_id": episode.place.room_id,
                     "participants": participants,
                     "participant_ids": [person["id"] for person in participants],
-                    "created_at": created_at,
+                    "created_at": written_at,
+                    "updated_at": written_at,
                     "last_seen": episode.end_time or episode.start_time,
                 },
             )
@@ -100,7 +110,7 @@ class EventIngestionService:
         self.runner = runner
 
     def ingest(self, event: EventInput) -> str:
-        created_at = utc_now_iso()
+        written_at = utc_now_iso()
         attendees = [
             {
                 "person_id": attendee.person.id,
@@ -122,7 +132,8 @@ class EventIngestionService:
             SET e.description = $description,
                 e.start_time = $start_time,
                 e.end_time = $end_time,
-                e.created_at = coalesce(e.created_at, $created_at)
+                e.created_at = coalesce(e.created_at, $created_at),
+                e.updated_at = $updated_at
             WITH e
             OPTIONAL MATCH (e)-[old_place:OCCURRED_AT]->(:Place)
             FOREACH (_ IN CASE WHEN old_place IS NULL THEN [] ELSE [1] END | DELETE old_place)
@@ -135,23 +146,9 @@ class EventIngestionService:
             FOREACH (_ IN CASE WHEN old_person IS NOT NULL AND NOT old_person.id IN $attendee_ids THEN [1] ELSE [] END | DELETE old_rel)
             WITH DISTINCT e
             UNWIND $attendees AS attendee
-                MERGE (p:Person {id: attendee.person_id})
-                SET p.display_name = coalesce(attendee.display_name, p.display_name),
-                    p.email = coalesce(attendee.email, p.email),
-                    p.consent_status = coalesce(attendee.consent_status, p.consent_status),
-                    p.face_embedding = CASE
-                      WHEN attendee.consent_status IS NOT NULL AND attendee.consent_status <> 'consented' THEN NULL
-                      ELSE coalesce(attendee.face_embedding, p.face_embedding)
-                    END,
-                    p.audio_embedding = CASE
-                      WHEN attendee.consent_status IS NOT NULL AND attendee.consent_status <> 'consented' THEN NULL
-                      ELSE coalesce(attendee.audio_embedding, p.audio_embedding)
-                    END,
-                    p.created_at = coalesce(p.created_at, $created_at),
-                    p.last_seen = CASE
-                      WHEN p.last_seen IS NULL OR datetime(p.last_seen) < datetime($last_seen) THEN $last_seen
-                      ELSE p.last_seen
-                    END
+            """
+            + _person_upsert_cypher("attendee", "person_id")
+            + """
                 MERGE (p)-[r:ATTENDED]->(e)
                 SET r.source = attendee.source,
                     r.response = attendee.response,
@@ -166,7 +163,8 @@ class EventIngestionService:
                     "room_id": event.place.room_id,
                     "attendees": attendees,
                     "attendee_ids": [attendee["person_id"] for attendee in attendees],
-                    "created_at": created_at,
+                    "created_at": written_at,
+                    "updated_at": written_at,
                     "last_seen": event.end_time or event.start_time,
                 },
             )

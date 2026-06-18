@@ -31,11 +31,14 @@ Implemented now:
 - `SUPPORTED_BY`
 - OpenAI-backed episode embeddings
 - OpenAI-backed memory item embeddings
+- Neo4j 5.26 local Docker runtime
 - OpenAI-backed natural-language person context synthesis
 - transcript-derived person memory extraction and markdown context formatting
+- durable memory context plus recent episode/event context in `person_context`
+- memory context CLI command
 - optional caller-supplied person face embeddings
 - optional caller-supplied person audio embeddings
-- Neo4j constraints and vector indexes
+- Neo4j constraints and vector indexes for `Episode.summary_embedding`, `Episode.transcript_embedding`, `Person.face_embedding`, `Person.audio_embedding`, and `MemoryItem.summary_embedding`
 - ingestion flow
 - retrieval flow
 - seed/demo data
@@ -68,6 +71,7 @@ Deferred for later:
 - Production embeddings use the OpenAI-compatible provider; tests use deterministic mock embeddings with the same provider interface.
 - The code should be split early enough to avoid large, tangled modules.
 - `MemoryItem` is the approved narrow path for transcript-derived person memory. It does not open scope for a broad `SemanticFact` ontology or triple store.
+- This pre-release plan describes current behavior and intended boundaries; it does not promise backward compatibility for earlier local-only shapes.
 
 ## Initial Graph Model
 
@@ -247,8 +251,10 @@ Create vector indexes for:
 - `Episode.transcript_embedding`
 - `Person.face_embedding`
 - `Person.audio_embedding`
+- `MemoryItem.summary_embedding`
 
 The embedding dimension should be configurable so the OpenAI provider and deterministic mock provider can share the same retrieval code.
+Retrieval queries vector indexes with Neo4j's current `SEARCH` clause.
 
 ## Embedding Interface
 
@@ -405,6 +411,9 @@ tailwag search "what did Jamie ask about?"
 tailwag search --person-id person_jamie "charger"
 tailwag search --building-code MAIN --room-id 101 "projector"
 tailwag event by-place --building-code MAIN --room-id 101
+tailwag person context --person-id person_jamie
+tailwag person context --person-id person_jamie --semantic-scope "chargers"
+tailwag memory context --person-id person_jamie --current-text "robot demo later today"
 tailwag person search-face --embedding-file examples/face-embedding.json
 tailwag person search-audio --embedding-file examples/audio-embedding.json
 ```

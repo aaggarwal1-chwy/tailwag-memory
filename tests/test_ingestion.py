@@ -1,6 +1,6 @@
 from tailwag_memory.db import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
-from tailwag_memory.ingestion import EpisodeIngestionService, EventIngestionService
+from tailwag_memory.ingestion import EpisodeIngestionService, EventIngestionService, _person_upsert_cypher
 from tailwag_memory.models import EpisodeInput, EventAttendeeInput, EventInput, PersonInput, PlaceInput
 import unittest
 
@@ -30,6 +30,21 @@ def _episode() -> EpisodeInput:
     )
 
 
+class PersonUpsertCypherTest(unittest.TestCase):
+    def test_person_upsert_helper_preserves_consent_and_last_seen_rules(self) -> None:
+        participant_clause = _person_upsert_cypher("person", "id")
+        attendee_clause = _person_upsert_cypher("attendee", "person_id")
+
+        self.assertIn("MERGE (p:Person {id: person.id})", participant_clause)
+        self.assertIn("MERGE (p:Person {id: attendee.person_id})", attendee_clause)
+        self.assertIn("p.email = coalesce(person.email, p.email)", participant_clause)
+        self.assertIn("p.email = coalesce(attendee.email, p.email)", attendee_clause)
+        self.assertIn("person.consent_status <> 'consented'", participant_clause)
+        self.assertIn("attendee.consent_status <> 'consented'", attendee_clause)
+        self.assertIn("datetime(p.last_seen) < datetime($last_seen)", participant_clause)
+        self.assertIn("datetime(p.last_seen) < datetime($last_seen)", attendee_clause)
+
+
 class EpisodeIngestionServiceTest(unittest.TestCase):
     def test_ingest_writes_episode_place_and_participant(self) -> None:
         runner = RecordingQueryRunner()
@@ -43,6 +58,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters["building_code"], "MAIN")
         self.assertEqual(runner.queries[0].parameters["room_id"], "101")
         self.assertEqual(runner.queries[0].parameters["participant_ids"], ["person_external_jamie"])
+        self.assertEqual(runner.queries[0].parameters["updated_at"], runner.queries[0].parameters["created_at"])
         participant = runner.queries[0].parameters["participants"][0]
         self.assertEqual(participant["id"], "person_external_jamie")
         self.assertEqual(participant["email"], "jamie@example.com")
@@ -52,6 +68,8 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertIn("DELETE old_place", runner.queries[0].query)
         self.assertIn("DELETE old_rel", runner.queries[0].query)
         self.assertIn("UNWIND $participants AS person", runner.queries[0].query)
+        self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", runner.queries[0].query)
+        self.assertIn("e.updated_at = $updated_at", runner.queries[0].query)
         self.assertIn("p.display_name = coalesce(person.display_name, p.display_name)", runner.queries[0].query)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", runner.queries[0].query)
         self.assertIn("person.consent_status <> 'consented'", runner.queries[0].query)
@@ -136,6 +154,9 @@ class EventIngestionServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters["room_id"], "101")
         self.assertEqual(runner.queries[0].parameters["attendees"], [])
         self.assertEqual(runner.queries[0].parameters["attendee_ids"], [])
+        self.assertEqual(runner.queries[0].parameters["updated_at"], runner.queries[0].parameters["created_at"])
+        self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", runner.queries[0].query)
+        self.assertIn("e.updated_at = $updated_at", runner.queries[0].query)
         self.assertNotIn("PARTICIPATED_IN", runner.queries[0].query)
 
     def test_ingest_event_writes_accepted_attendees(self) -> None:

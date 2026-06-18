@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import html
 import json
 from pathlib import Path
 import re
+from tempfile import NamedTemporaryFile
 from typing import Any, Protocol
 
 from .models import EpisodeInput, EpisodeRecordResult, PersonInput, PlaceInput
@@ -118,19 +120,29 @@ class SlackPollState:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.data = self._load()
+        self._dirty_channels: set[str] = set()
 
     def latest_history_ts(self, channel: str) -> str | None:
         return self._channel(channel).get("latest_history_ts")
 
     def set_latest_history_ts(self, channel: str, ts: str) -> None:
         self._channel(channel)["latest_history_ts"] = ts
+        self._dirty_channels.add(channel)
 
     def active_threads(self, channel: str) -> dict[str, dict[str, str]]:
+        self._dirty_channels.add(channel)
         return self._channel(channel).setdefault("active_threads", {})
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.data, indent=2, sort_keys=True) + "\n")
+        data = self._merged_with_disk_state()
+        serialized = json.dumps(data, indent=2, sort_keys=True) + "\n"
+        with NamedTemporaryFile("w", dir=self.path.parent, delete=False) as temp_file:
+            temp_file.write(serialized)
+            temp_path = Path(temp_file.name)
+        temp_path.replace(self.path)
+        self.data = data
+        self._dirty_channels.clear()
 
     def _channel(self, channel: str) -> dict[str, Any]:
         channels = self.data.setdefault("channels", {})
@@ -139,7 +151,29 @@ class SlackPollState:
     def _load(self) -> dict[str, Any]:
         if not self.path.exists():
             return {"channels": {}}
-        return json.loads(self.path.read_text())
+        try:
+            data = json.loads(self.path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Slack poll state file is not valid JSON: {self.path}") from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"Slack poll state file must contain a JSON object: {self.path}")
+        channels = data.setdefault("channels", {})
+        if not isinstance(channels, dict):
+            raise ValueError(f"Slack poll state file channels must be a JSON object: {self.path}")
+        return data
+
+    def _merged_with_disk_state(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return self.data
+        disk_data = SlackPollState(self.path).data
+        merged = dict(disk_data)
+        merged_channels = dict(disk_data.get("channels", {}))
+        current_channels = self.data.get("channels", {})
+        for channel in self._dirty_channels:
+            if channel in current_channels:
+                merged_channels[channel] = current_channels[channel]
+        merged["channels"] = merged_channels
+        return merged
 
 
 class SlackMemoryPoller:
@@ -323,7 +357,7 @@ def build_episode_from_slack_thread(
 
 def _is_memory_message(message: dict[str, Any]) -> bool:
     subtype = message.get("subtype")
-    if subtype in {"message_deleted", "channel_join", "channel_leave"}:
+    if subtype in {"message_deleted", "channel_join", "channel_leave", "bot_message"} or message.get("bot_id"):
         return False
     return bool(message.get("user")) and bool(_clean_text(str(message.get("text") or ""))) and bool(message.get("ts"))
 
@@ -347,7 +381,9 @@ def _format_slack_text(
     client: SlackConversationClient,
     user_profiles: dict[str, SlackUserProfile],
 ) -> str:
-    return _clean_text(_replace_user_mentions(text, client=client, user_profiles=user_profiles))
+    text = html.unescape(text)
+    text = _replace_user_mentions(text, client=client, user_profiles=user_profiles)
+    return _clean_text(_replace_slack_entities(text))
 
 
 def _replace_user_mentions(
@@ -365,6 +401,26 @@ def _replace_user_mentions(
         return f"@{display_name}"
 
     return re.sub(r"<@(?P<user_id>[A-Z0-9]+)(?:\|(?P<label>[^>]+))?>", replace, text)
+
+
+def _replace_slack_entities(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        body = match.group("body")
+        if body.startswith("#"):
+            channel_id, _, label = body[1:].partition("|")
+            return f"#{label or channel_id}"
+        if body.startswith("!"):
+            mention, _, label = body[1:].partition("|")
+            return f"@{label or mention}"
+
+        target, _, label = body.partition("|")
+        if target.startswith("mailto:"):
+            return label or target.removeprefix("mailto:")
+        if "://" in target or target.startswith("www."):
+            return label or target
+        return match.group(0)
+
+    return re.sub(r"<(?P<body>[^<>]+)>", replace, text)
 
 
 def _normalize_email(email: Any) -> str | None:

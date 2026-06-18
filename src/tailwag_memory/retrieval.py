@@ -5,8 +5,8 @@ import re
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
 from .models import (
+    EpisodeMemoryResult,
     EventResult,
-    MemoryResult,
     PersonContextItem,
     PersonContextSource,
     PersonContextTranscriptLine,
@@ -16,6 +16,51 @@ from .models import (
 
 
 _TRANSCRIPT_LINE_RE = re.compile(r"^\[(?P<timestamp>[^\]]+)\]\s+(?P<speaker>[^:]+):\s*(?P<text>.*)$")
+_VECTOR_INDEX_LABELS = {
+    "episode_summary_embedding": "Episode",
+    "episode_transcript_embedding": "Episode",
+    "person_face_embedding": "Person",
+    "person_audio_embedding": "Person",
+    "memory_item_summary_embedding": "MemoryItem",
+}
+
+
+def _vector_search_clause(index_name: str, variable: str, limit_parameter: str) -> str:
+    label = _VECTOR_INDEX_LABELS.get(index_name)
+    if label is None:
+        raise ValueError(f"unsupported vector index: {index_name}")
+    return f"""
+            MATCH ({variable}:{label})
+              SEARCH {variable} IN (
+                VECTOR INDEX {index_name}
+                FOR $embedding
+                LIMIT ${limit_parameter}
+              ) SCORE AS score
+            """
+
+
+def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: int) -> list[dict[str, object]]:
+    return runner.run(
+        """
+            MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(e:Episode)
+            OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
+            RETURN e.id AS episode_id,
+                   e.id AS item_id,
+                   'episode' AS item_type,
+                   e.summary AS summary,
+                   e.transcript AS transcript,
+                   ('Summary: ' + coalesce(e.summary, '') + '\nTranscript:\n' + coalesce(e.transcript, '')) AS text,
+                   e.start_time AS start_time,
+                   e.end_time AS end_time,
+                   place.building_code AS building_code,
+                   place.room_id AS room_id,
+                   r.role AS role,
+                   r.source AS source
+            ORDER BY e.start_time DESC
+            LIMIT $limit
+            """,
+        {"person_id": person_id, "limit": limit},
+    )
 
 
 class EpisodeRetrievalService:
@@ -23,21 +68,11 @@ class EpisodeRetrievalService:
         self.runner = runner
         self.embeddings = embeddings
 
-    def by_person(self, person_id: str, limit: int = 10) -> list[MemoryResult]:
-        rows = self.runner.run(
-            """
-            MATCH (:Person {id: $person_id})-[:PARTICIPATED_IN]->(e:Episode)
-            RETURN e.id AS episode_id,
-                   e.summary AS summary,
-                   e.transcript AS transcript
-            ORDER BY e.start_time DESC
-            LIMIT $limit
-            """,
-            {"person_id": person_id, "limit": limit},
-        )
+    def by_person(self, person_id: str, limit: int = 10) -> list[EpisodeMemoryResult]:
+        rows = recent_episode_rows_for_person(self.runner, person_id, limit)
         return [self._row_to_result(row) for row in rows]
 
-    def by_place(self, building_code: str, room_id: str, limit: int = 10) -> list[MemoryResult]:
+    def by_place(self, building_code: str, room_id: str, limit: int = 10) -> list[EpisodeMemoryResult]:
         rows = self.runner.run(
             """
             MATCH (e:Episode)-[:OCCURRED_AT]->(:Place {
@@ -54,12 +89,11 @@ class EpisodeRetrievalService:
         )
         return [self._row_to_result(row) for row in rows]
 
-    def vector_search(self, text: str, target: str = "summary", limit: int = 10) -> list[MemoryResult]:
+    def vector_search(self, text: str, target: str = "summary", limit: int = 10) -> list[EpisodeMemoryResult]:
         index_name = self._index_name(target)
         rows = self.runner.run(
-            """
-            CALL db.index.vector.queryNodes($index_name, $limit, $embedding)
-            YIELD node, score
+            _vector_search_clause(index_name, "node", "limit")
+            + """
             RETURN node.id AS episode_id,
                    node.summary AS summary,
                    node.transcript AS transcript,
@@ -67,20 +101,18 @@ class EpisodeRetrievalService:
             ORDER BY score DESC
             """,
             {
-                "index_name": index_name,
                 "limit": limit,
                 "embedding": self.embeddings.embed(text),
             },
         )
         return [self._row_to_result(row) for row in rows]
 
-    def hybrid_search(self, query: SearchQuery) -> list[MemoryResult]:
+    def hybrid_search(self, query: SearchQuery) -> list[EpisodeMemoryResult]:
         index_name = self._index_name(query.target)
         candidate_limit = max(query.limit * 5, 25)
         rows = self.runner.run(
-            """
-            CALL db.index.vector.queryNodes($index_name, $candidate_limit, $embedding)
-            YIELD node, score
+            _vector_search_clause(index_name, "node", "candidate_limit")
+            + """
             OPTIONAL MATCH (person:Person)-[:PARTICIPATED_IN]->(node)
             OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
             WITH node, score, collect(DISTINCT person.id) AS person_ids, collect(DISTINCT place) AS places
@@ -101,7 +133,6 @@ class EpisodeRetrievalService:
             LIMIT $limit
             """,
             {
-                "index_name": index_name,
                 "candidate_limit": candidate_limit,
                 "limit": query.limit,
                 "embedding": self.embeddings.embed(query.text),
@@ -119,8 +150,8 @@ class EpisodeRetrievalService:
             return "episode_transcript_embedding"
         raise ValueError("target must be 'summary' or 'transcript'")
 
-    def _row_to_result(self, row: dict[str, object]) -> MemoryResult:
-        return MemoryResult(
+    def _row_to_result(self, row: dict[str, object]) -> EpisodeMemoryResult:
+        return EpisodeMemoryResult(
             episode_id=str(row["episode_id"]),
             summary=str(row.get("summary") or ""),
             transcript=str(row.get("transcript") or ""),
@@ -145,9 +176,8 @@ class PersonRecognitionService:
         limit: int,
     ) -> list[PersonRecognitionResult]:
         rows = self.runner.run(
-            """
-            CALL db.index.vector.queryNodes($index_name, $candidate_limit, $embedding)
-            YIELD node, score
+            _vector_search_clause(index_name, "node", "candidate_limit")
+            + """
             WHERE node.consent_status = 'consented'
             RETURN node.id AS person_id,
                    node.display_name AS display_name,
@@ -158,7 +188,6 @@ class PersonRecognitionService:
             LIMIT $limit
             """,
             {
-                "index_name": index_name,
                 "candidate_limit": max(limit * 5, 25),
                 "limit": limit,
                 "embedding": embedding,
@@ -243,24 +272,7 @@ class PersonContextRetrievalService:
                 items=items,
             )
 
-        episode_rows = self.runner.run(
-            """
-            MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(e:Episode)
-            OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
-            RETURN e.id AS item_id,
-                   'episode' AS item_type,
-                   ('Summary: ' + coalesce(e.summary, '') + '\nTranscript:\n' + coalesce(e.transcript, '')) AS text,
-                   e.start_time AS start_time,
-                   e.end_time AS end_time,
-                   place.building_code AS building_code,
-                   place.room_id AS room_id,
-                   r.role AS role,
-                   r.source AS source
-            ORDER BY e.start_time DESC
-            LIMIT $limit
-            """,
-            {"person_id": person_id, "limit": limit},
-        )
+        episode_rows = recent_episode_rows_for_person(self.runner, person_id, limit)
         event_rows = self.runner.run(
             """
             MATCH (:Person {id: $person_id})-[r]->(e:Event)
@@ -328,9 +340,8 @@ class PersonContextRetrievalService:
     ) -> list[dict[str, object]]:
         candidate_limit = max(limit * 5, 25)
         return self.runner.run(
-            """
-            CALL db.index.vector.queryNodes($index_name, $candidate_limit, $embedding)
-            YIELD node, score
+            _vector_search_clause(index_name, "node", "candidate_limit")
+            + """
             MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(node)
             OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
             RETURN node.id AS item_id,
@@ -347,7 +358,6 @@ class PersonContextRetrievalService:
             LIMIT $limit
             """,
             {
-                "index_name": index_name,
                 "candidate_limit": candidate_limit,
                 "embedding": embedding,
                 "person_id": person_id,

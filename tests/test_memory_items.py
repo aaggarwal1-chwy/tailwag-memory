@@ -3,12 +3,12 @@ import unittest
 
 from tailwag_memory.db import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
+from tailwag_memory.memory_context import PersonMemoryContextService, format_person_memory_markdown
 from tailwag_memory.memory_items import (
     EpisodeMemoryExtractionService,
     MemoryItemService,
     OpenAIMemoryExtractionProvider,
     followup_is_visible,
-    format_person_memory_markdown,
     stable_memory_id,
 )
 from tailwag_memory.models import EpisodeInput, MemoryItemInput, MemoryItemResult, PersonInput, PlaceInput
@@ -443,6 +443,35 @@ class MemoryItemMarkdownTest(unittest.TestCase):
 
     def test_empty_markdown_context_returns_empty_string(self) -> None:
         self.assertEqual(format_person_memory_markdown([], recent_episode_lines=[]), "")
+
+
+class PersonMemoryContextServiceTest(unittest.TestCase):
+    def test_markdown_for_person_uses_shared_recent_episode_rows(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [],
+                [
+                    {
+                        "episode_id": "episode_1",
+                        "item_id": "episode_1",
+                        "item_type": "episode",
+                        "summary": "Jamie mentioned Luna had a vet visit tomorrow.",
+                        "transcript": "Jamie: Luna has a vet visit tomorrow.",
+                        "text": "Summary: Jamie mentioned Luna had a vet visit tomorrow.\nTranscript:\nJamie: Luna has a vet visit tomorrow.",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                    }
+                ],
+            ]
+        )
+        service = PersonMemoryContextService(runner)
+
+        markdown = service.markdown_for_person(" person_jamie ", recent_episode_limit=2)
+
+        self.assertIn("Recent Episodes:", markdown)
+        self.assertIn("- 2026-06-16: Jamie mentioned Luna had a vet visit tomorrow.", markdown)
+        self.assertEqual(runner.queries[1].parameters, {"person_id": "person_jamie", "limit": 2})
+        self.assertIn("e.id AS episode_id", runner.queries[1].query)
+        self.assertIn("'episode' AS item_type", runner.queries[1].query)
 
 
 class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
