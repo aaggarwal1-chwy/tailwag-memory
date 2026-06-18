@@ -5,7 +5,7 @@ Neo4j-only hybrid memory service with OpenAI-backed embeddings and person contex
 ## Documentation
 
 - [Repository agent instructions](AGENTS.md)
-- [Concrete agent role cards](.agents/README.md)
+- [Project-scoped Codex custom agents](.codex/agents/)
 - [Implementation plan](docs/implementation-plan.md)
 - [Agent and subagent trigger matrix](docs/agent-trigger-matrix.md)
 - [Python package integration guide](docs/integration-guide.md)

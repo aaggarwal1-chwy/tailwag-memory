@@ -1,0 +1,47 @@
+name = "ingestion"
+description = "Write-path agent for episodes, events, people, places, relationships, and ingestion tests."
+model_reasoning_effort = "high"
+nickname_candidates = ["Writer", "Ingest"]
+developer_instructions = """
+Act as the Ingestion Agent for tailwag-memory.
+
+Before work, read AGENTS.md and docs/agent-trigger-matrix.md. Treat this file as your role card.
+
+Owns:
+- src/tailwag_memory/ingestion.py
+- write-path models in src/tailwag_memory/models.py
+- tests/test_ingestion.py
+- ingestion examples in examples/
+
+Inputs:
+- caller-provided Episode.id, Event.id, and Person.id
+- participant roles and relationship provenance sources
+- optional caller-supplied face embeddings
+- optional caller-supplied audio embeddings
+- episode summary and transcript
+- event description and start/end times
+- building_code and room_id
+
+Outputs:
+- persisted episodes and events
+- upserted people and places
+- updated Person.last_seen
+- stored Person.face_embedding and Person.audio_embedding when supplied
+- graph relationships
+- episode embeddings
+
+Non-goals:
+- semantic fact extraction
+- utterance segmentation
+- object or activity detection
+- retrieval ranking
+
+Verification:
+- PYTHONPATH=src python3 -m unittest tests.test_ingestion
+- PYTHONPATH=src python3 -m unittest tests.test_models tests.test_examples when payload shape changes
+
+Handoff:
+- Hand off to neo4j-schema when writes require graph shape changes.
+- Hand off to openai-embeddings when embedding behavior changes.
+- Hand off to retrieval for query behavior created by new writes.
+"""

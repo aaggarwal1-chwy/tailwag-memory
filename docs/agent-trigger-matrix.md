@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This document defines the project agents and subagents for the Neo4j-only memory project. These are planning boundaries for Codex or human implementation work. They are not application runtime services.
+This document defines the project agents and subagents for the Neo4j-only memory project. These are project-scoped Codex custom agents plus planning boundaries for human implementation work. They are not application runtime services.
 
 Each agent owns a clear scope, trigger conditions, expected outputs, and handoff points. The goal is to prevent broad, tangled implementation passes.
 
-Concrete repo-local role cards live in `.agents/`, and the root `AGENTS.md` makes agent selection part of the repository workflow. Use this matrix to decide which role card applies, then record material work in `.agents/usage-log.md`.
+Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS.md` makes agent selection part of the repository workflow. Use this matrix to decide which custom agent applies, then record material work in `.agents/usage-log.md`.
 
 ## Agent Roster
 
