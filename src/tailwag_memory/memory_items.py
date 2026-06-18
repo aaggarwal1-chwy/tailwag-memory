@@ -40,6 +40,52 @@ IDENTITY_OWNED_PREFIXES = (
     "job level:",
     "c level:",
 )
+TRANSIENT_TASK_MARKERS = (
+    "today",
+    "tomorrow",
+    "this morning",
+    "this afternoon",
+    "this evening",
+    "tonight",
+    "this week",
+    "right now",
+    "currently",
+    "at the moment",
+)
+TRANSIENT_TASK_TOPICS = (
+    "bug",
+    "debug",
+    "debugging",
+    "broken",
+    "failing",
+    "failure",
+    "incident",
+    "outage",
+    "blocked",
+    "stuck",
+    "deadline",
+    "todo",
+    "to do",
+    "task",
+)
+MEMORY_EXTRACTION_DEVELOPER_PROMPT = (
+    "Extract durable person memory from a transcript for a workplace social agent. "
+    "Extract only for the target person. In multi-speaker transcripts, only create memory "
+    "that is explicitly stated by the target person or explicitly about the target person. "
+    "Create a durable memory only when it is likely to make future conversation more fruitful: "
+    "stable preferences, boundaries, enduring personal context, or facts the agent can use again "
+    "without sounding stale. If the transcript does not contain that level of signal, return "
+    "update false and no ops. Allowed kinds are preference, boundary, pet, fact, and followup. "
+    "Facts must be narrow person-prompt context, not ontology triples, inferred traits, "
+    "directory attributes, current task status, short-lived problems, or general world knowledge. "
+    "Near-term conversational hooks, open tasks, transient blockers, bugs being debugged today, "
+    "meetings, travel, appointments, or anything that would be awkward to mention weeks later "
+    "must be followup, not fact or preference. Followups must include expires_at, should include "
+    "due_at, and should expire soon after the useful conversation window. Same-day bugs or tasks "
+    "should normally expire within a week. Do not create notes. Do not store org chart, title, "
+    "manager, team, cost center, or inferred personality. Return JSON only with update and ops. "
+    "Ops may be create, update, archive, or noop. Prefer updating existing memories over creating duplicates."
+)
 MEMORY_EXTRACTION_TEXT_FORMAT = {
     "format": {
         "type": "json_schema",
@@ -195,6 +241,14 @@ def _summary_has_identity_owned_prefix(summary: str) -> bool:
     return any(lowered.startswith(prefix) for prefix in IDENTITY_OWNED_PREFIXES)
 
 
+def _looks_like_transient_task_status(summary: str) -> bool:
+    """Return whether summary describes a short-lived task better stored as a follow-up."""
+    lowered = summary.strip().casefold()
+    return any(marker in lowered for marker in TRANSIENT_TASK_MARKERS) and any(
+        topic in lowered for topic in TRANSIENT_TASK_TOPICS
+    )
+
+
 def _validate_memory_fields(
     *,
     kind: str,
@@ -210,6 +264,8 @@ def _validate_memory_fields(
         raise ValueError("memory item summary is required")
     if _summary_has_identity_owned_prefix(summary):
         raise ValueError("identity-owned directory facts do not belong in memory items")
+    if kind != "followup" and _looks_like_transient_task_status(summary):
+        raise ValueError("transient task status belongs in a followup memory item")
     if status not in MEMORY_ITEM_STATUSES:
         raise ValueError(f"invalid memory item status: {status!r}")
     if observed_at and _parse_iso(observed_at) is None:
@@ -959,18 +1015,7 @@ class OpenAIMemoryExtractionProvider:
             input=[
                 {
                     "role": "developer",
-                    "content": (
-                        "Extract durable person memory from a transcript for a workplace social agent. "
-                        "Extract only for the target person. In multi-speaker transcripts, only create memory "
-                        "that is explicitly stated by the target person or explicitly about the target person. "
-                        "Allowed kinds are preference, boundary, pet, fact, and followup. "
-                        "Facts must be narrow person-prompt context, not ontology triples, inferred traits, "
-                        "directory attributes, or general world knowledge. "
-                        "Do not create notes. Do not store org chart, title, manager, team, cost center, "
-                        "or inferred personality. Followups must include expires_at and should include due_at. "
-                        "Return JSON only with update and ops. Ops may be create, update, archive, or noop. "
-                        "Prefer updating existing memories over creating duplicates."
-                    ),
+                    "content": MEMORY_EXTRACTION_DEVELOPER_PROMPT,
                 },
                 {
                     "role": "user",

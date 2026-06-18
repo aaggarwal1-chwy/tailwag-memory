@@ -106,6 +106,38 @@ class MemoryItemServiceTest(unittest.TestCase):
                 ),
             )
 
+    def test_transient_task_status_must_be_followup(self) -> None:
+        service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
+
+        with self.assertRaisesRegex(ValueError, "transient task status"):
+            service.upsert_item(
+                person_id="person_jamie",
+                item=MemoryItemInput(
+                    kind="fact",
+                    key="checkout_bug",
+                    summary="debugging the checkout bug today",
+                ),
+            )
+
+    def test_transient_task_followup_is_allowed_with_expiry(self) -> None:
+        runner = RecordingQueryRunner()
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        memory_id = service.upsert_item(
+            person_id="person_jamie",
+            item=MemoryItemInput(
+                kind="followup",
+                key="checkout_bug",
+                summary="debugging the checkout bug today",
+                due_at="2026-06-18T16:00:00+00:00",
+                expires_at="2026-06-25T00:00:00+00:00",
+            ),
+        )
+
+        self.assertEqual(runner.queries[0].parameters["kind"], "followup")
+        self.assertEqual(runner.queries[0].parameters["expires_at"], "2026-06-25T00:00:00+00:00")
+        self.assertTrue(memory_id.startswith("mem_"))
+
     def test_vector_search_scores_memory_items_within_person_scope(self) -> None:
         runner = RecordingQueryRunner(
             results=[
@@ -833,6 +865,11 @@ class OpenAIMemoryExtractionProviderTest(unittest.TestCase):
         metadata_schema = text_format["schema"]["properties"]["ops"]["items"]["properties"]["metadata"]
         self.assertEqual(metadata_schema["additionalProperties"], False)
         self.assertEqual(metadata_schema["properties"], {})
+        developer_prompt = client.responses.kwargs["input"][0]["content"]
+        self.assertIn("future conversation more fruitful", developer_prompt)
+        self.assertIn("bugs being debugged today", developer_prompt)
+        self.assertIn("must be followup, not fact or preference", developer_prompt)
+        self.assertIn("expire within a week", developer_prompt)
 
 
 if __name__ == "__main__":
