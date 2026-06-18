@@ -59,6 +59,23 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(params["building_code"], "MAIN")
         self.assertEqual(params["room_id"], "101")
         self.assertEqual(params["limit"], 5)
+        self.assertEqual(params["candidate_limit"], 25)
+
+    def test_hybrid_search_supports_one_sided_place_filters(self) -> None:
+        runner = RecordingQueryRunner()
+        service = EpisodeRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        service.hybrid_search(SearchQuery(text="chargers", building_code="MAIN", limit=10))
+        service.hybrid_search(SearchQuery(text="chargers", room_id="101", limit=10))
+
+        building_query = runner.queries[0]
+        room_query = runner.queries[1]
+        self.assertEqual(building_query.parameters["building_code"], "MAIN")
+        self.assertIsNone(building_query.parameters["room_id"])
+        self.assertIsNone(room_query.parameters["building_code"])
+        self.assertEqual(room_query.parameters["room_id"], "101")
+        self.assertIn("$room_id IS NULL OR place.room_id = $room_id", building_query.query)
+        self.assertIn("$building_code IS NULL OR place.building_code = $building_code", room_query.query)
 
     def test_retrieval_rejects_unknown_vector_target(self) -> None:
         service = EpisodeRetrievalService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
@@ -90,6 +107,9 @@ class PersonRecognitionServiceTest(unittest.TestCase):
         self.assertEqual(results[0].score, 0.98)
         self.assertEqual(runner.queries[0].parameters["index_name"], "person_face_embedding")
         self.assertEqual(runner.queries[0].parameters["limit"], 3)
+        self.assertEqual(runner.queries[0].parameters["candidate_limit"], 25)
+        self.assertIn("node.consent_status = 'consented'", runner.queries[0].query)
+        self.assertIn("LIMIT $limit", runner.queries[0].query)
 
     def test_audio_search_uses_person_audio_index(self) -> None:
         runner = RecordingQueryRunner()
@@ -99,6 +119,7 @@ class PersonRecognitionServiceTest(unittest.TestCase):
 
         self.assertEqual(runner.queries[0].parameters["index_name"], "person_audio_embedding")
         self.assertEqual(runner.queries[0].parameters["limit"], 4)
+        self.assertIn("node.consent_status = 'consented'", runner.queries[0].query)
 
 
 class EventRetrievalServiceTest(unittest.TestCase):
@@ -267,6 +288,7 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         self.assertIsNotNone(source)
         assert source is not None
         self.assertEqual([item.item_id for item in source.items], ["episode_1", "episode_2"])
+        self.assertEqual([item.score for item in source.items], [0.96, 0.88])
         self.assertEqual(runner.queries[1].parameters["index_name"], "episode_summary_embedding")
         self.assertEqual(runner.queries[2].parameters["index_name"], "episode_transcript_embedding")
         self.assertEqual(runner.queries[1].parameters["person_id"], "person_jamie")

@@ -12,7 +12,6 @@ Use this agent when the repository shape, package metadata, local setup, or fold
 ## Owns
 
 - `pyproject.toml`
-- `setup.py`
 - `docker-compose.yml`
 - `.env.example`
 - top-level package, test, docs, scripts, and example directories

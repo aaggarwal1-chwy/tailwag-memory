@@ -39,7 +39,12 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             input=text,
             dimensions=self.dimension,
         )
-        return list(self._extract_embedding(response))
+        embedding = list(self._extract_embedding(response))
+        if len(embedding) != self.dimension:
+            raise OpenAIConfigurationError(
+                f"OpenAI embedding returned {len(embedding)} dimensions; expected {self.dimension}."
+            )
+        return embedding
 
     def _openai_client(self) -> Any:
         if self._client is not None:

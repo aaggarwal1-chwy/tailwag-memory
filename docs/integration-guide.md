@@ -76,8 +76,10 @@ tailwag db wipe --yes
 Create an episode from JSON:
 
 ```bash
-tailwag episode create --file examples/episode.json
+tailwag episode create --file examples/episode.json --skip-memory-extraction
 ```
+
+Omit `--skip-memory-extraction` when you want the default high-level workflow: store the episode, then run OpenAI-backed transcript memory extraction for the linked participants.
 
 Create a later memory for an existing person by ID:
 
@@ -101,8 +103,8 @@ tailwag search --building-code SLACK --room-id C0123456789 "conversation"
 tailwag event by-place --building-code MAIN --room-id 101
 tailwag person context --person-id person_jamie
 tailwag person context --person-id person_jamie --semantic-scope "chargers"
-tailwag memory extract --episode-id episode_external_001
-tailwag memory extract --episode-id episode_external_001 --person-id person_jamie
+tailwag memory extract --episode-id episode_example_001
+tailwag memory extract --episode-id episode_example_001 --person-id person_jamie
 tailwag person search-face --embedding-file examples/face-embedding.json
 tailwag person search-audio --embedding-file examples/audio-embedding.json
 ```
@@ -223,7 +225,7 @@ When `display_name`, `email`, `consent_status`, `face_embedding`, or `audio_embe
 
 ## Poll Slack Into Episodes
 
-Slack channel polling creates normal conversation episodes. The channel is stored as a virtual place with `building_code="SLACK"` and `room_id` set to the Slack channel ID. Slack users become people with IDs such as `slack:U0123456789`; email is stored separately on `Person.email` when Slack provides it, and face and audio embeddings are left unset. Slack transcripts resolve user mentions to display names and include timestamped speaker lines. Slack episode summaries include the root speaker name to preserve attribution when a person context paragraph is synthesized later.
+Slack channel polling creates normal conversation episodes. The channel is stored as a virtual place with `building_code="SLACK"` and `room_id` set to the Slack channel ID. Slack users become people with IDs such as `slack:U0123456789`; email is stored separately on `Person.email` only when `--include-email` is used and Slack provides it, and face and audio embeddings are left unset. Slack transcripts resolve user mentions to display names and include timestamped speaker lines. Slack episode summaries include the root speaker name to preserve attribution when a person context paragraph is synthesized later.
 
 ```bash
 tailwag slack poll --channel C0123456789 --once
@@ -263,7 +265,7 @@ To inspect generated Slack memories through retrieval, search the Slack virtual 
 tailwag search --building-code SLACK --room-id C0123456789 "conversation"
 ```
 
-Public channel polling needs `channels:read`, `channels:history`, `users:read`, and `users:read.email`. Private channel polling also needs `groups:read` and `groups:history`, and the Slack app must be invited to the private channel. See [Slack ingestion guide](slack-ingestion.md) for operator details.
+Public channel polling needs `channels:read`, `channels:history`, and `users:read`. Add `users:read.email` only when using `--include-email`. Private channel polling also needs `groups:read` and `groups:history`, and the Slack app must be invited to the private channel. See [Slack ingestion guide](slack-ingestion.md) for operator details.
 
 ## Create A Place Event
 
@@ -603,7 +605,7 @@ Memory extraction supports these person-scoped memory item kinds:
 - `fact`: narrow person-prompt context that helps future conversation, such as durable personal projects or recurring personal context. Do not use it for ontology triples, inferred traits, directory attributes, or general world knowledge. `note` is intentionally not a separate kind.
 - `followup`: short-lived conversational opportunities. These require `expires_at` and are visible while the current time is between `due_at` and `expires_at`, inclusive. Missing `due_at` means immediately visible.
 
-Memory item identity is person-scoped by `(person_id, kind, key)`, so the same preference or fact extracted from live chat and Slack-derived source adapters converges into one durable memory item. This package does not add Slack polling; Slack-specific ingestion remains Source Adapter work. The extractor rejects identity-owned directory facts such as title, team, manager, cost center, business function, and leadership org. Those should stay in the calling system's identity or directory layer.
+Memory item identity is person-scoped by `(person_id, kind, key)`, so the same preference or fact extracted from live chat and Slack-derived source adapters converges into one durable memory item. Slack polling is available through the built-in Source Adapter CLI path and writes the same episode and memory item shapes as caller-supplied records. The extractor rejects identity-owned directory facts such as title, team, manager, cost center, business function, and leadership org. Those should stay in the calling system's identity or directory layer.
 
 ## Render Markdown Person Memory Context
 

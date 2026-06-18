@@ -45,7 +45,7 @@ class SlackPollResult:
 
 
 class SlackWebApiClient:
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, *, include_email: bool = False) -> None:
         try:
             from slack_sdk import WebClient
         except ImportError as exc:
@@ -53,12 +53,13 @@ class SlackWebApiClient:
 
         self._client = WebClient(token=token)
         self._user_cache: dict[str, SlackUserProfile] = {}
+        self.include_email = include_email
 
     def history(self, channel: str, oldest: str | None, limit: int) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         cursor: str | None = None
-        while len(messages) < limit:
-            page_size = min(200, limit - len(messages))
+        page_size = min(200, max(1, int(limit or 200)))
+        while True:
             params: dict[str, Any] = {
                 "channel": channel,
                 "limit": page_size,
@@ -79,8 +80,8 @@ class SlackWebApiClient:
     def replies(self, channel: str, thread_ts: str, limit: int) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         cursor: str | None = None
-        while len(messages) < limit:
-            page_size = min(200, limit - len(messages))
+        page_size = min(200, max(1, int(limit or 200)))
+        while True:
             params: dict[str, Any] = {
                 "channel": channel,
                 "ts": thread_ts,
@@ -108,7 +109,7 @@ class SlackWebApiClient:
                     or user.get("real_name")
                     or user.get("name")
                 ),
-                email=_normalize_email(profile.get("email")),
+                email=_normalize_email(profile.get("email")) if self.include_email else None,
             )
         return self._user_cache[user_id]
 

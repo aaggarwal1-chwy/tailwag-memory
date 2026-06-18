@@ -23,17 +23,18 @@ class MockOpenAIEmbeddingProviderTest(unittest.TestCase):
 
 
 class FakeEmbeddings:
-    def __init__(self) -> None:
+    def __init__(self, embedding: list[float] | None = None) -> None:
         self.calls = []
+        self.embedding = embedding or [0.1, 0.2, 0.3]
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        return {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
+        return {"data": [{"embedding": self.embedding}]}
 
 
 class FakeOpenAIClient:
-    def __init__(self) -> None:
-        self.embeddings = FakeEmbeddings()
+    def __init__(self, embedding: list[float] | None = None) -> None:
+        self.embeddings = FakeEmbeddings(embedding)
 
 
 class OpenAIEmbeddingProviderTest(unittest.TestCase):
@@ -64,6 +65,16 @@ class OpenAIEmbeddingProviderTest(unittest.TestCase):
         provider = OpenAIEmbeddingProvider(api_key=None, dimension=3)
 
         with self.assertRaisesRegex(OpenAIConfigurationError, "OPENAI_API_KEY"):
+            provider.embed("chargers")
+
+    def test_openai_embeddings_reject_wrong_dimension_response(self) -> None:
+        provider = OpenAIEmbeddingProvider(
+            api_key=None,
+            dimension=3,
+            client=FakeOpenAIClient(embedding=[0.1, 0.2]),
+        )
+
+        with self.assertRaisesRegex(OpenAIConfigurationError, "expected 3"):
             provider.embed("chargers")
 
 

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import unittest
 from unittest.mock import patch
 
@@ -127,20 +128,36 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(calls, [{"episode_id": "episode_1", "person_id": "person_jamie", "speaker_only": True}])
 
     def test_person_memory_context_returns_markdown_context(self) -> None:
+        calls = []
+
         class FakeMarkdownContext:
             def __init__(self, runner_arg, embeddings) -> None:
                 pass
 
-            def markdown_for_person(self, person_id: str, *, current_text: str | None = None) -> str:
+            def markdown_for_person(
+                self,
+                person_id: str,
+                *,
+                current_text: str | None = None,
+                now=None,
+                memory_limit: int = 12,
+                recent_episode_limit: int = 5,
+            ) -> str:
+                calls.append((person_id, current_text, now, memory_limit, recent_episode_limit))
                 return f"{person_id}: {current_text}"
 
+        now = datetime(2026, 6, 18, tzinfo=timezone.utc)
         with patch("tailwag_memory.client.PersonMarkdownContextService", FakeMarkdownContext):
             context = TailwagMemoryClient(FakeRunner(), _settings()).person_memory_context(
                 "person_jamie",
                 current_text="robot demo",
+                now=now,
+                memory_limit=4,
+                recent_episode_limit=2,
             )
 
         self.assertEqual(context, "person_jamie: robot demo")
+        self.assertEqual(calls, [("person_jamie", "robot demo", now, 4, 2)])
 
     def test_context_manager_closes_runner(self) -> None:
         runner = FakeRunner()

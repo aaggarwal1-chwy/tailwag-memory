@@ -143,7 +143,7 @@ class SlackThreadConversionTest(unittest.TestCase):
 
 
 class SlackWebApiClientTest(unittest.TestCase):
-    def test_user_profile_reads_and_normalizes_email(self) -> None:
+    def test_user_profile_omits_email_by_default(self) -> None:
         class FakeWebClient:
             def __init__(self) -> None:
                 self.calls = 0
@@ -163,13 +163,79 @@ class SlackWebApiClientTest(unittest.TestCase):
         client = SlackWebApiClient.__new__(SlackWebApiClient)
         client._client = fake_web_client
         client._user_cache = {}
+        client.include_email = False
 
         profile = client.user_profile("U1")
         cached_profile = client.user_profile("U1")
 
-        self.assertEqual(profile, SlackUserProfile(display_name="Asha", email="asha.example@example.com"))
+        self.assertEqual(profile, SlackUserProfile(display_name="Asha", email=None))
         self.assertEqual(cached_profile, profile)
         self.assertEqual(fake_web_client.calls, 1)
+
+    def test_user_profile_reads_email_when_enabled(self) -> None:
+        class FakeWebClient:
+            def users_info(self, user: str) -> dict:
+                return {
+                    "user": {
+                        "profile": {
+                            "display_name": "Asha",
+                            "email": " Asha.Example@Example.COM ",
+                        }
+                    }
+                }
+
+        client = SlackWebApiClient.__new__(SlackWebApiClient)
+        client._client = FakeWebClient()
+        client._user_cache = {}
+        client.include_email = True
+
+        self.assertEqual(client.user_profile("U1"), SlackUserProfile(display_name="Asha", email="asha.example@example.com"))
+
+    def test_history_fetches_all_pages_using_limit_as_page_size(self) -> None:
+        class FakeWebClient:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def conversations_history(self, **params) -> dict:
+                self.calls.append(params)
+                if "cursor" not in params:
+                    return {"messages": [{"ts": "2.0"}], "has_more": True, "response_metadata": {"next_cursor": "next"}}
+                return {"messages": [{"ts": "1.0"}], "has_more": False, "response_metadata": {}}
+
+        fake = FakeWebClient()
+        client = SlackWebApiClient.__new__(SlackWebApiClient)
+        client._client = fake
+        client._user_cache = {}
+        client.include_email = False
+
+        messages = client.history("C123", oldest="0.0", limit=1)
+
+        self.assertEqual([message["ts"] for message in messages], ["2.0", "1.0"])
+        self.assertEqual([call["limit"] for call in fake.calls], [1, 1])
+        self.assertEqual(fake.calls[1]["cursor"], "next")
+
+    def test_replies_fetches_all_pages_using_limit_as_page_size(self) -> None:
+        class FakeWebClient:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def conversations_replies(self, **params) -> dict:
+                self.calls.append(params)
+                if "cursor" not in params:
+                    return {"messages": [{"ts": "1.0"}], "has_more": True, "response_metadata": {"next_cursor": "next"}}
+                return {"messages": [{"ts": "2.0"}], "has_more": False, "response_metadata": {}}
+
+        fake = FakeWebClient()
+        client = SlackWebApiClient.__new__(SlackWebApiClient)
+        client._client = fake
+        client._user_cache = {}
+        client.include_email = False
+
+        messages = client.replies("C123", thread_ts="1.0", limit=1)
+
+        self.assertEqual([message["ts"] for message in messages], ["1.0", "2.0"])
+        self.assertEqual([call["limit"] for call in fake.calls], [1, 1])
+        self.assertEqual(fake.calls[1]["cursor"], "next")
 
 
 class SlackMemoryPollerTest(unittest.TestCase):

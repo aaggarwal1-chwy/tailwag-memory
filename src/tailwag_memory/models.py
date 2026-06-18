@@ -178,6 +178,7 @@ class PersonContextItem:
     room_id: str | None = None
     role: str | None = None
     source: str | None = None
+    score: float | None = None
     transcript_lines: list[PersonContextTranscriptLine] = field(default_factory=list)
 
 

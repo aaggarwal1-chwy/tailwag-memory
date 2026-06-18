@@ -54,6 +54,12 @@ Start Neo4j:
 docker compose up -d
 ```
 
+Create a local env file from the template:
+
+```bash
+cp .env.example .env
+```
+
 Open Neo4j Browser:
 
 ```text
@@ -71,6 +77,12 @@ Install the package in editable mode:
 
 ```bash
 python3 -m pip install -e .
+```
+
+Initialize the Neo4j schema before ingesting or querying data:
+
+```bash
+tailwag schema init
 ```
 
 For OpenAI-backed embeddings, person context synthesis, and transcript memory extraction, add your API key to the ignored repo-local `.env` file:

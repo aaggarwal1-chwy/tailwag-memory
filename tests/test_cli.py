@@ -88,6 +88,15 @@ class CliTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--force-backfill requires --backfill-hours", stderr.getvalue())
 
+    def test_slack_force_backfill_requires_once(self) -> None:
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                main(["slack", "poll", "--channel", "C123", "--force-backfill", "--backfill-hours", "1"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--force-backfill requires --once", stderr.getvalue())
+
     def test_slack_force_backfill_is_passed_to_poller(self) -> None:
         settings = Settings(
             neo4j_uri="bolt://example.test:7687",
@@ -258,6 +267,53 @@ class CliTest(unittest.TestCase):
         self.assertFalse(output["memory_extraction_enabled"])
         self.assertEqual(output["episode_records"][0]["memory_results"], [])
 
+    def test_slack_poll_passes_include_email_to_client(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            slack_bot_token="xoxb-test-token",
+        )
+        runner = FakeRunner(settings)
+        client_calls = []
+
+        class FakeMemoryClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
+
+        class FakePoller:
+            def __init__(self, client, episode_recorder, state_path, *, active_thread_hours: float) -> None:
+                pass
+
+            def poll_once(
+                self,
+                channel: str,
+                *,
+                backfill_hours: float | None,
+                force_backfill: bool,
+                history_limit: int,
+                reply_limit: int,
+                extract_memory: bool,
+            ) -> SlackPollResult:
+                return SlackPollResult(channel=channel, checked_threads=0, ingested_threads=0, latest_history_ts=None)
+
+        def fake_slack_client(token: str, *, include_email: bool = False):
+            client_calls.append({"token": token, "include_email": include_email})
+            return object()
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                with patch("tailwag_memory.cli.SlackWebApiClient", fake_slack_client):
+                    with patch("tailwag_memory.cli.TailwagMemoryClient", FakeMemoryClient):
+                        with patch("tailwag_memory.cli.SlackMemoryPoller", FakePoller):
+                            stdout = StringIO()
+                            with redirect_stdout(stdout):
+                                exit_code = main(["slack", "poll", "--channel", "C123", "--once", "--include-email"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(client_calls, [{"token": "xoxb-test-token", "include_email": True}])
+
     def test_person_context_prints_synthesized_paragraph(self) -> None:
         settings = Settings(
             neo4j_uri="bolt://example.test:7687",
@@ -294,6 +350,44 @@ class CliTest(unittest.TestCase):
         self.assertEqual(calls, [{"person_id": "person_jamie", "limit": 3, "semantic_scope": None}])
         self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
         self.assertTrue(runner.closed)
+
+    def test_seed_demo_uses_mock_embeddings(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=8,
+        )
+        runner = FakeRunner(settings)
+        calls = []
+
+        def fake_seed(runner_arg, embeddings) -> None:
+            calls.append((runner_arg, embeddings.embed("demo")))
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                with patch("tailwag_memory.demo.seed_demo", fake_seed):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = main(["seed", "demo"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls[0][0], runner)
+        self.assertEqual(len(calls[0][1]), 8)
+        self.assertIn("Demo data seeded.", stdout.getvalue())
+
+    def test_episode_create_help_mentions_memory_extraction(self) -> None:
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as raised:
+                main(["episode", "create", "--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        help_text = stdout.getvalue()
+        self.assertIn("--file", help_text)
+        self.assertIn("--skip-memory-extraction", help_text)
+        self.assertIn("OpenAI-backed memory", help_text)
+        self.assertIn("extraction", help_text)
 
     def test_person_context_passes_semantic_scope(self) -> None:
         settings = Settings(

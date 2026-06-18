@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
@@ -47,10 +49,21 @@ class TailwagMemoryClient:
             semantic_scope=semantic_scope,
         )
 
-    def person_memory_context(self, person_id: str, current_text: str | None = None) -> str:
+    def person_memory_context(
+        self,
+        person_id: str,
+        current_text: str | None = None,
+        *,
+        now: datetime | None = None,
+        memory_limit: int = 12,
+        recent_episode_limit: int = 5,
+    ) -> str:
         return PersonMarkdownContextService(self.runner, self._embeddings()).markdown_for_person(
             person_id,
             current_text=current_text,
+            now=now,
+            memory_limit=memory_limit,
+            recent_episode_limit=recent_episode_limit,
         )
 
     def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:

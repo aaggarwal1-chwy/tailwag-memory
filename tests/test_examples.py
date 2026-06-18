@@ -17,6 +17,8 @@ class ExamplePayloadTest(unittest.TestCase):
         self.assertEqual(len(audio), 64)
         self.assertEqual(len(person["face_embedding"]), 64)
         self.assertEqual(len(person["audio_embedding"]), 64)
+        self.assertEqual(person["face_embedding"], face)
+        self.assertEqual(person["audio_embedding"], audio)
         self.assertEqual(existing_person_episode["participants"][0], {
             "id": "person_jamie",
             "role": "speaker",

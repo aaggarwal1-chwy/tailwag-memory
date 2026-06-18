@@ -4,6 +4,8 @@ from .db import QueryRunner
 
 
 def schema_statements(embedding_dimension: int) -> list[str]:
+    if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
+        raise ValueError("embedding_dimension must be a positive integer")
     return [
         """
         CREATE CONSTRAINT person_id IF NOT EXISTS
@@ -38,16 +40,6 @@ def schema_statements(embedding_dimension: int) -> list[str]:
         f"""
         CREATE VECTOR INDEX episode_transcript_embedding IF NOT EXISTS
         FOR (e:Episode) ON (e.transcript_embedding)
-        OPTIONS {{
-          indexConfig: {{
-            `vector.dimensions`: {embedding_dimension},
-            `vector.similarity_function`: 'cosine'
-          }}
-        }}
-        """,
-        f"""
-        CREATE VECTOR INDEX memory_item_summary_embedding IF NOT EXISTS
-        FOR (m:MemoryItem) ON (m.summary_embedding)
         OPTIONS {{
           indexConfig: {{
             `vector.dimensions`: {embedding_dimension},

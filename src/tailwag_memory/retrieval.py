@@ -76,9 +76,10 @@ class EpisodeRetrievalService:
 
     def hybrid_search(self, query: SearchQuery) -> list[MemoryResult]:
         index_name = self._index_name(query.target)
+        candidate_limit = max(query.limit * 5, 25)
         rows = self.runner.run(
             """
-            CALL db.index.vector.queryNodes($index_name, $limit, $embedding)
+            CALL db.index.vector.queryNodes($index_name, $candidate_limit, $embedding)
             YIELD node, score
             OPTIONAL MATCH (person:Person)-[:PARTICIPATED_IN]->(node)
             OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
@@ -86,7 +87,11 @@ class EpisodeRetrievalService:
             WHERE ($person_id IS NULL OR $person_id IN person_ids)
               AND (
                 $building_code IS NULL
-                OR any(place IN places WHERE place.building_code = $building_code AND place.room_id = $room_id)
+                OR any(place IN places WHERE place.building_code = $building_code AND ($room_id IS NULL OR place.room_id = $room_id))
+              )
+              AND (
+                $room_id IS NULL
+                OR any(place IN places WHERE place.room_id = $room_id AND ($building_code IS NULL OR place.building_code = $building_code))
               )
             RETURN node.id AS episode_id,
                    node.summary AS summary,
@@ -97,6 +102,7 @@ class EpisodeRetrievalService:
             """,
             {
                 "index_name": index_name,
+                "candidate_limit": candidate_limit,
                 "limit": query.limit,
                 "embedding": self.embeddings.embed(query.text),
                 "person_id": query.person_id,
@@ -140,17 +146,20 @@ class PersonRecognitionService:
     ) -> list[PersonRecognitionResult]:
         rows = self.runner.run(
             """
-            CALL db.index.vector.queryNodes($index_name, $limit, $embedding)
+            CALL db.index.vector.queryNodes($index_name, $candidate_limit, $embedding)
             YIELD node, score
+            WHERE node.consent_status = 'consented'
             RETURN node.id AS person_id,
                    node.display_name AS display_name,
                    node.consent_status AS consent_status,
                    node.last_seen AS last_seen,
                    score AS score
             ORDER BY score DESC
+            LIMIT $limit
             """,
             {
                 "index_name": index_name,
+                "candidate_limit": max(limit * 5, 25),
                 "limit": limit,
                 "embedding": embedding,
             },
@@ -362,6 +371,7 @@ class PersonContextRetrievalService:
             room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
             role=str(row["role"]) if row.get("role") is not None else None,
             source=str(row["source"]) if row.get("source") is not None else None,
+            score=row.get("score") if isinstance(row.get("score"), float) else None,
             transcript_lines=self._parse_transcript_lines(text),
         )
 

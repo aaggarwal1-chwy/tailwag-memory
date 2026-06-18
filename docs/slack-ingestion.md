@@ -9,10 +9,10 @@ The adapter does not add Slack-specific Neo4j labels or relationships. It maps S
 - Slack channel: `Place` with `building_code="SLACK"` and `room_id=<channel_id>`
 - Slack thread/root message: `Episode` with ID `slack:<channel_id>:<thread_ts>`
 - Slack user: `Person` with ID `slack:<user_id>`
-- Slack user email: stored on `Person.email` when available
+- Slack user email: stored on `Person.email` only when `--include-email` is used and Slack provides it
 - Slack participation: `PARTICIPATED_IN` with `source="slack"` and `role="speaker"`
 
-Slack-created people do not include face or audio embeddings. Email is identity evidence for a future linking agent; it does not replace the Slack-owned `Person.id`.
+Slack-created people do not include face or audio embeddings. Optional email is identity evidence for a future linking agent; it does not replace the Slack-owned `Person.id`.
 
 Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. Episode summaries include the root speaker name so person context synthesis does not mistake a reply participant for the person who asked the root question. Person context synthesis also receives those timestamped transcript lines as structured evidence so relative words like `today` can be resolved against the message date.
 
@@ -29,6 +29,9 @@ Required bot scopes for public channels:
 - `channels:read`
 - `channels:history`
 - `users:read`
+
+Optional bot scope when polling with `--include-email`:
+
 - `users:read.email`
 
 Additional bot scopes for private channels:
@@ -76,6 +79,12 @@ After wiping Neo4j data, force a backfill even when `.tailwag/slack-state.json` 
 
 ```bash
 tailwag slack poll --channel C0123456789 --once --backfill-hours 10 --force-backfill
+```
+
+Use `--include-email` only when you want Slack profile email stored as optional identity evidence:
+
+```bash
+tailwag slack poll --channel C0123456789 --once --backfill-hours 2 --include-email
 ```
 
 Run continuously:

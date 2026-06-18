@@ -17,13 +17,26 @@ class Settings:
     slack_bot_token: str | None = None
 
 
+def parse_positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
 def load_settings() -> Settings:
     load_env_file()
     return Settings(
         neo4j_uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
         neo4j_user=os.getenv("NEO4J_USER", "neo4j"),
         neo4j_password=os.getenv("NEO4J_PASSWORD", "tailwag-memory"),
-        embedding_dimension=int(os.getenv("TAILWAG_EMBEDDING_DIMENSION", "64")),
+        embedding_dimension=parse_positive_int_env("TAILWAG_EMBEDDING_DIMENSION", 64),
         embedding_model=os.getenv("TAILWAG_EMBEDDING_MODEL", "text-embedding-3-small"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         synthesis_model=os.getenv("TAILWAG_SYNTHESIS_MODEL", "gpt-5.5"),

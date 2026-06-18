@@ -21,7 +21,7 @@ from .models import (
 
 
 MEMORY_ITEM_KINDS = {"preference", "boundary", "pet", "fact", "followup"}
-MEMORY_ITEM_SOURCES = {"caller", "live_chat", "slack"}
+MEMORY_ITEM_SOURCES = {"caller", "calling-system", "live_chat", "slack", "argos"}
 MEMORY_ITEM_STATUSES = {"active", "archived", "superseded"}
 PINNED_MEMORY_KEYS = {"preferred_name", "preferred_language", "nickname_for_robot", "birthday"}
 _PRESERVE = object()
@@ -184,6 +184,7 @@ def _validate_memory_fields(
     kind: str,
     status: str,
     summary: str,
+    observed_at: str,
     due_at: str,
     expires_at: str,
     require_followup_expiry: bool,
@@ -194,6 +195,8 @@ def _validate_memory_fields(
         raise ValueError("identity-owned directory facts do not belong in memory items")
     if status not in MEMORY_ITEM_STATUSES:
         raise ValueError(f"invalid memory item status: {status!r}")
+    if observed_at and _parse_iso(observed_at) is None:
+        raise ValueError("observed_at must be an ISO datetime")
     if due_at and _parse_iso(due_at) is None:
         raise ValueError("due_at must be an ISO datetime")
     if expires_at and _parse_iso(expires_at) is None:
@@ -218,6 +221,7 @@ def _validate_item(item: MemoryItemInput) -> MemoryItemInput:
         kind=kind,
         status=status,
         summary=summary,
+        observed_at=str(item.observed_at or "").strip(),
         due_at=str(item.due_at or "").strip(),
         expires_at=str(item.expires_at or "").strip(),
         require_followup_expiry=True,
@@ -327,16 +331,23 @@ class MemoryItemService:
         if existing is None:
             return False
         next_summary = str(summary or "").strip() or existing.summary
-        next_source_ref = str(source_ref).strip() if source_ref is not _PRESERVE else existing.source_ref
+        if source_ref is _PRESERVE:
+            next_source_ref = existing.source_ref
+        elif source_ref is None:
+            next_source_ref = ""
+        else:
+            next_source_ref = str(source_ref).strip()
         next_status = str(status).strip() if status is not _PRESERVE else existing.status
         next_due_at = str(due_at).strip() if due_at is not _PRESERVE else existing.due_at
         next_expires_at = str(expires_at).strip() if expires_at is not _PRESERVE else existing.expires_at
+        next_observed_at = str(observed_at or "").strip()
         next_metadata = dict(metadata) if isinstance(metadata, dict) else existing.metadata
         item = MemoryItemInput(
             kind=existing.kind,
             key=existing.key,
             summary=next_summary,
             status=next_status,
+            observed_at=next_observed_at,
             due_at=next_due_at,
             expires_at=next_expires_at,
             metadata=next_metadata,
@@ -367,7 +378,7 @@ class MemoryItemService:
                 "summary_embedding": self.embeddings.embed(next_summary),
                 "source_ref": next_source_ref,
                 "status": next_status,
-                "observed_at": str(observed_at or "").strip() or None,
+                "observed_at": next_observed_at or None,
                 "due_at": next_due_at,
                 "expires_at": next_expires_at,
                 "metadata_json": _json_dumps(next_metadata),
@@ -586,6 +597,7 @@ def _validate_update_fields(item: MemoryItemInput) -> None:
         kind=str(item.kind or "").strip(),
         status=status,
         summary=summary,
+        observed_at=str(item.observed_at or "").strip(),
         due_at=str(item.due_at or "").strip(),
         expires_at=str(item.expires_at or "").strip(),
         require_followup_expiry=False,
@@ -742,9 +754,9 @@ def _sanitize_context_line(value: str) -> str:
 
 
 def _operation_metadata(raw: dict[str, Any], *, default: dict[str, Any] | object) -> dict[str, Any] | object:
-    if "metadata" not in raw and "value" not in raw:
+    if "metadata" not in raw:
         return default
-    value = raw.get("metadata") if "metadata" in raw else raw.get("value")
+    value = raw.get("metadata")
     if not value:
         return {}
     if not isinstance(value, dict):
@@ -974,8 +986,6 @@ class EpisodeMemoryExtractionService:
                    p.display_name AS display_name,
                    p.email AS email,
                    p.consent_status AS consent_status,
-                   p.face_embedding AS face_embedding,
-                   p.audio_embedding AS audio_embedding,
                    r.role AS role,
                    r.source AS source
             ORDER BY p.id
@@ -988,8 +998,6 @@ class EpisodeMemoryExtractionService:
                 display_name=row.get("display_name"),
                 email=row.get("email"),
                 consent_status=row.get("consent_status"),
-                face_embedding=row.get("face_embedding"),
-                audio_embedding=row.get("audio_embedding"),
                 role=str(row.get("role") or "participant"),
                 source=str(row.get("source") or "caller"),
             )

@@ -8,9 +8,9 @@ import time
 from typing import Sequence
 
 from .client import TailwagMemoryClient
-from .config import load_settings
+from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
-from .embeddings import OpenAIEmbeddingProvider
+from .embeddings import MockOpenAIEmbeddingProvider, OpenAIEmbeddingProvider
 from .ingestion import EventIngestionService
 from .models import EpisodeInput, EventInput, SearchQuery
 from .retrieval import EpisodeRetrievalService, EventRetrievalService, PersonContextRetrievalService, PersonRecognitionService
@@ -19,13 +19,21 @@ from .slack_ingestion import SlackMemoryPoller, SlackWebApiClient
 from .synthesis import OpenAIPersonContextProvider, PersonContextSynthesisService
 
 
+def _embedding_provider(settings: Settings) -> OpenAIEmbeddingProvider:
+    return OpenAIEmbeddingProvider(
+        api_key=settings.openai_api_key,
+        model=settings.embedding_model,
+        dimension=settings.embedding_dimension,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="tailwag")
+    parser = argparse.ArgumentParser(prog="tailwag", description="Tailwag Neo4j memory service tools.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     schema_parser = subparsers.add_parser("schema")
     schema_subparsers = schema_parser.add_subparsers(dest="schema_command", required=True)
-    schema_subparsers.add_parser("init")
+    schema_subparsers.add_parser("init", help="create Neo4j constraints and vector indexes")
 
     db_parser = subparsers.add_parser("db")
     db_subparsers = db_parser.add_subparsers(dest="db_command", required=True)
@@ -38,73 +46,80 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     seed_parser = subparsers.add_parser("seed")
     seed_subparsers = seed_parser.add_subparsers(dest="seed_command", required=True)
-    seed_subparsers.add_parser("demo")
+    seed_subparsers.add_parser("demo", help="seed deterministic local demo data")
 
     episode_parser = subparsers.add_parser("episode")
     episode_subparsers = episode_parser.add_subparsers(dest="episode_command", required=True)
     create_parser = episode_subparsers.add_parser("create")
-    create_parser.add_argument("--file", required=True)
-    create_parser.add_argument("--skip-memory-extraction", action="store_true")
+    create_parser.add_argument("--file", required=True, help="episode JSON payload path")
+    create_parser.add_argument(
+        "--skip-memory-extraction",
+        action="store_true",
+        help="store the episode without OpenAI-backed memory extraction",
+    )
 
     event_parser = subparsers.add_parser("event")
     event_subparsers = event_parser.add_subparsers(dest="event_command", required=True)
     event_create_parser = event_subparsers.add_parser("create")
-    event_create_parser.add_argument("--file", required=True)
+    event_create_parser.add_argument("--file", required=True, help="event JSON payload path")
     event_place_parser = event_subparsers.add_parser("by-place")
-    event_place_parser.add_argument("--building-code", required=True)
-    event_place_parser.add_argument("--room-id", required=True)
-    event_place_parser.add_argument("--limit", type=int, default=10)
+    event_place_parser.add_argument("--building-code", required=True, help="place building code")
+    event_place_parser.add_argument("--room-id", required=True, help="place room id")
+    event_place_parser.add_argument("--limit", type=int, default=10, help="maximum events to print")
 
     person_parser = subparsers.add_parser("person")
     person_subparsers = person_parser.add_subparsers(dest="person_command", required=True)
     face_parser = person_subparsers.add_parser("search-face")
-    face_parser.add_argument("--embedding-file", required=True)
-    face_parser.add_argument("--limit", type=int, default=10)
+    face_parser.add_argument("--embedding-file", required=True, help="JSON file containing the face embedding vector")
+    face_parser.add_argument("--limit", type=int, default=10, help="maximum consented people to print")
     audio_parser = person_subparsers.add_parser("search-audio")
-    audio_parser.add_argument("--embedding-file", required=True)
-    audio_parser.add_argument("--limit", type=int, default=10)
+    audio_parser.add_argument("--embedding-file", required=True, help="JSON file containing the audio embedding vector")
+    audio_parser.add_argument("--limit", type=int, default=10, help="maximum consented people to print")
     context_parser = person_subparsers.add_parser("context")
-    context_parser.add_argument("--person-id", required=True)
-    context_parser.add_argument("--limit", type=int, default=10)
-    context_parser.add_argument("--semantic-scope")
+    context_parser.add_argument("--person-id", required=True, help="person id to summarize")
+    context_parser.add_argument("--limit", type=int, default=10, help="maximum context items to retrieve")
+    context_parser.add_argument("--semantic-scope", help="optional semantic focus for OpenAI-backed vector retrieval")
 
     search_parser = subparsers.add_parser("search")
-    search_parser.add_argument("text")
-    search_parser.add_argument("--person-id")
-    search_parser.add_argument("--building-code")
-    search_parser.add_argument("--room-id")
-    search_parser.add_argument("--target", choices=["summary", "transcript"], default="summary")
-    search_parser.add_argument("--limit", type=int, default=10)
+    search_parser.add_argument("text", help="query text")
+    search_parser.add_argument("--person-id", help="optional person filter")
+    search_parser.add_argument("--building-code", help="optional building filter")
+    search_parser.add_argument("--room-id", help="optional room filter")
+    search_parser.add_argument("--target", choices=["summary", "transcript"], default="summary", help="episode vector field")
+    search_parser.add_argument("--limit", type=int, default=10, help="maximum episodes to print")
 
     slack_parser = subparsers.add_parser("slack")
     slack_subparsers = slack_parser.add_subparsers(dest="slack_command", required=True)
     slack_poll_parser = slack_subparsers.add_parser("poll")
-    slack_poll_parser.add_argument("--channel", required=True)
-    slack_poll_parser.add_argument("--interval", type=float, default=60.0)
-    slack_poll_parser.add_argument("--once", action="store_true")
-    slack_poll_parser.add_argument("--state-file", default=".tailwag/slack-state.json")
-    slack_poll_parser.add_argument("--backfill-hours", type=float)
+    slack_poll_parser.add_argument("--channel", required=True, help="Slack channel id")
+    slack_poll_parser.add_argument("--interval", type=float, default=60.0, help="seconds between continuous polls")
+    slack_poll_parser.add_argument("--once", action="store_true", help="run one poll and exit")
+    slack_poll_parser.add_argument("--state-file", default=".tailwag/slack-state.json", help="poll cursor state path")
+    slack_poll_parser.add_argument("--backfill-hours", type=float, help="initial history window when no state exists")
     slack_poll_parser.add_argument(
         "--force-backfill",
         action="store_true",
         help="use --backfill-hours even when saved Slack polling state already exists",
     )
-    slack_poll_parser.add_argument("--active-thread-hours", type=float, default=24.0)
-    slack_poll_parser.add_argument("--history-limit", type=int, default=200)
-    slack_poll_parser.add_argument("--reply-limit", type=int, default=200)
-    slack_poll_parser.add_argument("--skip-memory-extraction", action="store_true")
+    slack_poll_parser.add_argument("--active-thread-hours", type=float, default=24.0, help="hours to keep checking recent roots")
+    slack_poll_parser.add_argument("--history-limit", type=int, default=200, help="Slack history page size")
+    slack_poll_parser.add_argument("--reply-limit", type=int, default=200, help="Slack replies page size")
+    slack_poll_parser.add_argument("--skip-memory-extraction", action="store_true", help="store episodes without memory extraction")
+    slack_poll_parser.add_argument("--include-email", action="store_true", help="store Slack profile email when available")
 
     memory_parser = subparsers.add_parser("memory")
     memory_subparsers = memory_parser.add_subparsers(dest="memory_command", required=True)
     memory_extract_parser = memory_subparsers.add_parser("extract")
-    memory_extract_parser.add_argument("--episode-id", required=True)
-    memory_extract_parser.add_argument("--person-id")
+    memory_extract_parser.add_argument("--episode-id", required=True, help="stored episode id")
+    memory_extract_parser.add_argument("--person-id", help="limit extraction to one linked participant")
 
     args = parser.parse_args(argv)
     if args.command == "db" and args.db_command == "wipe" and not args.yes:
         parser.error("db wipe requires --yes because it deletes all Neo4j data.")
     if args.command == "slack" and args.slack_command == "poll" and args.force_backfill and args.backfill_hours is None:
         parser.error("slack poll --force-backfill requires --backfill-hours.")
+    if args.command == "slack" and args.slack_command == "poll" and args.force_backfill and not args.once:
+        parser.error("slack poll --force-backfill requires --once so the same window is not replayed continuously.")
 
     settings = load_settings()
     runner = Neo4jQueryRunner(settings)
@@ -123,12 +138,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "seed":
             from .demo import seed_demo
 
-            embeddings = OpenAIEmbeddingProvider(
-                api_key=settings.openai_api_key,
-                model=settings.embedding_model,
-                dimension=settings.embedding_dimension,
-            )
-            seed_demo(runner, embeddings)
+            seed_demo(runner, MockOpenAIEmbeddingProvider(dimension=settings.embedding_dimension))
             print("Demo data seeded.")
             return 0
 
@@ -169,12 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "person":
             if args.person_command == "context":
-                embeddings = OpenAIEmbeddingProvider(
-                    api_key=settings.openai_api_key,
-                    model=settings.embedding_model,
-                    dimension=settings.embedding_dimension,
-                )
-                retrieval = PersonContextRetrievalService(runner, embeddings)
+                retrieval = PersonContextRetrievalService(runner, _embedding_provider(settings))
                 provider = OpenAIPersonContextProvider(
                     api_key=settings.openai_api_key,
                     model=settings.synthesis_model,
@@ -194,12 +199,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "search":
-            embeddings = OpenAIEmbeddingProvider(
-                api_key=settings.openai_api_key,
-                model=settings.embedding_model,
-                dimension=settings.embedding_dimension,
-            )
-            service = EpisodeRetrievalService(runner, embeddings)
+            service = EpisodeRetrievalService(runner, _embedding_provider(settings))
             results = service.hybrid_search(
                 SearchQuery(
                     text=args.text,
@@ -219,7 +219,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 parser.error("SLACK_BOT_TOKEN is required. Add it to .env or export it in your shell.")
 
             memory_client = TailwagMemoryClient(runner, settings)
-            client = SlackWebApiClient(settings.slack_bot_token)
+            client = SlackWebApiClient(settings.slack_bot_token, include_email=args.include_email)
             poller = SlackMemoryPoller(
                 client,
                 memory_client,

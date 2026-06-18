@@ -192,6 +192,44 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertEqual(params["expires_at"], "2026-06-27T23:59:00+00:00")
         self.assertIn("Cape Cod", params["metadata_json"])
 
+    def test_update_item_treats_source_ref_none_as_empty_string(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "memory_id": "mem_fact",
+                        "person_id": "person_jamie",
+                        "kind": "fact",
+                        "key": "robot_memory",
+                        "summary": "working on robot memory",
+                        "source": "live_chat",
+                        "source_ref": "segment_1",
+                        "status": "active",
+                    }
+                ],
+                [{"memory_id": "mem_fact"}],
+            ]
+        )
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        self.assertTrue(service.update_item("mem_fact", source_ref=None))
+
+        self.assertEqual(runner.queries[1].parameters["source_ref"], "")
+
+    def test_rejects_invalid_observed_at(self) -> None:
+        service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
+
+        with self.assertRaisesRegex(ValueError, "observed_at"):
+            service.upsert_item(
+                person_id="person_jamie",
+                item=MemoryItemInput(
+                    kind="fact",
+                    key="robot_memory",
+                    summary="working on robot memory",
+                    observed_at="not-a-time",
+                ),
+            )
+
     def test_update_item_rejects_clearing_active_followup_expiry(self) -> None:
         runner = RecordingQueryRunner(
             results=[
@@ -585,7 +623,7 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         self.assertTrue(memory_queries)
         memory_params = memory_queries[-1].parameters
         self.assertEqual(memory_params["episode_id"], "episode_segment_1")
-        self.assertEqual(memory_params["source"], "caller")
+        self.assertEqual(memory_params["source"], "calling-system")
         self.assertEqual(memory_params["source_ref"], "episode_segment_1")
         self.assertEqual(memory_params["observed_at"], "2026-06-16T10:00:00+00:00")
 
@@ -692,6 +730,46 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         self.assertEqual(person_result.archived_memory_ids, ["mem_existing"])
         self.assertEqual(len(person_result.skipped_ops), 3)
         self.assertIn("unknown_memory_id", {item["reason"] for item in person_result.skipped_ops})
+
+    def test_metadata_value_alias_is_not_accepted(self) -> None:
+        class FakeExtractionProvider:
+            def extract(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "create",
+                            "kind": "fact",
+                            "key": "robot_memory",
+                            "summary": "working on robot memory",
+                            "value": {"legacy": True},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(results=[[], [], []])
+        service = EpisodeMemoryExtractionService(
+            runner,
+            MockOpenAIEmbeddingProvider(dimension=8),
+            FakeExtractionProvider(),
+        )
+
+        service.extract_for_episode(
+            EpisodeInput(
+                id="episode_segment_3",
+                episode_type="conversation",
+                start_time="2026-06-17T10:00:00+00:00",
+                end_time=None,
+                summary="Jamie works on robot memory.",
+                transcript="Jamie: I work on robot memory.",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+            )
+        )
+
+        memory_queries = [query for query in runner.queries if "MERGE (m:MemoryItem" in query.query]
+        self.assertEqual(memory_queries[-1].parameters["metadata_json"], "{}")
 
 
 class OpenAIMemoryExtractionProviderTest(unittest.TestCase):

@@ -176,7 +176,7 @@ Notes:
 Notes:
 
 - Memory items are person-scoped durable or short-lived prompt memories extracted from transcripts.
-- Durable memory identity is deterministic by `(person_id, kind, key)`, so the same memory extracted from live chat and Slack converges into one item; `source` and `source_ref` remain provenance fields, not identity fields.
+- Durable memory identity is deterministic by the service-generated `MemoryItem.id`, derived from `(person_id, kind, key)`, so the same memory extracted from live chat and Slack converges into one item; `source` and `source_ref` remain provenance fields, not identity fields.
 - Allowed kinds are `preference`, `boundary`, `pet`, `fact`, and `followup`.
 - `note` is intentionally excluded; durable ongoing person-prompt context belongs in `fact`.
 - `fact` must stay narrow: no ontology triples, inferred traits, directory attributes, or general world knowledge.
@@ -245,7 +245,6 @@ Create vector indexes for:
 
 - `Episode.summary_embedding`
 - `Episode.transcript_embedding`
-- `MemoryItem.summary_embedding`
 - `Person.face_embedding`
 - `Person.audio_embedding`
 
@@ -274,38 +273,55 @@ Requirements:
 - no network calls in tests
 - OpenAI-backed runtime embeddings without changing ingestion or retrieval service APIs
 
-## Proposed Project Layout
+## Project Layout
 
 ```text
 tailwag-memory/
   README.md
+  AGENTS.md
   docker-compose.yml
   .env.example
   pyproject.toml
   docs/
     implementation-plan.md
     agent-trigger-matrix.md
+    integration-guide.md
+    slack-ingestion.md
   src/tailwag_memory/
     __init__.py
+    client.py
     config.py
     db.py
     schema.py
     models.py
     embeddings.py
     ingestion.py
+    memory_items.py
     retrieval.py
+    slack_ingestion.py
+    synthesis.py
     cli.py
   scripts/
-    reset_neo4j.py
     seed_demo.py
   examples/
     episode.json
+    existing-person-episode.json
+    event.json
+    face-embedding.json
+    audio-embedding.json
   tests/
+    test_cli.py
+    test_client.py
+    test_config.py
     test_schema.py
     test_models.py
     test_embeddings.py
     test_ingestion.py
     test_retrieval.py
+    test_memory_items.py
+    test_slack_ingestion.py
+    test_synthesis.py
+    test_examples.py
 ```
 
 ## Implementation Phases
@@ -380,11 +396,11 @@ Target command shape:
 ```bash
 tailwag schema init
 tailwag seed demo
-tailwag episode create --file examples/episode.json
 tailwag episode create --file examples/episode.json --skip-memory-extraction
+tailwag episode create --file examples/episode.json
 tailwag event create --file examples/event.json
-tailwag memory extract --episode-id episode_external_001
-tailwag memory extract --episode-id episode_external_001 --person-id person_jamie
+tailwag memory extract --episode-id episode_example_001
+tailwag memory extract --episode-id episode_example_001 --person-id person_jamie
 tailwag search "what did Jamie ask about?"
 tailwag search --person-id person_jamie "charger"
 tailwag search --building-code MAIN --room-id 101 "projector"

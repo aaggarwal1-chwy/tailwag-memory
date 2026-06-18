@@ -23,7 +23,7 @@ Use this agent for Neo4j constraints, labels, vector indexes, and schema initial
 ## Outputs
 
 - Constraints for `Person.id`, `Episode.id`, `Event.id`, `MemoryItem.id`, and `(Place.building_code, Place.room_id)`
-- Vector indexes for `Episode.summary_embedding`, `Episode.transcript_embedding`, `MemoryItem.summary_embedding`, `Person.face_embedding`, and `Person.audio_embedding`
+- Vector indexes for `Episode.summary_embedding`, `Episode.transcript_embedding`, `Person.face_embedding`, and `Person.audio_embedding`
 - Schema initialization command support
 
 ## Non-goals

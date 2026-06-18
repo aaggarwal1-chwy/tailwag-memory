@@ -13,7 +13,6 @@ Use this agent when sample data, repeatable local state, or demo reset behavior 
 
 - `src/tailwag_memory/demo.py`
 - `scripts/seed_demo.py`
-- `scripts/reset_neo4j.py`
 - demo payloads in `examples/`
 - demo instructions in docs
 

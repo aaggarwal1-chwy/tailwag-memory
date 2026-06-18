@@ -15,7 +15,7 @@ Use this checker agent when public package usage, dataclass shape, JSON payload 
 - public dataclasses in `src/tailwag_memory/models.py`
 - consumer-facing services in `src/tailwag_memory/ingestion.py` and `src/tailwag_memory/retrieval.py`
 - example JSON compatibility in `examples/`
-- package install metadata in `pyproject.toml` and `setup.py`
+- package install metadata in `pyproject.toml`
 
 ## Inputs
 

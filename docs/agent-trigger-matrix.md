@@ -35,7 +35,7 @@ Concrete repo-local role cards live in `.agents/`, and the root `AGENTS.md` make
 | Trigger | Agent | Subagents To Consider | Scope Boundary | Handoff |
 | --- | --- | --- | --- | --- |
 | Repo lacks package structure, local run instructions, or environment examples | Project Scaffold Agent | Documentation Agent | Create scaffolding only; do not implement domain logic | Handoff to Schema Agent and CLI Mockup Agent |
-| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, `HAS_MEMORY`, `SUPPORTED_BY`, episode vector indexes, memory item vector indexes, and person biometric vector indexes | Handoff to Ingestion Agent once schema is available |
+| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, `HAS_MEMORY`, `SUPPORTED_BY`, episode vector indexes, and person biometric vector indexes | Handoff to Ingestion Agent once schema is available |
 | Need embedding generation or embedding configuration | OpenAI Embeddings Agent | Test Agent, Code Refactor Agent | Runtime embeddings use OpenAI; tests use deterministic mocks and no network calls | Handoff to Ingestion Agent and Retrieval Agent |
 | Need to create or update episode memory records or place events | Ingestion Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Test Agent | Write path only; no retrieval ranking logic | Handoff to Retrieval Agent for query behavior |
 | Need durable transcript-derived memory items, memory item extraction, memory item context formatting, or memory item vector retrieval | Memory Item Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Retrieval Agent, Integration Contract Agent, Test Agent, Scope Guard Agent | Memory item semantics only; do not expand into a broad ontology, triple store, or open-ended semantic fact graph | Handoff to Retrieval Agent for context selection and Integration Contract Agent for public APIs |
@@ -90,7 +90,7 @@ Inputs:
 Outputs:
 
 - constraints for `Person.id`, `Episode.id`, `Event.id`, `MemoryItem.id`, and `(Place.building_code, Place.room_id)`
-- vector indexes for `Episode.summary_embedding`, `Episode.transcript_embedding`, `MemoryItem.summary_embedding`, `Person.face_embedding`, and `Person.audio_embedding`
+- vector indexes for `Episode.summary_embedding`, `Episode.transcript_embedding`, `Person.face_embedding`, and `Person.audio_embedding`
 - schema initialization command support
 
 Non-goals:
