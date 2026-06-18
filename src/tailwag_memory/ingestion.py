@@ -6,6 +6,7 @@ from .models import EpisodeInput, EventInput, utc_now_iso
 
 
 def _person_upsert_cypher(person_variable: str, id_property: str) -> str:
+    """Return Cypher for consent-aware person upserts."""
     return f"""
                 MERGE (p:Person {{id: {person_variable}.{id_property}}})
                 SET p.display_name = coalesce({person_variable}.display_name, p.display_name),
@@ -28,11 +29,15 @@ def _person_upsert_cypher(person_variable: str, id_property: str) -> str:
 
 
 class EpisodeIngestionService:
+    """Persist episodes, places, participants, and embeddings."""
+
     def __init__(self, runner: QueryRunner, embeddings: EmbeddingProvider) -> None:
+        """Store dependencies for episode ingestion."""
         self.runner = runner
         self.embeddings = embeddings
 
     def ingest(self, episode: EpisodeInput) -> str:
+        """Write an episode graph snapshot and return its id."""
         written_at = utc_now_iso()
         summary_embedding = self.embeddings.embed(episode.summary)
         transcript_embedding = self.embeddings.embed(episode.transcript)
@@ -106,10 +111,14 @@ class EpisodeIngestionService:
 
 
 class EventIngestionService:
+    """Persist events, places, and accepted attendee links."""
+
     def __init__(self, runner: QueryRunner) -> None:
+        """Store dependencies for event ingestion."""
         self.runner = runner
 
     def ingest(self, event: EventInput) -> str:
+        """Write an event graph snapshot and return its id."""
         written_at = utc_now_iso()
         attendees = [
             {

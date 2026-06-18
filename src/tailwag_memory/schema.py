@@ -4,6 +4,8 @@ from .db import QueryRunner
 
 
 def schema_statements(embedding_dimension: int) -> list[str]:
+    """Return idempotent Neo4j schema statements for the configured dimension."""
+
     if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
         raise ValueError("embedding_dimension must be a positive integer")
     return [
@@ -81,5 +83,7 @@ def schema_statements(embedding_dimension: int) -> list[str]:
 
 
 def initialize_schema(runner: QueryRunner, embedding_dimension: int) -> None:
+    """Run all schema statements against the supplied query runner."""
+
     for statement in schema_statements(embedding_dimension):
         runner.run(statement)

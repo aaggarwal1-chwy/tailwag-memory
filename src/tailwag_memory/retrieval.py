@@ -26,6 +26,7 @@ _VECTOR_INDEX_LABELS = {
 
 
 def _vector_search_clause(index_name: str, variable: str, limit_parameter: str) -> str:
+    """Return a Neo4j vector search clause for a known index."""
     label = _VECTOR_INDEX_LABELS.get(index_name)
     if label is None:
         raise ValueError(f"unsupported vector index: {index_name}")
@@ -40,6 +41,7 @@ def _vector_search_clause(index_name: str, variable: str, limit_parameter: str) 
 
 
 def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: int) -> list[dict[str, object]]:
+    """Fetch recent episode rows linked to a person."""
     return runner.run(
         """
             MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(e:Episode)
@@ -64,15 +66,20 @@ def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: i
 
 
 class EpisodeRetrievalService:
+    """Read episode memories by person, place, or semantic match."""
+
     def __init__(self, runner: QueryRunner, embeddings: EmbeddingProvider) -> None:
+        """Store dependencies for episode retrieval."""
         self.runner = runner
         self.embeddings = embeddings
 
     def by_person(self, person_id: str, limit: int = 10) -> list[EpisodeMemoryResult]:
+        """Return recent episode memories for a person."""
         rows = recent_episode_rows_for_person(self.runner, person_id, limit)
         return [self._row_to_result(row) for row in rows]
 
     def by_place(self, building_code: str, room_id: str, limit: int = 10) -> list[EpisodeMemoryResult]:
+        """Return recent episode memories for a place."""
         rows = self.runner.run(
             """
             MATCH (e:Episode)-[:OCCURRED_AT]->(:Place {
@@ -90,6 +97,7 @@ class EpisodeRetrievalService:
         return [self._row_to_result(row) for row in rows]
 
     def vector_search(self, text: str, target: str = "summary", limit: int = 10) -> list[EpisodeMemoryResult]:
+        """Return episode memories ranked by vector similarity."""
         index_name = self._index_name(target)
         rows = self.runner.run(
             _vector_search_clause(index_name, "node", "limit")
@@ -108,6 +116,7 @@ class EpisodeRetrievalService:
         return [self._row_to_result(row) for row in rows]
 
     def hybrid_search(self, query: SearchQuery) -> list[EpisodeMemoryResult]:
+        """Return vector-ranked episodes filtered by query constraints."""
         index_name = self._index_name(query.target)
         candidate_limit = max(query.limit * 5, 25)
         rows = self.runner.run(
@@ -144,6 +153,7 @@ class EpisodeRetrievalService:
         return [self._row_to_result(row) for row in rows]
 
     def _index_name(self, target: str) -> str:
+        """Map an episode vector target to its index name."""
         if target == "summary":
             return "episode_summary_embedding"
         if target == "transcript":
@@ -151,6 +161,7 @@ class EpisodeRetrievalService:
         raise ValueError("target must be 'summary' or 'transcript'")
 
     def _row_to_result(self, row: dict[str, object]) -> EpisodeMemoryResult:
+        """Convert a Neo4j episode row into a result model."""
         return EpisodeMemoryResult(
             episode_id=str(row["episode_id"]),
             summary=str(row.get("summary") or ""),
@@ -160,13 +171,18 @@ class EpisodeRetrievalService:
 
 
 class PersonRecognitionService:
+    """Read consented people by biometric vector similarity."""
+
     def __init__(self, runner: QueryRunner) -> None:
+        """Store dependencies for person recognition."""
         self.runner = runner
 
     def by_face_embedding(self, embedding: list[float], limit: int = 10) -> list[PersonRecognitionResult]:
+        """Return consented people ranked by face embedding."""
         return self._vector_search("person_face_embedding", embedding, limit)
 
     def by_audio_embedding(self, embedding: list[float], limit: int = 10) -> list[PersonRecognitionResult]:
+        """Return consented people ranked by audio embedding."""
         return self._vector_search("person_audio_embedding", embedding, limit)
 
     def _vector_search(
@@ -175,6 +191,7 @@ class PersonRecognitionService:
         embedding: list[float],
         limit: int,
     ) -> list[PersonRecognitionResult]:
+        """Run a consent-filtered person vector search."""
         rows = self.runner.run(
             _vector_search_clause(index_name, "node", "candidate_limit")
             + """
@@ -196,6 +213,7 @@ class PersonRecognitionService:
         return [self._row_to_result(row) for row in rows]
 
     def _row_to_result(self, row: dict[str, object]) -> PersonRecognitionResult:
+        """Convert a Neo4j person row into a recognition result."""
         return PersonRecognitionResult(
             person_id=str(row["person_id"]),
             display_name=str(row.get("display_name") or ""),
@@ -206,10 +224,14 @@ class PersonRecognitionService:
 
 
 class EventRetrievalService:
+    """Read event memories by place."""
+
     def __init__(self, runner: QueryRunner) -> None:
+        """Store dependencies for event retrieval."""
         self.runner = runner
 
     def by_place(self, building_code: str, room_id: str, limit: int = 10) -> list[EventResult]:
+        """Return recent events for a place."""
         rows = self.runner.run(
             """
             MATCH (e:Event)-[:OCCURRED_AT]->(p:Place {
@@ -230,6 +252,7 @@ class EventRetrievalService:
         return [self._row_to_result(row) for row in rows]
 
     def _row_to_result(self, row: dict[str, object]) -> EventResult:
+        """Convert a Neo4j event row into a result model."""
         return EventResult(
             event_id=str(row["event_id"]),
             description=str(row.get("description") or ""),
@@ -241,7 +264,10 @@ class EventRetrievalService:
 
 
 class PersonContextRetrievalService:
+    """Read person context from episodes and events."""
+
     def __init__(self, runner: QueryRunner, embeddings: EmbeddingProvider | None = None) -> None:
+        """Store dependencies for person context retrieval."""
         self.runner = runner
         self.embeddings = embeddings
 
@@ -251,6 +277,7 @@ class PersonContextRetrievalService:
         limit: int = 10,
         semantic_scope: str | None = None,
     ) -> PersonContextSource | None:
+        """Return context source data for a person when present."""
         person_rows = self.runner.run(
             """
             MATCH (p:Person {id: $person_id})
@@ -303,12 +330,14 @@ class PersonContextRetrievalService:
         )
 
     def _normalize_semantic_scope(self, semantic_scope: str | None) -> str | None:
+        """Normalize an optional semantic scope string."""
         if semantic_scope is None:
             return None
         scope = semantic_scope.strip()
         return scope or None
 
     def _scoped_items_for_person(self, person_id: str, semantic_scope: str, limit: int) -> list[PersonContextItem]:
+        """Return semantically scoped context items for a person."""
         if self.embeddings is None:
             raise ValueError("semantic_scope requires an embedding provider")
 
@@ -338,6 +367,7 @@ class PersonContextRetrievalService:
         embedding: list[float],
         limit: int,
     ) -> list[dict[str, object]]:
+        """Fetch scoped episode rows from one vector index."""
         candidate_limit = max(limit * 5, 25)
         return self.runner.run(
             _vector_search_clause(index_name, "node", "candidate_limit")
@@ -366,10 +396,12 @@ class PersonContextRetrievalService:
         )
 
     def _row_score(self, row: dict[str, object]) -> float:
+        """Return a numeric score for a context row."""
         score = row.get("score")
         return score if isinstance(score, float) else 0.0
 
     def _row_to_context_item(self, row: dict[str, object]) -> PersonContextItem:
+        """Convert a Neo4j row into a person context item."""
         text = str(row.get("text") or "")
         return PersonContextItem(
             item_id=str(row["item_id"]),
@@ -386,6 +418,7 @@ class PersonContextRetrievalService:
         )
 
     def _parse_transcript_lines(self, text: str) -> list[PersonContextTranscriptLine]:
+        """Parse timestamped transcript lines from context text."""
         lines: list[PersonContextTranscriptLine] = []
         for raw_line in text.splitlines():
             match = _TRANSCRIPT_LINE_RE.match(raw_line.strip())

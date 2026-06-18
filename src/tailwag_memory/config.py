@@ -7,6 +7,8 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Settings:
+    """Runtime configuration loaded from environment values."""
+
     neo4j_uri: str
     neo4j_user: str
     neo4j_password: str
@@ -18,6 +20,8 @@ class Settings:
 
 
 def parse_positive_int_env(name: str, default: int) -> int:
+    """Read a positive integer environment variable with a default."""
+
     raw = os.getenv(name)
     if raw is None:
         return default
@@ -31,6 +35,8 @@ def parse_positive_int_env(name: str, default: int) -> int:
 
 
 def load_settings() -> Settings:
+    """Load runtime settings from .env and process environment."""
+
     load_env_file()
     return Settings(
         neo4j_uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
@@ -45,6 +51,8 @@ def load_settings() -> Settings:
 
 
 def load_env_file(path: Path = Path(".env")) -> None:
+    """Populate unset environment variables from a simple .env file."""
+
     if not path.exists():
         return
 

@@ -95,6 +95,8 @@ MEMORY_EXTRACTION_TEXT_FORMAT = {
 
 
 class MemoryExtractionProvider(Protocol):
+    """Protocol for transcript-to-memory extraction providers."""
+
     def extract(
         self,
         *,
@@ -104,30 +106,36 @@ class MemoryExtractionProvider(Protocol):
         existing_memories: list[MemoryItemResult],
         current_time: str,
     ) -> dict[str, Any]:
+        """Return memory operations for one person transcript."""
         ...
 
 
 def normalize_memory_key(value: Any) -> str:
+    """Normalize a memory key for deterministic storage."""
     rendered = str(value or "").strip().casefold()
     normalized = "".join(char if char.isalnum() else "_" for char in rendered)
     return "_".join(part for part in normalized.split("_") if part)
 
 
 def normalize_memory_source(value: Any) -> str:
+    """Normalize a memory item source to an allowed value."""
     source = str(value or "").strip()
     return source if source in MEMORY_ITEM_SOURCES else "caller"
 
 
 def stable_memory_id(*, person_id: str, kind: str, key: str) -> str:
+    """Return the deterministic memory id for a person item."""
     seed = "|".join([person_id, kind, key]).encode("utf-8")
     return f"mem_{hashlib.sha256(seed).hexdigest()[:32]}"
 
 
 def _json_dumps(value: Any) -> str:
+    """Serialize metadata as deterministic JSON."""
     return json.dumps(value if isinstance(value, dict) else {}, ensure_ascii=True, sort_keys=True)
 
 
 def _json_loads(value: Any) -> dict[str, Any]:
+    """Deserialize metadata JSON into a dictionary."""
     if not isinstance(value, str) or not value.strip():
         return {}
     try:
@@ -138,6 +146,7 @@ def _json_loads(value: Any) -> dict[str, Any]:
 
 
 def _parse_iso(value: str | None) -> datetime | None:
+    """Parse an optional ISO datetime value."""
     text = str(value or "").strip()
     if not text:
         return None
@@ -153,6 +162,7 @@ def _parse_iso(value: str | None) -> datetime | None:
 
 
 def _now(value: datetime | None = None) -> datetime:
+    """Return a timezone-aware reference datetime."""
     ref = value or datetime.now(timezone.utc)
     if ref.tzinfo is None:
         return ref.replace(tzinfo=timezone.utc)
@@ -160,6 +170,7 @@ def _now(value: datetime | None = None) -> datetime:
 
 
 def followup_is_visible(item: MemoryItemResult, *, now: datetime | None = None) -> bool:
+    """Return whether an active follow-up should be shown."""
     if item.kind != "followup" or item.status != "active":
         return False
     expires = _parse_iso(item.expires_at)
@@ -173,11 +184,13 @@ def followup_is_visible(item: MemoryItemResult, *, now: datetime | None = None) 
 
 
 def _is_expired(item: MemoryItemResult, *, now: datetime | None = None) -> bool:
+    """Return whether a memory item has expired."""
     expires = _parse_iso(item.expires_at)
     return expires is not None and _now(now) > expires
 
 
 def _summary_has_identity_owned_prefix(summary: str) -> bool:
+    """Return whether a summary starts with directory-owned data."""
     lowered = summary.strip().casefold()
     return any(lowered.startswith(prefix) for prefix in IDENTITY_OWNED_PREFIXES)
 
@@ -192,6 +205,7 @@ def _validate_memory_fields(
     expires_at: str,
     require_followup_expiry: bool,
 ) -> None:
+    """Validate shared memory item field rules."""
     if not summary:
         raise ValueError("memory item summary is required")
     if _summary_has_identity_owned_prefix(summary):
@@ -209,6 +223,7 @@ def _validate_memory_fields(
 
 
 def _validate_item(item: MemoryItemInput) -> MemoryItemInput:
+    """Validate and normalize a memory item input."""
     kind = str(item.kind or "").strip()
     source = str(item.source or "").strip()
     status = str(item.status or "").strip()
@@ -245,7 +260,10 @@ def _validate_item(item: MemoryItemInput) -> MemoryItemInput:
 
 
 class MemoryItemService:
+    """Persist and retrieve durable person memory items."""
+
     def __init__(self, runner: QueryRunner, embeddings: EmbeddingProvider) -> None:
+        """Store dependencies for memory item operations."""
         self.runner = runner
         self.embeddings = embeddings
 
@@ -256,6 +274,7 @@ class MemoryItemService:
         item: MemoryItemInput,
         supported_by_episode_id: str | None = None,
     ) -> str:
+        """Create or replace one deterministic memory item."""
         rendered_person_id = str(person_id or "").strip()
         if not rendered_person_id:
             raise ValueError("person_id is required")
@@ -327,6 +346,7 @@ class MemoryItemService:
         metadata: dict[str, Any] | object = _PRESERVE,
         supported_by_episode_id: str | None = None,
     ) -> bool:
+        """Update an existing memory item when it exists."""
         rendered = str(memory_id or "").strip()
         if not rendered:
             return False
@@ -392,6 +412,7 @@ class MemoryItemService:
         return bool(rows)
 
     def archive_item(self, memory_id: str) -> bool:
+        """Archive a memory item by id."""
         rendered = str(memory_id or "").strip()
         if not rendered:
             return False
@@ -407,6 +428,7 @@ class MemoryItemService:
         return bool(rows)
 
     def get_item(self, memory_id: str) -> MemoryItemResult | None:
+        """Return one memory item by id when present."""
         rows = self.runner.run(
             """
             MATCH (p:Person)-[:HAS_MEMORY]->(m:MemoryItem {id: $memory_id})
@@ -439,6 +461,7 @@ class MemoryItemService:
         source: str = "",
         limit: int = 100,
     ) -> list[MemoryItemResult]:
+        """Return memory items matching basic filters."""
         rows = self.runner.run(
             """
             MATCH (:Person {id: $person_id})-[:HAS_MEMORY]->(m:MemoryItem)
@@ -481,6 +504,7 @@ class MemoryItemService:
         now: datetime | None = None,
         limit: int = 100,
     ) -> list[MemoryItemResult]:
+        """Return active, unexpired memory items."""
         requested_limit = max(1, int(limit or 100))
         items = self.list_items(
             person_id=person_id,
@@ -499,6 +523,7 @@ class MemoryItemService:
         limit: int = 10,
         now: datetime | None = None,
     ) -> list[MemoryItemResult]:
+        """Return active memory items ranked by summary similarity."""
         rows = self.runner.run(
             """
             MATCH (:Person {id: $person_id})-[:HAS_MEMORY]->(node:MemoryItem)
@@ -538,11 +563,13 @@ class MemoryItemService:
         transcript: str,
         limit: int = 12,
     ) -> list[MemoryItemResult]:
+        """Return existing memories relevant to a transcript."""
         active = self.list_active_items(person_id=person_id, limit=100)
         selected: list[MemoryItemResult] = []
         seen: set[str] = set()
 
         def add(item: MemoryItemResult) -> None:
+            """Append an unseen candidate until the limit is reached."""
             if item.memory_id in seen or len(selected) >= max(1, limit):
                 return
             selected.append(item)
@@ -574,6 +601,7 @@ class MemoryItemService:
         return selected
 
     def _row_to_item(self, row: dict[str, Any]) -> MemoryItemResult:
+        """Convert a Neo4j row into a memory item result."""
         return MemoryItemResult(
             memory_id=str(row["memory_id"]),
             person_id=str(row.get("person_id") or ""),
@@ -594,6 +622,7 @@ class MemoryItemService:
 
 
 def _validate_update_fields(item: MemoryItemInput) -> None:
+    """Validate fields allowed during memory item updates."""
     summary = str(item.summary or "").strip()
     status = str(item.status or "").strip()
     _validate_memory_fields(
@@ -610,11 +639,13 @@ def _validate_update_fields(item: MemoryItemInput) -> None:
 
 
 def _tokenize(text: str) -> set[str]:
+    """Return coarse tokens for transcript-memory matching."""
     normalized = "".join(char.casefold() if char.isalnum() else " " for char in str(text or ""))
     return {part for part in normalized.split() if len(part) >= 3}
 
 
 def _operation_metadata(raw: dict[str, Any], *, default: dict[str, Any] | object) -> dict[str, Any] | object:
+    """Extract and validate metadata from an operation payload."""
     if "metadata" not in raw:
         return default
     value = raw.get("metadata")
@@ -637,6 +668,7 @@ def _extract_memory_for_participant(
     participant: PersonInput,
     source_ref: str | None = None,
 ) -> PersonMemoryExtractionResult:
+    """Extract and apply memory operations for one participant."""
     memory_service = MemoryItemService(runner, embeddings)
     candidates = memory_service.candidate_items(
         person_id=participant.id,
@@ -680,6 +712,7 @@ def _apply_memory_operations(
     episode_id: str,
     candidates: list[MemoryItemResult],
 ) -> dict[str, list[Any]]:
+    """Apply extraction provider operations to memory items."""
     applied: dict[str, list[Any]] = {"created": [], "updated": [], "archived": [], "skipped": []}
     if not isinstance(operations, dict) or not operations.get("update"):
         return applied
@@ -753,12 +786,15 @@ def _apply_memory_operations(
 
 
 class EpisodeMemoryExtractionService:
+    """Coordinate memory extraction for episodes."""
+
     def __init__(
         self,
         runner: QueryRunner,
         embeddings: EmbeddingProvider,
         extraction_provider: MemoryExtractionProvider,
     ) -> None:
+        """Store dependencies for episode memory extraction."""
         self.runner = runner
         self.embeddings = embeddings
         self.extraction_provider = extraction_provider
@@ -770,6 +806,7 @@ class EpisodeMemoryExtractionService:
         person_id: str | None = None,
         speaker_only: bool = False,
     ) -> EpisodeMemoryExtractionResult:
+        """Extract memory for selected participants in an episode."""
         participants = self._target_participants(episode, person_id=person_id, speaker_only=speaker_only)
         results: list[PersonMemoryExtractionResult] = []
         errors: list[dict[str, str]] = []
@@ -800,10 +837,12 @@ class EpisodeMemoryExtractionService:
         person_id: str | None = None,
         speaker_only: bool = True,
     ) -> EpisodeMemoryExtractionResult:
+        """Load an episode by id and extract participant memories."""
         episode = self.load_episode(episode_id)
         return self.extract_for_episode(episode, person_id=person_id, speaker_only=speaker_only if person_id is None else False)
 
     def load_episode(self, episode_id: str) -> EpisodeInput:
+        """Load an episode input model from stored graph data."""
         rendered = str(episode_id or "").strip()
         if not rendered:
             raise ValueError("episode_id is required")
@@ -843,6 +882,7 @@ class EpisodeMemoryExtractionService:
         )
 
     def _load_participants(self, episode_id: str) -> list[PersonInput]:
+        """Load participants linked to an episode."""
         rows = self.runner.run(
             """
             MATCH (p:Person)-[r:PARTICIPATED_IN]->(:Episode {id: $episode_id})
@@ -876,6 +916,7 @@ class EpisodeMemoryExtractionService:
         person_id: str | None,
         speaker_only: bool,
     ) -> list[PersonInput]:
+        """Select participants eligible for memory extraction."""
         if person_id is not None:
             rendered = str(person_id or "").strip()
             matches = [participant for participant in episode.participants if participant.id == rendered]
@@ -889,12 +930,15 @@ class EpisodeMemoryExtractionService:
 
 
 class OpenAIMemoryExtractionProvider:
+    """Extract memory operations with the OpenAI Responses API."""
+
     def __init__(
         self,
         api_key: str | None = None,
         model: str = "gpt-5.5",
         client: Any | None = None,
     ) -> None:
+        """Store OpenAI client configuration."""
         self.api_key = api_key
         self.model = model
         self._client = client
@@ -908,6 +952,7 @@ class OpenAIMemoryExtractionProvider:
         existing_memories: list[MemoryItemResult],
         current_time: str,
     ) -> dict[str, Any]:
+        """Return memory operations extracted from a transcript."""
         response = self._openai_client().responses.create(
             model=self.model,
             text=MEMORY_EXTRACTION_TEXT_FORMAT,
@@ -950,6 +995,7 @@ class OpenAIMemoryExtractionProvider:
         return payload if isinstance(payload, dict) else {"update": False, "ops": []}
 
     def _memory_payload(self, item: MemoryItemResult) -> dict[str, Any]:
+        """Render a memory item for extraction context."""
         payload: dict[str, Any] = {
             "memory_id": item.memory_id,
             "kind": item.kind,
@@ -963,6 +1009,7 @@ class OpenAIMemoryExtractionProvider:
         return payload
 
     def _openai_client(self) -> Any:
+        """Return a configured OpenAI client."""
         if self._client is not None:
             return self._client
         if not self.api_key:
@@ -975,6 +1022,7 @@ class OpenAIMemoryExtractionProvider:
         return self._client
 
     def _extract_text(self, response: Any) -> str:
+        """Extract response text from dict or SDK response shapes."""
         if isinstance(response, dict):
             output_text = response.get("output_text")
             if output_text:

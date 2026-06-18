@@ -6,11 +6,15 @@ from typing import Any
 
 
 def utc_now_iso() -> str:
+    """Return the current UTC time as an ISO-8601 string."""
+
     return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
 class PersonInput:
+    """Caller-supplied person data for ingestion."""
+
     id: str
     display_name: str | None = None
     email: str | None = None
@@ -23,12 +27,16 @@ class PersonInput:
 
 @dataclass(frozen=True)
 class PlaceInput:
+    """Building and room identifier for a place."""
+
     building_code: str
     room_id: str
 
 
 @dataclass(frozen=True)
 class EventAttendeeInput:
+    """Accepted event attendee data for ingestion."""
+
     person: PersonInput
     response_time: str | None = None
     source: str = "caller"
@@ -37,6 +45,8 @@ class EventAttendeeInput:
 
 @dataclass(frozen=True)
 class EpisodeInput:
+    """Caller-supplied episode payload for ingestion."""
+
     id: str
     episode_type: str
     start_time: str
@@ -49,6 +59,8 @@ class EpisodeInput:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "EpisodeInput":
+        """Build an episode input from a dictionary payload."""
+
         place = payload.get("place") or {}
         participants = payload.get("participants") or []
         return cls(
@@ -81,6 +93,8 @@ class EpisodeInput:
 
 @dataclass(frozen=True)
 class EventInput:
+    """Caller-supplied event payload for ingestion."""
+
     id: str
     description: str
     start_time: str
@@ -90,6 +104,8 @@ class EventInput:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "EventInput":
+        """Build an event input from a dictionary payload."""
+
         place = payload.get("place") or {}
         accepted_attendees = payload["accepted_attendees"]
         return cls(
@@ -124,6 +140,8 @@ class EventInput:
 
 @dataclass(frozen=True)
 class SearchQuery:
+    """Retrieval query parameters for memory searches."""
+
     text: str
     person_id: str | None = None
     building_code: str | None = None
@@ -134,6 +152,8 @@ class SearchQuery:
 
 @dataclass(frozen=True)
 class EpisodeMemoryResult:
+    """Episode search result with optional vector score."""
+
     episode_id: str
     summary: str
     transcript: str
@@ -142,6 +162,8 @@ class EpisodeMemoryResult:
 
 @dataclass(frozen=True)
 class EventResult:
+    """Event lookup result with place and time fields."""
+
     event_id: str
     description: str
     start_time: str
@@ -152,6 +174,8 @@ class EventResult:
 
 @dataclass(frozen=True)
 class PersonRecognitionResult:
+    """Person recognition match with consent and score data."""
+
     person_id: str
     display_name: str
     consent_status: str
@@ -161,6 +185,8 @@ class PersonRecognitionResult:
 
 @dataclass(frozen=True)
 class PersonContextTranscriptLine:
+    """Transcript line included in person context output."""
+
     timestamp: str
     speaker: str
     text: str
@@ -168,6 +194,8 @@ class PersonContextTranscriptLine:
 
 @dataclass(frozen=True)
 class PersonContextItem:
+    """Context item associated with a person."""
+
     item_id: str
     item_type: str
     text: str
@@ -183,6 +211,8 @@ class PersonContextItem:
 
 @dataclass(frozen=True)
 class PersonContextSource:
+    """Grouped context items for a person."""
+
     person_id: str
     display_name: str | None
     items: list[PersonContextItem] = field(default_factory=list)
@@ -190,6 +220,8 @@ class PersonContextSource:
 
 @dataclass(frozen=True)
 class MemoryItemInput:
+    """Caller-supplied memory item mutation payload."""
+
     kind: str
     key: str
     summary: str
@@ -205,6 +237,8 @@ class MemoryItemInput:
 
 @dataclass(frozen=True)
 class MemoryItemResult:
+    """Persisted memory item result with metadata and score."""
+
     memory_id: str
     person_id: str
     kind: str
@@ -224,6 +258,8 @@ class MemoryItemResult:
 
 @dataclass(frozen=True)
 class PersonMemoryExtractionResult:
+    """Per-person result for episode memory extraction."""
+
     person_id: str
     update_requested: bool = False
     created_memory_ids: list[str] = field(default_factory=list)
@@ -235,6 +271,8 @@ class PersonMemoryExtractionResult:
 
 @dataclass(frozen=True)
 class EpisodeMemoryExtractionResult:
+    """Aggregate memory extraction result for one episode."""
+
     episode_id: str
     memory_results: list[PersonMemoryExtractionResult] = field(default_factory=list)
     memory_errors: list[dict[str, str]] = field(default_factory=list)
@@ -242,6 +280,8 @@ class EpisodeMemoryExtractionResult:
 
 @dataclass(frozen=True)
 class EpisodeRecordResult:
+    """Episode recording result with memory extraction details."""
+
     episode_id: str
     memory_results: list[PersonMemoryExtractionResult] = field(default_factory=list)
     memory_errors: list[dict[str, str]] = field(default_factory=list)

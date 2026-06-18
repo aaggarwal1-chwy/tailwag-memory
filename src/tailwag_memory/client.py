@@ -14,27 +14,34 @@ from .synthesis import OpenAIPersonContextProvider, PersonContextSynthesisServic
 
 
 class TailwagMemoryClient:
+    """Coordinate high-level Tailwag memory operations."""
+
     def __init__(
         self,
         runner: Neo4jQueryRunner,
         settings: Settings,
     ) -> None:
+        """Create a client from an existing query runner and settings."""
         self.runner = runner
         self.settings = settings
         self._embedding_provider: OpenAIEmbeddingProvider | None = None
 
     @classmethod
     def from_env(cls) -> "TailwagMemoryClient":
+        """Create a client from environment-backed settings."""
         settings = load_settings()
         return cls(Neo4jQueryRunner(settings), settings)
 
     def close(self) -> None:
+        """Close the underlying query runner."""
         self.runner.close()
 
     def __enter__(self) -> "TailwagMemoryClient":
+        """Enter the client context manager."""
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        """Close the client when leaving a context manager."""
         self.close()
 
     def person_context(
@@ -48,6 +55,7 @@ class TailwagMemoryClient:
         memory_limit: int = 12,
         recent_episode_limit: int = 5,
     ) -> str:
+        """Return combined durable and synthesized context for a person."""
         memory_context = PersonMemoryContextService(self.runner, self._embeddings()).markdown_for_person(
             person_id,
             current_text=current_text or semantic_scope,
@@ -69,6 +77,7 @@ class TailwagMemoryClient:
         return "\n\n".join(part for part in [memory_context, synthesized_context] if part)
 
     def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
+        """Store an episode and optionally extract durable memory items."""
         episode_id = EpisodeIngestionService(self.runner, self._embeddings()).ingest(episode)
         if not extract_memory:
             return EpisodeRecordResult(episode_id=episode_id)
@@ -84,6 +93,7 @@ class TailwagMemoryClient:
         episode_id: str,
         person_id: str | None = None,
     ) -> EpisodeMemoryExtractionResult:
+        """Extract durable memory items for a stored episode."""
         return self._memory_extraction_service().extract_for_stored_episode(
             episode_id,
             person_id=person_id,
@@ -91,6 +101,7 @@ class TailwagMemoryClient:
         )
 
     def _embeddings(self) -> OpenAIEmbeddingProvider:
+        """Return the lazily initialized embedding provider."""
         if self._embedding_provider is None:
             self._embedding_provider = OpenAIEmbeddingProvider(
                 api_key=self.settings.openai_api_key,
@@ -100,6 +111,7 @@ class TailwagMemoryClient:
         return self._embedding_provider
 
     def _memory_extraction_service(self) -> EpisodeMemoryExtractionService:
+        """Build a memory extraction service using client settings."""
         return EpisodeMemoryExtractionService(
             self.runner,
             self._embeddings(),

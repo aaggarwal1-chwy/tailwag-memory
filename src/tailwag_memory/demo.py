@@ -7,6 +7,7 @@ from .models import EpisodeInput, EventInput, PersonInput, PlaceInput
 
 
 def demo_episodes() -> list[EpisodeInput]:
+    """Return deterministic demo episode inputs."""
     return [
         EpisodeInput(
             id="episode_demo_001",
@@ -50,6 +51,7 @@ def demo_episodes() -> list[EpisodeInput]:
 
 
 def seed_demo(runner: QueryRunner, embeddings: EmbeddingProvider) -> None:
+    """Seed the graph with deterministic demo episodes and events."""
     episode_service = EpisodeIngestionService(runner, embeddings)
     for episode in demo_episodes():
         episode_service.ingest(episode)
@@ -60,6 +62,7 @@ def seed_demo(runner: QueryRunner, embeddings: EmbeddingProvider) -> None:
 
 
 def demo_events() -> list[EventInput]:
+    """Return deterministic demo event inputs."""
     return [
         EventInput(
             id="event_demo_001",

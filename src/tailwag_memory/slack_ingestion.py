@@ -13,29 +13,41 @@ from .models import EpisodeInput, EpisodeRecordResult, PersonInput, PlaceInput
 
 
 class SlackConversationClient(Protocol):
+    """Describe the Slack conversation methods used by polling."""
+
     def history(self, channel: str, oldest: str | None, limit: int) -> list[dict[str, Any]]:
+        """Return channel history newer than the optional Slack timestamp."""
         ...
 
     def replies(self, channel: str, thread_ts: str, limit: int) -> list[dict[str, Any]]:
+        """Return replies for a Slack thread."""
         ...
 
     def user_profile(self, user_id: str) -> "SlackUserProfile":
+        """Return profile data for a Slack user."""
         ...
 
 
 class EpisodeRecorder(Protocol):
+    """Describe the episode recording behavior needed by Slack polling."""
+
     def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
+        """Record one episode and optionally extract memory."""
         ...
 
 
 @dataclass(frozen=True)
 class SlackUserProfile:
+    """Hold Slack user display metadata."""
+
     display_name: str | None = None
     email: str | None = None
 
 
 @dataclass(frozen=True)
 class SlackPollResult:
+    """Summarize one Slack polling pass."""
+
     channel: str
     checked_threads: int
     ingested_threads: int
@@ -47,7 +59,10 @@ class SlackPollResult:
 
 
 class SlackWebApiClient:
+    """Fetch Slack conversations through the Slack Web API."""
+
     def __init__(self, token: str, *, include_email: bool = False) -> None:
+        """Create a Slack API client with optional email capture."""
         try:
             from slack_sdk import WebClient
         except ImportError as exc:
@@ -58,6 +73,7 @@ class SlackWebApiClient:
         self.include_email = include_email
 
     def history(self, channel: str, oldest: str | None, limit: int) -> list[dict[str, Any]]:
+        """Return paginated channel history from Slack."""
         messages: list[dict[str, Any]] = []
         cursor: str | None = None
         page_size = min(200, max(1, int(limit or 200)))
@@ -80,6 +96,7 @@ class SlackWebApiClient:
         return messages
 
     def replies(self, channel: str, thread_ts: str, limit: int) -> list[dict[str, Any]]:
+        """Return paginated replies for a Slack thread."""
         messages: list[dict[str, Any]] = []
         cursor: str | None = None
         page_size = min(200, max(1, int(limit or 200)))
@@ -100,6 +117,7 @@ class SlackWebApiClient:
         return messages
 
     def user_profile(self, user_id: str) -> SlackUserProfile:
+        """Return cached Slack profile metadata for a user."""
         if user_id not in self._user_cache:
             response = self._client.users_info(user=user_id)
             user = response.get("user") or {}
@@ -117,23 +135,30 @@ class SlackWebApiClient:
 
 
 class SlackPollState:
+    """Persist per-channel Slack polling cursors."""
+
     def __init__(self, path: Path) -> None:
+        """Load poll state from a JSON file path."""
         self.path = path
         self.data = self._load()
         self._dirty_channels: set[str] = set()
 
     def latest_history_ts(self, channel: str) -> str | None:
+        """Return the latest saved channel history timestamp."""
         return self._channel(channel).get("latest_history_ts")
 
     def set_latest_history_ts(self, channel: str, ts: str) -> None:
+        """Store the latest channel history timestamp."""
         self._channel(channel)["latest_history_ts"] = ts
         self._dirty_channels.add(channel)
 
     def active_threads(self, channel: str) -> dict[str, dict[str, str]]:
+        """Return mutable active-thread state for a channel."""
         self._dirty_channels.add(channel)
         return self._channel(channel).setdefault("active_threads", {})
 
     def save(self) -> None:
+        """Atomically save poll state to disk."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = self._merged_with_disk_state()
         serialized = json.dumps(data, indent=2, sort_keys=True) + "\n"
@@ -145,10 +170,12 @@ class SlackPollState:
         self._dirty_channels.clear()
 
     def _channel(self, channel: str) -> dict[str, Any]:
+        """Return mutable state for one channel."""
         channels = self.data.setdefault("channels", {})
         return channels.setdefault(channel, {})
 
     def _load(self) -> dict[str, Any]:
+        """Load and validate poll state JSON."""
         if not self.path.exists():
             return {"channels": {}}
         try:
@@ -163,6 +190,7 @@ class SlackPollState:
         return data
 
     def _merged_with_disk_state(self) -> dict[str, Any]:
+        """Merge dirty in-memory channel state with current disk state."""
         if not self.path.exists():
             return self.data
         disk_data = SlackPollState(self.path).data
@@ -177,6 +205,8 @@ class SlackPollState:
 
 
 class SlackMemoryPoller:
+    """Poll Slack threads and record them as Tailwag episodes."""
+
     def __init__(
         self,
         client: SlackConversationClient,
@@ -186,6 +216,7 @@ class SlackMemoryPoller:
         retention_class: str = "standard",
         active_thread_hours: float = 24.0,
     ) -> None:
+        """Create a poller for a Slack client and episode recorder."""
         self.client = client
         self.episode_recorder = episode_recorder
         self.state_path = state_path
@@ -202,6 +233,7 @@ class SlackMemoryPoller:
         reply_limit: int = 200,
         extract_memory: bool = True,
     ) -> SlackPollResult:
+        """Run one Slack channel polling pass."""
         if force_backfill and backfill_hours is None:
             raise ValueError("force_backfill requires backfill_hours.")
 
@@ -304,6 +336,7 @@ def build_episode_from_slack_thread(
     client: SlackConversationClient,
     retention_class: str = "standard",
 ) -> EpisodeInput:
+    """Convert a Slack thread into an episode input."""
     ordered = sorted([message for message in messages if _is_memory_message(message)], key=lambda item: float(item["ts"]))
     if not ordered:
         raise ValueError("Cannot build an episode from an empty Slack thread.")
@@ -356,6 +389,7 @@ def build_episode_from_slack_thread(
 
 
 def _is_memory_message(message: dict[str, Any]) -> bool:
+    """Return whether a Slack message should be ingested."""
     subtype = message.get("subtype")
     if subtype in {"message_deleted", "channel_join", "channel_leave", "bot_message"} or message.get("bot_id"):
         return False
@@ -363,15 +397,18 @@ def _is_memory_message(message: dict[str, Any]) -> bool:
 
 
 def _thread_ts(message: dict[str, Any]) -> str | None:
+    """Return the thread timestamp for a Slack message."""
     ts = message.get("thread_ts") or message.get("ts")
     return str(ts) if ts is not None else None
 
 
 def _has_thread_replies(message: dict[str, Any]) -> bool:
+    """Return whether a Slack root reports replies."""
     return int(message.get("reply_count") or 0) > 0
 
 
 def _clean_text(text: str) -> str:
+    """Collapse whitespace in Slack text."""
     return " ".join(text.split())
 
 
@@ -381,6 +418,7 @@ def _format_slack_text(
     client: SlackConversationClient,
     user_profiles: dict[str, SlackUserProfile],
 ) -> str:
+    """Format Slack mrkdwn into transcript text."""
     text = html.unescape(text)
     text = _replace_user_mentions(text, client=client, user_profiles=user_profiles)
     return _clean_text(_replace_slack_entities(text))
@@ -392,7 +430,9 @@ def _replace_user_mentions(
     client: SlackConversationClient,
     user_profiles: dict[str, SlackUserProfile],
 ) -> str:
+    """Replace Slack user mention tokens with display names."""
     def replace(match: re.Match[str]) -> str:
+        """Return a formatted display name for one mention."""
         user_id = match.group("user_id")
         label = match.group("label")
         if user_id not in user_profiles:
@@ -404,7 +444,9 @@ def _replace_user_mentions(
 
 
 def _replace_slack_entities(text: str) -> str:
+    """Replace Slack entity tokens with readable labels."""
     def replace(match: re.Match[str]) -> str:
+        """Return readable text for one Slack entity token."""
         body = match.group("body")
         if body.startswith("#"):
             channel_id, _, label = body[1:].partition("|")
@@ -424,6 +466,7 @@ def _replace_slack_entities(text: str) -> str:
 
 
 def _normalize_email(email: Any) -> str | None:
+    """Normalize a Slack profile email value."""
     if not isinstance(email, str):
         return None
     normalized = email.strip().lower()
@@ -437,6 +480,7 @@ def _summarize(
     client: SlackConversationClient,
     user_profiles: dict[str, SlackUserProfile],
 ) -> str:
+    """Build a terse Slack thread summary."""
     text = _format_slack_text(
         str(message.get("text") or "Slack conversation"),
         client=client,
@@ -449,20 +493,25 @@ def _summarize(
 
 
 def _max_ts(messages: list[dict[str, Any]]) -> str:
+    """Return the maximum Slack timestamp in a message list."""
     return max((str(message["ts"]) for message in messages if message.get("ts") is not None), key=float)
 
 
 def _ts_greater(left: str, right: str) -> bool:
+    """Return whether one Slack timestamp is greater than another."""
     return float(left) > float(right)
 
 
 def _slack_ts_to_datetime(ts: str) -> datetime:
+    """Convert a Slack timestamp to a UTC datetime."""
     return datetime.fromtimestamp(float(ts), tz=timezone.utc)
 
 
 def _datetime_to_slack_ts(value: datetime) -> str:
+    """Convert a datetime to Slack timestamp text."""
     return f"{value.timestamp():.6f}"
 
 
 def _now_slack_ts() -> str:
+    """Return the current time as a Slack timestamp."""
     return _datetime_to_slack_ts(datetime.now(timezone.utc))

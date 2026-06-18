@@ -13,6 +13,8 @@ UNKNOWN_PERSON_MESSAGE = "the database does not have a record of this person"
 
 
 class PersonContextProvider(Protocol):
+    """Describe a provider that synthesizes person context."""
+
     def synthesize(
         self,
         *,
@@ -21,16 +23,20 @@ class PersonContextProvider(Protocol):
         items: list[PersonContextItem],
         current_time: str,
     ) -> str:
+        """Synthesize context from retrieved person items."""
         ...
 
 
 class OpenAIPersonContextProvider:
+    """Synthesize person context through OpenAI responses."""
+
     def __init__(
         self,
         api_key: str | None = None,
         model: str = "gpt-5.5",
         client: Any | None = None,
     ) -> None:
+        """Create an OpenAI-backed person context provider."""
         self.api_key = api_key
         self.model = model
         self._client = client
@@ -43,6 +49,7 @@ class OpenAIPersonContextProvider:
         items: list[PersonContextItem],
         current_time: str,
     ) -> str:
+        """Return synthesized context for retrieved person evidence."""
         response = self._openai_client().responses.create(
             model=self.model,
             input=[
@@ -81,6 +88,7 @@ class OpenAIPersonContextProvider:
         return self._extract_text(response)
 
     def _item_payload(self, item: PersonContextItem) -> dict[str, Any]:
+        """Serialize one retrieved item for synthesis."""
         return {
             "id": item.item_id,
             "type": item.item_type,
@@ -103,6 +111,7 @@ class OpenAIPersonContextProvider:
         }
 
     def _temporal_note(self, item: PersonContextItem) -> str:
+        """Describe how to interpret relative dates in one item."""
         evidence_date = item.start_time[:10] if len(item.start_time) >= 10 else item.start_time
         if not evidence_date:
             return "This evidence has no timestamp. Treat relative time references as ambiguous."
@@ -112,6 +121,7 @@ class OpenAIPersonContextProvider:
         )
 
     def _openai_client(self) -> Any:
+        """Return the configured OpenAI client."""
         if self._client is not None:
             return self._client
         if not self.api_key:
@@ -124,6 +134,7 @@ class OpenAIPersonContextProvider:
         return self._client
 
     def _extract_text(self, response: Any) -> str:
+        """Extract response text from OpenAI response shapes."""
         if isinstance(response, dict):
             output_text = response.get("output_text")
             if output_text:
@@ -135,11 +146,14 @@ class OpenAIPersonContextProvider:
 
 
 class PersonContextSynthesisService:
+    """Retrieve and synthesize person context."""
+
     def __init__(
         self,
         retrieval: PersonContextRetrievalService,
         provider: PersonContextProvider,
     ) -> None:
+        """Create a synthesis service from retrieval and provider parts."""
         self.retrieval = retrieval
         self.provider = provider
 
@@ -149,6 +163,7 @@ class PersonContextSynthesisService:
         limit: int = 10,
         semantic_scope: str | None = None,
     ) -> str:
+        """Return synthesized context for a person."""
         source = self.retrieval.source_for_person(person_id, limit=limit, semantic_scope=semantic_scope)
         if source is None:
             return UNKNOWN_PERSON_MESSAGE
@@ -167,4 +182,5 @@ class PersonContextSynthesisService:
 
 
 def _current_time_iso() -> str:
+    """Return the local current time as ISO-8601 text."""
     return datetime.now().astimezone().isoformat()

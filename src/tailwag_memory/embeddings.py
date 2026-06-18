@@ -7,6 +7,8 @@ from typing import Any
 
 
 class EmbeddingProvider(ABC):
+    """Abstract interface for text embedding providers."""
+
     @abstractmethod
     def embed(self, text: str) -> list[float]:
         """Return one embedding vector for the supplied text."""
@@ -26,6 +28,8 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         dimension: int = 64,
         client: Any | None = None,
     ) -> None:
+        """Configure an OpenAI embedding provider."""
+
         if dimension <= 0:
             raise ValueError("dimension must be positive")
         self.api_key = api_key
@@ -34,6 +38,8 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         self._client = client
 
     def embed(self, text: str) -> list[float]:
+        """Generate an embedding using the configured OpenAI model."""
+
         response = self._openai_client().embeddings.create(
             model=self.model,
             input=text,
@@ -47,6 +53,8 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         return embedding
 
     def _openai_client(self) -> Any:
+        """Return a cached OpenAI client or create one from the API key."""
+
         if self._client is not None:
             return self._client
         if not self.api_key:
@@ -59,6 +67,8 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         return self._client
 
     def _extract_embedding(self, response: Any) -> list[float]:
+        """Extract the first embedding vector from an OpenAI response."""
+
         if isinstance(response, dict):
             return response["data"][0]["embedding"]
         return response.data[0].embedding
@@ -68,11 +78,15 @@ class MockOpenAIEmbeddingProvider(EmbeddingProvider):
     """Deterministic OpenAI-shaped embedding mock with no network calls."""
 
     def __init__(self, dimension: int = 64) -> None:
+        """Configure the deterministic mock embedding dimension."""
+
         if dimension <= 0:
             raise ValueError("dimension must be positive")
         self.dimension = dimension
 
     def embed(self, text: str) -> list[float]:
+        """Generate a deterministic normalized embedding for text."""
+
         seed = hashlib.sha256(text.encode("utf-8")).digest()
         values: list[float] = []
         counter = 0

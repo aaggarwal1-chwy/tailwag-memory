@@ -19,6 +19,7 @@ from .slack_ingestion import SlackMemoryPoller, SlackWebApiClient
 
 
 def _embedding_provider(settings: Settings) -> OpenAIEmbeddingProvider:
+    """Build the configured OpenAI embedding provider."""
     return OpenAIEmbeddingProvider(
         api_key=settings.openai_api_key,
         model=settings.embedding_model,
@@ -27,6 +28,7 @@ def _embedding_provider(settings: Settings) -> OpenAIEmbeddingProvider:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the Tailwag command-line interface."""
     parser = argparse.ArgumentParser(prog="tailwag", description="Tailwag Neo4j memory service tools.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
