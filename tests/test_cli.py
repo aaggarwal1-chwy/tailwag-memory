@@ -99,10 +99,15 @@ class CliTest(unittest.TestCase):
         runner = FakeRunner(settings)
         poll_calls = []
 
+        class FakeMemoryClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                self.runner = runner_arg
+                self.settings = settings_arg
+
         class FakePoller:
-            def __init__(self, client, service, state_path, *, active_thread_hours: float) -> None:
+            def __init__(self, client, episode_recorder, state_path, *, active_thread_hours: float) -> None:
                 self.client = client
-                self.service = service
+                self.episode_recorder = episode_recorder
                 self.state_path = state_path
                 self.active_thread_hours = active_thread_hours
 
@@ -114,6 +119,7 @@ class CliTest(unittest.TestCase):
                 force_backfill: bool,
                 history_limit: int,
                 reply_limit: int,
+                extract_memory: bool,
             ) -> SlackPollResult:
                 poll_calls.append(
                     {
@@ -122,6 +128,8 @@ class CliTest(unittest.TestCase):
                         "force_backfill": force_backfill,
                         "history_limit": history_limit,
                         "reply_limit": reply_limit,
+                        "extract_memory": extract_memory,
+                        "uses_memory_client": isinstance(self.episode_recorder, FakeMemoryClient),
                     }
                 )
                 return SlackPollResult(
@@ -130,12 +138,25 @@ class CliTest(unittest.TestCase):
                     ingested_threads=0,
                     latest_history_ts=None,
                     armed_without_backfill=True,
+                    memory_extraction_enabled=extract_memory,
+                    ingested_episode_ids=["episode_1"],
+                    episode_records=[
+                        EpisodeRecordResult(
+                            episode_id="episode_1",
+                            memory_results=[
+                                PersonMemoryExtractionResult(
+                                    person_id="person_jamie",
+                                    created_memory_ids=["mem_1"],
+                                )
+                            ],
+                        )
+                    ],
                 )
 
         with patch("tailwag_memory.cli.load_settings", return_value=settings):
             with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
                 with patch("tailwag_memory.cli.SlackWebApiClient", return_value=object()):
-                    with patch("tailwag_memory.cli.EpisodeIngestionService", return_value=object()):
+                    with patch("tailwag_memory.cli.TailwagMemoryClient", FakeMemoryClient):
                         with patch("tailwag_memory.cli.SlackMemoryPoller", FakePoller):
                             stdout = StringIO()
                             with redirect_stdout(stdout):
@@ -162,10 +183,80 @@ class CliTest(unittest.TestCase):
                     "force_backfill": True,
                     "history_limit": 200,
                     "reply_limit": 200,
+                    "extract_memory": True,
+                    "uses_memory_client": True,
                 }
             ],
         )
-        self.assertEqual(json.loads(stdout.getvalue())["channel"], "C123")
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["channel"], "C123")
+        self.assertTrue(output["memory_extraction_enabled"])
+        self.assertEqual(output["ingested_episode_ids"], ["episode_1"])
+        self.assertEqual(output["episode_records"][0]["memory_results"][0]["created_memory_ids"], ["mem_1"])
+
+    def test_slack_poll_can_skip_memory_extraction(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            slack_bot_token="xoxb-test-token",
+        )
+        runner = FakeRunner(settings)
+        poll_calls = []
+
+        class FakeMemoryClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
+
+        class FakePoller:
+            def __init__(self, client, episode_recorder, state_path, *, active_thread_hours: float) -> None:
+                pass
+
+            def poll_once(
+                self,
+                channel: str,
+                *,
+                backfill_hours: float | None,
+                force_backfill: bool,
+                history_limit: int,
+                reply_limit: int,
+                extract_memory: bool,
+            ) -> SlackPollResult:
+                poll_calls.append(extract_memory)
+                return SlackPollResult(
+                    channel=channel,
+                    checked_threads=1,
+                    ingested_threads=1,
+                    latest_history_ts="1781798400.000000",
+                    memory_extraction_enabled=extract_memory,
+                    ingested_episode_ids=["episode_1"],
+                    episode_records=[EpisodeRecordResult(episode_id="episode_1")],
+                )
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                with patch("tailwag_memory.cli.SlackWebApiClient", return_value=object()):
+                    with patch("tailwag_memory.cli.TailwagMemoryClient", FakeMemoryClient):
+                        with patch("tailwag_memory.cli.SlackMemoryPoller", FakePoller):
+                            stdout = StringIO()
+                            with redirect_stdout(stdout):
+                                exit_code = main(
+                                    [
+                                        "slack",
+                                        "poll",
+                                        "--channel",
+                                        "C123",
+                                        "--once",
+                                        "--skip-memory-extraction",
+                                    ]
+                                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(poll_calls, [False])
+        output = json.loads(stdout.getvalue())
+        self.assertFalse(output["memory_extraction_enabled"])
+        self.assertEqual(output["episode_records"][0]["memory_results"], [])
 
     def test_person_context_prints_synthesized_paragraph(self) -> None:
         settings = Settings(

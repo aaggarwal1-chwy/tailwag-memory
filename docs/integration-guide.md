@@ -229,6 +229,8 @@ Slack channel polling creates normal conversation episodes. The channel is store
 tailwag slack poll --channel C0123456789 --once
 ```
 
+Slack polling records episodes through the high-level Tailwag client, so it attempts transcript-derived memory extraction by default for each newly ingested or refreshed thread. The JSON output keeps the polling counters and adds `memory_extraction_enabled`, `ingested_episode_ids`, and `episode_records`; each episode record contains the same `memory_results` and `memory_errors` shape returned by `tailwag episode create`.
+
 The first run without `--backfill-hours` starts the cursor at the current time. To import recent existing activity for testing:
 
 ```bash
@@ -239,6 +241,12 @@ After wiping Neo4j data, use `--force-backfill` to ignore the saved polling curs
 
 ```bash
 tailwag slack poll --channel C0123456789 --once --backfill-hours 10 --force-backfill
+```
+
+Use `--skip-memory-extraction` for smoke tests, local imports without OpenAI-backed extraction, or expensive backfills where you only want to store episodes:
+
+```bash
+tailwag slack poll --channel C0123456789 --once --backfill-hours 10 --force-backfill --skip-memory-extraction
 ```
 
 Run continuous polling:

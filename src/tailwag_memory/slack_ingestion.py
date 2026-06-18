@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
 from typing import Any, Protocol
 
-from .ingestion import EpisodeIngestionService
-from .models import EpisodeInput, PersonInput, PlaceInput
+from .models import EpisodeInput, EpisodeRecordResult, PersonInput, PlaceInput
 
 
 class SlackConversationClient(Protocol):
@@ -19,6 +18,11 @@ class SlackConversationClient(Protocol):
         ...
 
     def user_profile(self, user_id: str) -> "SlackUserProfile":
+        ...
+
+
+class EpisodeRecorder(Protocol):
+    def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
         ...
 
 
@@ -35,6 +39,9 @@ class SlackPollResult:
     ingested_threads: int
     latest_history_ts: str | None
     armed_without_backfill: bool = False
+    memory_extraction_enabled: bool = True
+    ingested_episode_ids: list[str] = field(default_factory=list)
+    episode_records: list[EpisodeRecordResult] = field(default_factory=list)
 
 
 class SlackWebApiClient:
@@ -138,14 +145,14 @@ class SlackMemoryPoller:
     def __init__(
         self,
         client: SlackConversationClient,
-        episode_service: EpisodeIngestionService,
+        episode_recorder: EpisodeRecorder,
         state_path: Path,
         *,
         retention_class: str = "standard",
         active_thread_hours: float = 24.0,
     ) -> None:
         self.client = client
-        self.episode_service = episode_service
+        self.episode_recorder = episode_recorder
         self.state_path = state_path
         self.retention_class = retention_class
         self.active_thread_hours = active_thread_hours
@@ -158,6 +165,7 @@ class SlackMemoryPoller:
         force_backfill: bool = False,
         history_limit: int = 200,
         reply_limit: int = 200,
+        extract_memory: bool = True,
     ) -> SlackPollResult:
         if force_backfill and backfill_hours is None:
             raise ValueError("force_backfill requires backfill_hours.")
@@ -178,6 +186,7 @@ class SlackMemoryPoller:
                 ingested_threads=0,
                 latest_history_ts=now_ts,
                 armed_without_backfill=True,
+                memory_extraction_enabled=extract_memory,
             )
 
         if oldest is None and backfill_hours is not None:
@@ -200,7 +209,7 @@ class SlackMemoryPoller:
 
         active_threads = state.active_threads(channel)
         threads_to_check = set(active_threads) | set(history_messages)
-        ingested_threads = 0
+        episode_records: list[EpisodeRecordResult] = []
         thread_cutoff = datetime.now(timezone.utc) - timedelta(hours=self.active_thread_hours)
 
         for thread_ts in sorted(threads_to_check, key=float):
@@ -224,8 +233,12 @@ class SlackMemoryPoller:
                     client=self.client,
                     retention_class=self.retention_class,
                 )
-                self.episode_service.ingest(episode)
-                ingested_threads += 1
+                episode_records.append(
+                    self.episode_recorder.record_episode(
+                        episode,
+                        extract_memory=extract_memory,
+                    )
+                )
 
             latest_thread_time = _slack_ts_to_datetime(latest_thread_ts)
             if latest_thread_time >= thread_cutoff:
@@ -241,8 +254,11 @@ class SlackMemoryPoller:
         return SlackPollResult(
             channel=channel,
             checked_threads=len(threads_to_check),
-            ingested_threads=ingested_threads,
+            ingested_threads=len(episode_records),
             latest_history_ts=latest_history_ts,
+            memory_extraction_enabled=extract_memory,
+            ingested_episode_ids=[record.episode_id for record in episode_records],
+            episode_records=episode_records,
         )
 
 

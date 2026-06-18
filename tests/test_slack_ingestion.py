@@ -12,6 +12,7 @@ from tailwag_memory.slack_ingestion import (
     SlackUserProfile,
     build_episode_from_slack_thread,
 )
+from tailwag_memory.models import EpisodeRecordResult, PersonMemoryExtractionResult
 
 
 def _ts(offset_seconds: float = 0.0) -> str:
@@ -49,16 +50,27 @@ class FakeSlackClient:
         )
 
 
-class FakeEpisodeService:
-    def __init__(self, *, fail: bool = False) -> None:
+class FakeEpisodeRecorder:
+    def __init__(self, *, fail: bool = False, memory_errors: list[dict[str, str]] | None = None) -> None:
         self.fail = fail
+        self.memory_errors = memory_errors or []
         self.episodes = []
+        self.record_calls = []
 
-    def ingest(self, episode):
+    def record_episode(self, episode, *, extract_memory: bool = True):
         if self.fail:
             raise RuntimeError("ingest failed")
         self.episodes.append(episode)
-        return episode.id
+        self.record_calls.append({"episode_id": episode.id, "extract_memory": extract_memory})
+        return EpisodeRecordResult(
+            episode_id=episode.id,
+            memory_results=(
+                [PersonMemoryExtractionResult(person_id=episode.participants[0].id, created_memory_ids=["mem_1"])]
+                if extract_memory and episode.participants
+                else []
+            ),
+            memory_errors=self.memory_errors,
+        )
 
 
 class SlackThreadConversionTest(unittest.TestCase):
@@ -164,7 +176,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
     def test_first_poll_without_backfill_arms_state_without_ingesting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
-            service = FakeEpisodeService()
+            service = FakeEpisodeRecorder()
             client = FakeSlackClient()
             poller = SlackMemoryPoller(client, service, state_path)
 
@@ -181,7 +193,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             state_path = Path(tmp) / "slack-state.json"
             root_ts = _ts()
             reply_ts = _ts(2)
-            service = FakeEpisodeService()
+            service = FakeEpisodeRecorder()
             client = FakeSlackClient(
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread", "reply_count": 1}],
                 replies_by_thread={
@@ -198,9 +210,50 @@ class SlackMemoryPollerTest(unittest.TestCase):
 
             self.assertEqual(result.checked_threads, 1)
             self.assertEqual(result.ingested_threads, 1)
+            self.assertEqual(result.ingested_episode_ids, [f"slack:C123:{root_ts}"])
+            self.assertTrue(result.memory_extraction_enabled)
+            self.assertEqual(result.episode_records[0].memory_results[0].created_memory_ids, ["mem_1"])
+            self.assertEqual(service.record_calls[0]["extract_memory"], True)
             self.assertEqual(service.episodes[0].id, f"slack:C123:{root_ts}")
             state = json.loads(state_path.read_text())
             self.assertEqual(state["channels"]["C123"]["latest_history_ts"], root_ts)
+
+    def test_backfill_can_skip_memory_extraction(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            root_ts = _ts()
+            service = FakeEpisodeRecorder()
+            client = FakeSlackClient(
+                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
+                user_names={"U1": "Asha"},
+            )
+            poller = SlackMemoryPoller(client, service, state_path)
+
+            result = poller.poll_once("C123", backfill_hours=1, extract_memory=False)
+
+            self.assertEqual(result.checked_threads, 1)
+            self.assertEqual(result.ingested_threads, 1)
+            self.assertEqual(result.ingested_episode_ids, [f"slack:C123:{root_ts}"])
+            self.assertFalse(result.memory_extraction_enabled)
+            self.assertEqual(result.episode_records[0].memory_results, [])
+            self.assertEqual(service.record_calls, [{"episode_id": f"slack:C123:{root_ts}", "extract_memory": False}])
+
+    def test_memory_extraction_errors_are_returned_and_state_advances(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            root_ts = _ts()
+            service = FakeEpisodeRecorder(memory_errors=[{"person_id": "slack:U1", "error": "model unavailable"}])
+            client = FakeSlackClient(
+                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
+                user_names={"U1": "Asha"},
+            )
+            poller = SlackMemoryPoller(client, service, state_path)
+
+            result = poller.poll_once("C123", backfill_hours=1)
+
+            self.assertEqual(result.ingested_threads, 1)
+            self.assertEqual(result.episode_records[0].memory_errors, [{"person_id": "slack:U1", "error": "model unavailable"}])
+            self.assertTrue(state_path.exists())
 
     def test_force_backfill_ignores_saved_cursor_and_reingests_seen_thread(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -218,7 +271,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                     }
                 )
             )
-            service = FakeEpisodeService()
+            service = FakeEpisodeRecorder()
             client = FakeSlackClient(
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread", "reply_count": 1}],
                 replies_by_thread={root_ts: [{"ts": root_ts, "user": "U1", "text": "Start thread"}]},
@@ -239,7 +292,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             root_ts = _ts()
             first_reply_ts = _ts(2)
             second_reply_ts = _ts(4)
-            service = FakeEpisodeService()
+            service = FakeEpisodeRecorder()
             client = FakeSlackClient(
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread", "reply_count": 1}],
                 replies_by_thread={
@@ -270,7 +323,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
             root_ts = _ts()
-            service = FakeEpisodeService(fail=True)
+            service = FakeEpisodeRecorder(fail=True)
             client = FakeSlackClient(
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread", "reply_count": 1}],
                 replies_by_thread={root_ts: [{"ts": root_ts, "user": "U1", "text": "Start thread"}]},
@@ -298,7 +351,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                     }
                 )
             )
-            service = FakeEpisodeService()
+            service = FakeEpisodeRecorder()
             client = FakeSlackClient(history_messages=[])
             poller = SlackMemoryPoller(client, service, state_path)
 
@@ -316,7 +369,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
             root_ts = _ts()
-            service = FakeEpisodeService()
+            service = FakeEpisodeRecorder()
             client = FakeSlackClient(
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Standalone update"}],
                 user_names={"U1": "Asha"},
@@ -337,7 +390,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             state_path = Path(tmp) / "slack-state.json"
             root_ts = _ts(-3600)
             reply_ts = _ts()
-            service = FakeEpisodeService()
+            service = FakeEpisodeRecorder()
             client = FakeSlackClient(
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Can someone review this?"}],
                 user_names={"U1": "Asha", "U2": "Ben"},
@@ -377,7 +430,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                     }
                 )
             )
-            service = FakeEpisodeService()
+            service = FakeEpisodeRecorder()
             client = FakeSlackClient(
                 replies_by_thread={root_ts: [{"ts": root_ts, "user": "U1", "text": "Old standalone"}]},
                 user_names={"U1": "Asha"},

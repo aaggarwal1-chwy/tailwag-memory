@@ -11,7 +11,7 @@ from .client import TailwagMemoryClient
 from .config import load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
-from .ingestion import EpisodeIngestionService, EventIngestionService
+from .ingestion import EventIngestionService
 from .models import EpisodeInput, EventInput, SearchQuery
 from .retrieval import EpisodeRetrievalService, EventRetrievalService, PersonContextRetrievalService, PersonRecognitionService
 from .schema import initialize_schema
@@ -92,6 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     slack_poll_parser.add_argument("--active-thread-hours", type=float, default=24.0)
     slack_poll_parser.add_argument("--history-limit", type=int, default=200)
     slack_poll_parser.add_argument("--reply-limit", type=int, default=200)
+    slack_poll_parser.add_argument("--skip-memory-extraction", action="store_true")
 
     memory_parser = subparsers.add_parser("memory")
     memory_subparsers = memory_parser.add_subparsers(dest="memory_command", required=True)
@@ -217,16 +218,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not settings.slack_bot_token:
                 parser.error("SLACK_BOT_TOKEN is required. Add it to .env or export it in your shell.")
 
-            embeddings = OpenAIEmbeddingProvider(
-                api_key=settings.openai_api_key,
-                model=settings.embedding_model,
-                dimension=settings.embedding_dimension,
-            )
-            service = EpisodeIngestionService(runner, embeddings)
+            memory_client = TailwagMemoryClient(runner, settings)
             client = SlackWebApiClient(settings.slack_bot_token)
             poller = SlackMemoryPoller(
                 client,
-                service,
+                memory_client,
                 Path(args.state_file),
                 active_thread_hours=args.active_thread_hours,
             )
@@ -238,8 +234,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     force_backfill=args.force_backfill,
                     history_limit=args.history_limit,
                     reply_limit=args.reply_limit,
+                    extract_memory=not args.skip_memory_extraction,
                 )
-                print(json.dumps(result.__dict__, sort_keys=True))
+                print(json.dumps(asdict(result), sort_keys=True))
                 if args.once:
                     return 0
                 time.sleep(args.interval)
