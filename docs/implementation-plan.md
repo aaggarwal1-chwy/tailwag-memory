@@ -34,6 +34,7 @@ Implemented now:
 - Neo4j 5.26 local Docker runtime
 - OpenAI-backed natural-language person context synthesis
 - transcript-derived person memory extraction and markdown context formatting
+- per-person repeated-evidence memory consolidation into `MemoryItem`
 - durable memory context plus recent episode/event context in `person_context`
 - memory context CLI command
 - optional caller-supplied person face embeddings
@@ -71,6 +72,7 @@ Deferred for later:
 - Production embeddings use the OpenAI-compatible provider; tests use deterministic mock embeddings with the same provider interface.
 - The code should be split early enough to avoid large, tangled modules.
 - `MemoryItem` is the approved narrow path for transcript-derived person memory. It does not open scope for a broad `SemanticFact` ontology or triple store.
+- Per-person memory consolidation may use Neo4j episode vector indexes to reduce candidate evidence, but it still writes only `MemoryItem` records and `SUPPORTED_BY` episode links.
 - This pre-release plan describes current behavior and intended boundaries; it does not promise backward compatibility for earlier local-only shapes.
 
 ## Initial Graph Model
@@ -254,7 +256,7 @@ Create vector indexes for:
 - `MemoryItem.summary_embedding`
 
 The embedding dimension should be configurable so the OpenAI provider and deterministic mock provider can share the same retrieval code.
-Retrieval queries vector indexes with Neo4j's current `SEARCH` clause.
+Retrieval queries vector indexes with Neo4j's `db.index.vector.queryNodes` procedure for Neo4j 5.26 compatibility.
 
 ## Embedding Interface
 

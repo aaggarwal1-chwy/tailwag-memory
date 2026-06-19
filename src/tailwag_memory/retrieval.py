@@ -31,12 +31,9 @@ def _vector_search_clause(index_name: str, variable: str, limit_parameter: str) 
     if label is None:
         raise ValueError(f"unsupported vector index: {index_name}")
     return f"""
-            MATCH ({variable}:{label})
-              SEARCH {variable} IN (
-                VECTOR INDEX {index_name}
-                FOR $embedding
-                LIMIT ${limit_parameter}
-              ) SCORE AS score
+            CALL db.index.vector.queryNodes('{index_name}', ${limit_parameter}, $embedding)
+            YIELD node AS {variable}, score
+            WHERE {variable}:{label}
             """
 
 

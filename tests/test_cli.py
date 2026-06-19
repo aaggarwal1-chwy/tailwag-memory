@@ -10,7 +10,13 @@ from unittest.mock import patch
 
 from tailwag_memory.cli import main
 from tailwag_memory.config import Settings
-from tailwag_memory.models import EpisodeMemoryExtractionResult, EpisodeRecordResult, PersonMemoryExtractionResult
+from tailwag_memory.models import (
+    EpisodeMemoryExtractionResult,
+    EpisodeRecordResult,
+    MemoryConsolidationResult,
+    PersonMemoryConsolidationResult,
+    PersonMemoryExtractionResult,
+)
 from tailwag_memory.slack_ingestion import SlackPollResult
 
 
@@ -567,6 +573,116 @@ class CliTest(unittest.TestCase):
             ],
         )
         self.assertIn("[PERSON MEMORY]", stdout.getvalue())
+
+    def test_memory_consolidate_person_outputs_json(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            openai_api_key="test-key",
+        )
+        runner = FakeRunner(settings)
+        calls = []
+
+        class FakeClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
+
+            def consolidate_memory(self, **kwargs):
+                calls.append(kwargs)
+                return MemoryConsolidationResult(
+                    person_results=[
+                        PersonMemoryConsolidationResult(
+                            person_id="person_jamie",
+                            created_memory_ids=["mem_1"],
+                            candidate_episode_ids=["ep1", "ep2", "ep3", "ep4"],
+                            provider_called=True,
+                        )
+                    ]
+                )
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = main(["memory", "consolidate", "--person-id", "person_jamie"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls[0]["person_id"], "person_jamie")
+        self.assertFalse(calls[0]["all_people"])
+        self.assertEqual(calls[0]["min_evidence_episodes"], 4)
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["person_results"][0]["created_memory_ids"], ["mem_1"])
+        self.assertTrue(runner.closed)
+
+    def test_memory_consolidate_all_outputs_json(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+            openai_api_key="test-key",
+        )
+        runner = FakeRunner(settings)
+        calls = []
+
+        class FakeClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
+
+            def consolidate_memory(self, **kwargs):
+                calls.append(kwargs)
+                return MemoryConsolidationResult(
+                    person_results=[PersonMemoryConsolidationResult(person_id="person_jamie")]
+                )
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "memory",
+                                "consolidate",
+                                "--all",
+                                "--person-limit",
+                                "7",
+                                "--min-evidence-episodes",
+                                "5",
+                            ]
+                        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIsNone(calls[0]["person_id"])
+        self.assertTrue(calls[0]["all_people"])
+        self.assertEqual(calls[0]["person_limit"], 7)
+        self.assertEqual(calls[0]["min_evidence_episodes"], 5)
+        self.assertEqual(json.loads(stdout.getvalue())["person_results"][0]["person_id"], "person_jamie")
+
+    def test_memory_consolidate_requires_one_target_before_runner(self) -> None:
+        with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["memory", "consolidate"])
+
+        self.assertEqual(raised.exception.code, 2)
+        runner_class.assert_not_called()
+        self.assertIn("one of the arguments --person-id --all is required", stderr.getvalue())
+
+    def test_memory_consolidate_rejects_two_targets_before_runner(self) -> None:
+        with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["memory", "consolidate", "--person-id", "person_jamie", "--all"])
+
+        self.assertEqual(raised.exception.code, 2)
+        runner_class.assert_not_called()
+        self.assertIn("not allowed with argument", stderr.getvalue())
 
     def test_episode_create_extracts_memory_by_default(self) -> None:
         settings = Settings(

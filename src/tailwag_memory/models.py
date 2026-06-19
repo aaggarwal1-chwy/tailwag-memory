@@ -279,6 +279,29 @@ class EpisodeMemoryExtractionResult:
 
 
 @dataclass(frozen=True)
+class PersonMemoryConsolidationResult:
+    """Per-person result for semantic memory consolidation."""
+
+    person_id: str
+    update_requested: bool = False
+    created_memory_ids: list[str] = field(default_factory=list)
+    updated_memory_ids: list[str] = field(default_factory=list)
+    archived_memory_ids: list[str] = field(default_factory=list)
+    skipped_ops: list[dict[str, Any]] = field(default_factory=list)
+    candidate_episode_ids: list[str] = field(default_factory=list)
+    provider_called: bool = False
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class MemoryConsolidationResult:
+    """Aggregate result for semantic memory consolidation."""
+
+    person_results: list[PersonMemoryConsolidationResult] = field(default_factory=list)
+    memory_errors: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class EpisodeRecordResult:
     """Episode recording result with memory extraction details."""
 

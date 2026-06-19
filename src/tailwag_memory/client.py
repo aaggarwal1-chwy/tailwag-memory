@@ -7,8 +7,14 @@ from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
 from .ingestion import EpisodeIngestionService
 from .memory_context import PersonMemoryContextService
-from .memory_items import EpisodeMemoryExtractionService, OpenAIMemoryExtractionProvider
-from .models import EpisodeInput, EpisodeMemoryExtractionResult, EpisodeRecordResult
+from .memory_items import (
+    DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
+    EpisodeMemoryExtractionService,
+    MemoryConsolidationService,
+    OpenAIMemoryConsolidationProvider,
+    OpenAIMemoryExtractionProvider,
+)
+from .models import EpisodeInput, EpisodeMemoryExtractionResult, EpisodeRecordResult, MemoryConsolidationResult
 from .retrieval import PersonContextRetrievalService
 from .synthesis import OpenAIPersonContextProvider, PersonContextSynthesisService
 
@@ -100,6 +106,45 @@ class TailwagMemoryClient:
             speaker_only=True,
         )
 
+    def consolidate_memory(
+        self,
+        *,
+        person_id: str | None = None,
+        all_people: bool = False,
+        person_limit: int = 100,
+        min_evidence_episodes: int = DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
+        seed_limit: int = 25,
+        neighbor_limit: int = 12,
+        cluster_limit: int = 8,
+        episode_text_limit: int = 1200,
+    ) -> MemoryConsolidationResult:
+        """Consolidate repeated episode evidence into per-person memory items."""
+        service = self._memory_consolidation_service()
+        if all_people:
+            return service.consolidate_all(
+                person_limit=person_limit,
+                min_evidence_episodes=min_evidence_episodes,
+                seed_limit=seed_limit,
+                neighbor_limit=neighbor_limit,
+                cluster_limit=cluster_limit,
+                episode_text_limit=episode_text_limit,
+            )
+        rendered_person_id = str(person_id or "").strip()
+        if not rendered_person_id:
+            raise ValueError("person_id is required unless all_people is true")
+        return MemoryConsolidationResult(
+            person_results=[
+                service.consolidate_person(
+                    rendered_person_id,
+                    min_evidence_episodes=min_evidence_episodes,
+                    seed_limit=seed_limit,
+                    neighbor_limit=neighbor_limit,
+                    cluster_limit=cluster_limit,
+                    episode_text_limit=episode_text_limit,
+                )
+            ]
+        )
+
     def _embeddings(self) -> OpenAIEmbeddingProvider:
         """Return the lazily initialized embedding provider."""
         if self._embedding_provider is None:
@@ -116,6 +161,17 @@ class TailwagMemoryClient:
             self.runner,
             self._embeddings(),
             OpenAIMemoryExtractionProvider(
+                api_key=self.settings.openai_api_key,
+                model=self.settings.synthesis_model,
+            ),
+        )
+
+    def _memory_consolidation_service(self) -> MemoryConsolidationService:
+        """Build a memory consolidation service using client settings."""
+        return MemoryConsolidationService(
+            self.runner,
+            self._embeddings(),
+            OpenAIMemoryConsolidationProvider(
                 api_key=self.settings.openai_api_key,
                 model=self.settings.synthesis_model,
             ),

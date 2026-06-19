@@ -1,17 +1,37 @@
 from datetime import datetime, timezone
+import json
 import unittest
 
 from tailwag_memory.db import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
 from tailwag_memory.memory_context import PersonMemoryContextService, format_person_memory_markdown
 from tailwag_memory.memory_items import (
+    DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
     EpisodeMemoryExtractionService,
+    MemoryConsolidationService,
     MemoryItemService,
+    OpenAIMemoryConsolidationProvider,
     OpenAIMemoryExtractionProvider,
     followup_is_visible,
     stable_memory_id,
 )
 from tailwag_memory.models import EpisodeInput, MemoryItemInput, MemoryItemResult, PersonInput, PlaceInput
+
+
+def _seed_row(episode_id: str) -> dict[str, object]:
+    return {
+        "episode_id": episode_id,
+        "summary": f"Jamie mentioned robot demos in {episode_id}.",
+        "transcript": f"Jamie: robot demos help me understand memory systems. ({episode_id})",
+        "start_time": f"2026-06-1{episode_id[-1]}T10:00:00+00:00",
+        "summary_embedding": [0.1] * 8,
+    }
+
+
+def _neighbor_row(episode_id: str) -> dict[str, object]:
+    row = _seed_row(episode_id)
+    row["score"] = 0.9
+    return row
 
 
 class MemoryItemServiceTest(unittest.TestCase):
@@ -345,6 +365,242 @@ class MemoryItemServiceTest(unittest.TestCase):
 
         self.assertEqual([item.memory_id for item in selected], ["mem_boundary", "mem_pref", "mem_lexical", "mem_vector"])
         self.assertEqual(service.vector_kwargs["person_id"], "person_jamie")
+
+
+class MemoryConsolidationServiceTest(unittest.TestCase):
+    def test_consolidation_uses_default_minimum_four_evidence_episodes(self) -> None:
+        self.assertEqual(DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES, 4)
+
+    def test_consolidate_person_creates_memory_with_four_valid_supporting_episodes(self) -> None:
+        class FakeConsolidationProvider:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def consolidate(self, **kwargs):
+                self.calls.append(kwargs)
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "create",
+                            "kind": "fact",
+                            "key": "robot_memory_demos",
+                            "summary": "uses hands-on robot demos to understand memory systems",
+                            "supported_episode_ids": ["ep1", "ep2", "ep3", "ep4"],
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        provider = FakeConsolidationProvider()
+        runner = RecordingQueryRunner(
+            results=[
+                [_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3"), _seed_row("ep4")],
+                [_neighbor_row("ep1"), _neighbor_row("ep2"), _neighbor_row("ep3"), _neighbor_row("ep4")],
+                [],
+                [],
+                [{"linked_count": 4}],
+            ]
+        )
+        service = MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), provider)
+
+        result = service.consolidate_person("person_jamie", cluster_limit=1)
+
+        self.assertTrue(result.provider_called)
+        self.assertEqual(len(result.created_memory_ids), 1)
+        self.assertEqual(result.skipped_ops, [])
+        self.assertEqual(provider.calls[0]["min_evidence_episodes"], 4)
+        self.assertEqual(
+            [item["episode_id"] for item in provider.calls[0]["episode_clusters"][0]],
+            ["ep1", "ep2", "ep3", "ep4"],
+        )
+        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[1].query)
+        memory_query = [query for query in runner.queries if "MERGE (m:MemoryItem" in query.query][-1]
+        self.assertEqual(memory_query.parameters["source_ref"], "consolidation")
+        link_query = runner.queries[-1]
+        self.assertEqual(link_query.parameters["episode_ids"], ["ep1", "ep2", "ep3", "ep4"])
+        self.assertIn("MERGE (m)-[:SUPPORTED_BY]->(e)", link_query.query)
+
+    def test_consolidation_skips_operation_when_valid_evidence_drops_below_four(self) -> None:
+        class FakeConsolidationProvider:
+            def consolidate(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "create",
+                            "kind": "fact",
+                            "key": "robot_memory_demos",
+                            "summary": "uses robot demos to understand memory systems",
+                            "supported_episode_ids": ["ep1", "ep2", "ep3", "ep_missing"],
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(
+            results=[
+                [_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3"), _seed_row("ep4")],
+                [_neighbor_row("ep1"), _neighbor_row("ep2"), _neighbor_row("ep3"), _neighbor_row("ep4")],
+                [],
+            ]
+        )
+        service = MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), FakeConsolidationProvider())
+
+        result = service.consolidate_person("person_jamie", cluster_limit=1)
+
+        self.assertEqual(result.created_memory_ids, [])
+        self.assertIn("unsupported_episode_id", {item["reason"] for item in result.skipped_ops})
+        self.assertIn("insufficient_valid_evidence", {item["reason"] for item in result.skipped_ops})
+        self.assertFalse(any("MERGE (m:MemoryItem" in query.query for query in runner.queries))
+
+    def test_duplicate_supporting_episode_ids_count_once(self) -> None:
+        class FakeConsolidationProvider:
+            def consolidate(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "create",
+                            "kind": "fact",
+                            "key": "robot_memory_demos",
+                            "summary": "uses robot demos to understand memory systems",
+                            "supported_episode_ids": ["ep1", "ep1", "ep2", "ep3"],
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(
+            results=[
+                [_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3"), _seed_row("ep4")],
+                [_neighbor_row("ep1"), _neighbor_row("ep2"), _neighbor_row("ep3"), _neighbor_row("ep4")],
+                [],
+            ]
+        )
+        service = MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), FakeConsolidationProvider())
+
+        result = service.consolidate_person("person_jamie", cluster_limit=1)
+
+        self.assertEqual(result.created_memory_ids, [])
+        self.assertEqual([item["reason"] for item in result.skipped_ops], ["insufficient_valid_evidence"])
+
+    def test_consolidation_updates_only_known_candidate_memory_ids_and_links_support(self) -> None:
+        class FakeConsolidationProvider:
+            def consolidate(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "update",
+                            "memory_id": "mem_existing",
+                            "summary": "uses robot demos to understand memory systems",
+                            "supported_episode_ids": ["ep1", "ep2", "ep3", "ep4"],
+                            "metadata": {},
+                        },
+                        {
+                            "op": "archive",
+                            "memory_id": "mem_missing",
+                            "supported_episode_ids": ["ep1", "ep2", "ep3", "ep4"],
+                            "metadata": {},
+                        },
+                    ],
+                }
+
+        existing = {
+            "memory_id": "mem_existing",
+            "person_id": "person_jamie",
+            "kind": "fact",
+            "key": "robot_memory_demos",
+            "summary": "likes robot demos",
+            "source": "live_chat",
+            "status": "active",
+        }
+        runner = RecordingQueryRunner(
+            results=[
+                [_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3"), _seed_row("ep4")],
+                [_neighbor_row("ep1"), _neighbor_row("ep2"), _neighbor_row("ep3"), _neighbor_row("ep4")],
+                [existing],
+                [existing],
+                [{"memory_id": "mem_existing"}],
+                [{"linked_count": 4}],
+            ]
+        )
+        service = MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), FakeConsolidationProvider())
+
+        result = service.consolidate_person("person_jamie", cluster_limit=1)
+
+        self.assertEqual(result.updated_memory_ids, ["mem_existing"])
+        self.assertEqual(result.archived_memory_ids, [])
+        self.assertIn("unknown_memory_id", {item["reason"] for item in result.skipped_ops})
+        self.assertEqual(runner.queries[-1].parameters["episode_ids"], ["ep1", "ep2", "ep3", "ep4"])
+
+    def test_consolidation_rejects_nonempty_provider_metadata(self) -> None:
+        class FakeConsolidationProvider:
+            def consolidate(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "create",
+                            "kind": "fact",
+                            "key": "robot_memory_demos",
+                            "summary": "uses robot demos to understand memory systems",
+                            "supported_episode_ids": ["ep1", "ep2", "ep3", "ep4"],
+                            "metadata": {"extra": True},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(
+            results=[
+                [_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3"), _seed_row("ep4")],
+                [_neighbor_row("ep1"), _neighbor_row("ep2"), _neighbor_row("ep3"), _neighbor_row("ep4")],
+                [],
+            ]
+        )
+        service = MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), FakeConsolidationProvider())
+
+        result = service.consolidate_person("person_jamie", cluster_limit=1)
+
+        self.assertEqual(result.created_memory_ids, [])
+        self.assertIn("memory consolidation metadata must be empty", {item["reason"] for item in result.skipped_ops})
+        self.assertFalse(any("MERGE (m:MemoryItem" in query.query for query in runner.queries))
+
+    def test_consolidation_skips_provider_when_fewer_than_four_seed_episodes(self) -> None:
+        class FakeConsolidationProvider:
+            def consolidate(self, **kwargs):
+                raise AssertionError("provider should not be called")
+
+        runner = RecordingQueryRunner(results=[[_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3")]])
+        service = MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), FakeConsolidationProvider())
+
+        result = service.consolidate_person("person_jamie")
+
+        self.assertFalse(result.provider_called)
+        self.assertEqual(result.created_memory_ids, [])
+        self.assertEqual(len(runner.queries), 1)
+
+    def test_consolidate_all_isolates_per_person_errors(self) -> None:
+        class FakeConsolidationProvider:
+            def consolidate(self, **kwargs):
+                raise RuntimeError("provider unavailable")
+
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie"}],
+                [_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3"), _seed_row("ep4")],
+                [_neighbor_row("ep1"), _neighbor_row("ep2"), _neighbor_row("ep3"), _neighbor_row("ep4")],
+                [],
+            ]
+        )
+        service = MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), FakeConsolidationProvider())
+
+        result = service.consolidate_all(person_limit=5, cluster_limit=1)
+
+        self.assertEqual(result.person_results[0].person_id, "person_jamie")
+        self.assertEqual(result.person_results[0].error, "provider unavailable")
+        self.assertEqual(result.memory_errors, [{"person_id": "person_jamie", "error": "provider unavailable"}])
 
 
 class MemoryItemMarkdownTest(unittest.TestCase):
@@ -870,6 +1126,55 @@ class OpenAIMemoryExtractionProviderTest(unittest.TestCase):
         self.assertIn("bugs being debugged today", developer_prompt)
         self.assertIn("must be followup, not fact or preference", developer_prompt)
         self.assertIn("expire within a week", developer_prompt)
+
+
+class OpenAIMemoryConsolidationProviderTest(unittest.TestCase):
+    def test_consolidate_requests_structured_output_with_support_ids(self) -> None:
+        class FakeResponses:
+            def __init__(self) -> None:
+                self.kwargs = None
+
+            def create(self, **kwargs):
+                self.kwargs = kwargs
+                return {"output_text": '{"update": false, "ops": []}'}
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.responses = FakeResponses()
+
+        client = FakeClient()
+        provider = OpenAIMemoryConsolidationProvider(client=client)
+
+        payload = provider.consolidate(
+            person_id="person_jamie",
+            existing_memories=[],
+            episode_clusters=[
+                [
+                    {
+                        "episode_id": "ep1",
+                        "summary": "Jamie likes robot demos.",
+                        "transcript": "Jamie: I like robot demos.",
+                        "start_time": "2026-06-18T10:00:00+00:00",
+                        "end_time": "",
+                    }
+                ]
+            ],
+            current_time="2026-06-18T12:00:00+00:00",
+            min_evidence_episodes=4,
+        )
+
+        self.assertEqual(payload, {"update": False, "ops": []})
+        text_format = client.responses.kwargs["text"]["format"]
+        self.assertEqual(text_format["name"], "memory_consolidation")
+        op_schema = text_format["schema"]["properties"]["ops"]["items"]
+        self.assertIn("supported_episode_ids", op_schema["properties"])
+        self.assertIn("supported_episode_ids", op_schema["required"])
+        developer_prompt = client.responses.kwargs["input"][0]["content"]
+        self.assertIn("Do not invent episode IDs", developer_prompt)
+        self.assertIn("required minimum number", developer_prompt)
+        user_payload = json.loads(client.responses.kwargs["input"][1]["content"])
+        self.assertEqual(user_payload["min_evidence_episodes"], 4)
+        self.assertEqual(user_payload["episode_clusters"][0][0]["episode_id"], "ep1")
 
 
 if __name__ == "__main__":

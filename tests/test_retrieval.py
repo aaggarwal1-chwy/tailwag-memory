@@ -79,8 +79,8 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
 
         self.assertEqual(results[0].episode_id, "episode_1")
         self.assertEqual(results[0].score, 0.91)
-        self.assertIn("SEARCH node IN", runner.queries[0].query)
-        self.assertIn("VECTOR INDEX episode_summary_embedding", runner.queries[0].query)
+        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[0].query)
+        self.assertIn("WHERE node:Episode", runner.queries[0].query)
 
     def test_vector_search_can_use_transcript_index(self) -> None:
         runner = RecordingQueryRunner()
@@ -88,10 +88,10 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
 
         service.vector_search("chargers", target="transcript")
 
-        self.assertIn("VECTOR INDEX episode_transcript_embedding", runner.queries[0].query)
+        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[0].query)
 
     def test_search_clause_rejects_unknown_index_identifiers(self) -> None:
-        # SEARCH requires the vector index name as a Cypher identifier.
+        # Vector index names are interpolated as string literals from a known allowlist.
         with self.assertRaisesRegex(ValueError, "unsupported vector index"):
             _vector_search_clause("episode_summary_embedding) RETURN 1 //", "node", "limit")
 
@@ -115,8 +115,7 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(params["room_id"], "101")
         self.assertEqual(params["limit"], 5)
         self.assertEqual(params["candidate_limit"], 25)
-        self.assertIn("SEARCH node IN", runner.queries[0].query)
-        self.assertIn("VECTOR INDEX episode_summary_embedding", runner.queries[0].query)
+        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[0].query)
 
     def test_hybrid_search_supports_one_sided_place_filters(self) -> None:
         runner = RecordingQueryRunner()
@@ -162,7 +161,7 @@ class PersonRecognitionServiceTest(unittest.TestCase):
 
         self.assertEqual(results[0].person_id, "person_jamie")
         self.assertEqual(results[0].score, 0.98)
-        self.assertIn("VECTOR INDEX person_face_embedding", runner.queries[0].query)
+        self.assertIn("db.index.vector.queryNodes('person_face_embedding'", runner.queries[0].query)
         self.assertEqual(runner.queries[0].parameters["limit"], 3)
         self.assertEqual(runner.queries[0].parameters["candidate_limit"], 25)
         self.assertIn("node.consent_status = 'consented'", runner.queries[0].query)
@@ -174,7 +173,7 @@ class PersonRecognitionServiceTest(unittest.TestCase):
 
         service.by_audio_embedding([0.2] * 8, limit=4)
 
-        self.assertIn("VECTOR INDEX person_audio_embedding", runner.queries[0].query)
+        self.assertIn("db.index.vector.queryNodes('person_audio_embedding'", runner.queries[0].query)
         self.assertEqual(runner.queries[0].parameters["limit"], 4)
         self.assertIn("node.consent_status = 'consented'", runner.queries[0].query)
 
@@ -346,13 +345,13 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         assert source is not None
         self.assertEqual([item.item_id for item in source.items], ["episode_1", "episode_2"])
         self.assertEqual([item.score for item in source.items], [0.96, 0.88])
-        self.assertIn("VECTOR INDEX episode_summary_embedding", runner.queries[1].query)
-        self.assertIn("VECTOR INDEX episode_transcript_embedding", runner.queries[2].query)
+        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[1].query)
+        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[2].query)
         self.assertEqual(runner.queries[1].parameters["person_id"], "person_jamie")
         self.assertEqual(runner.queries[1].parameters["limit"], 10)
         self.assertEqual(runner.queries[1].parameters["candidate_limit"], 50)
         self.assertEqual(runner.queries[1].parameters["embedding"], runner.queries[2].parameters["embedding"])
-        self.assertTrue(all("SEARCH node IN" in query.query for query in runner.queries[1:]))
+        self.assertTrue(all("db.index.vector.queryNodes" in query.query for query in runner.queries[1:]))
         self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
 
     def test_source_for_person_whitespace_semantic_scope_uses_unscoped_context(self) -> None:

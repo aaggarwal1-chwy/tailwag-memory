@@ -32,6 +32,7 @@ Implemented now:
 - unified person context with durable memory context plus recent episode/event context and OpenAI-backed synthesis
 - memory context CLI command
 - transcript-derived person memory items
+- per-person memory consolidation from repeated episode evidence into `MemoryItem`
 - optional `Person.face_embedding`
 - optional `Person.audio_embedding`
 - graph and vector retrieval services
@@ -109,7 +110,7 @@ For package usage, JSON payload shapes, retrieval examples, and command workflow
 
 Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
 Episode summaries, transcripts, and memory item summaries are sent to OpenAI for text embeddings. Durable memory context is rendered locally, and recent event and episode context is sent to OpenAI when generating the synthesized part of person context. When `--semantic-scope` is provided for person context, the package first narrows episode evidence to vector-matched episodes for that person; unrelated recent history and events are not included.
-Memory item extraction sends caller-provided transcripts and a small set of existing candidate memory items to OpenAI when high-level episode recording or explicit memory backfill is used. `MemoryItem` is the narrow approved semantic-memory path for durable person preferences, boundaries, pets, facts, and follow-ups; it is not a broad ontology or triple store.
+Memory item extraction sends caller-provided transcripts and a small set of existing candidate memory items to OpenAI when high-level episode recording or explicit memory backfill is used. Memory consolidation sends bounded, person-scoped episode evidence clusters and existing memory items to OpenAI. `MemoryItem` is the narrow approved semantic-memory path for durable person preferences, boundaries, pets, facts, and follow-ups; it is not a broad ontology or triple store.
 
 ## Tests
 

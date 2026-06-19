@@ -7,7 +7,9 @@ from tailwag_memory.config import Settings
 from tailwag_memory.models import (
     EpisodeInput,
     EpisodeMemoryExtractionResult,
+    MemoryConsolidationResult,
     PersonInput,
+    PersonMemoryConsolidationResult,
     PersonMemoryExtractionResult,
     PlaceInput,
 )
@@ -179,6 +181,39 @@ class TailwagMemoryClientTest(unittest.TestCase):
         )
         self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4, 2)])
         self.assertEqual(synthesis_calls, [("person_jamie", 3, "chargers")])
+
+    def test_consolidate_memory_routes_single_person_and_all_people(self) -> None:
+        calls = []
+
+        class FakeConsolidationService:
+            def __init__(self, runner_arg, embeddings, provider) -> None:
+                pass
+
+            def consolidate_person(self, person_id: str, **kwargs):
+                calls.append(("person", person_id, kwargs))
+                return PersonMemoryConsolidationResult(person_id=person_id, created_memory_ids=["mem_1"])
+
+            def consolidate_all(self, **kwargs):
+                calls.append(("all", kwargs))
+                return MemoryConsolidationResult(
+                    person_results=[PersonMemoryConsolidationResult(person_id="person_jamie")]
+                )
+
+        with patch("tailwag_memory.client.MemoryConsolidationService", FakeConsolidationService):
+            client = TailwagMemoryClient(FakeRunner(), _settings())
+            single = client.consolidate_memory(person_id="person_jamie", min_evidence_episodes=4)
+            all_people = client.consolidate_memory(all_people=True, person_limit=7, min_evidence_episodes=5)
+
+        self.assertEqual(single.person_results[0].created_memory_ids, ["mem_1"])
+        self.assertEqual(all_people.person_results[0].person_id, "person_jamie")
+        self.assertEqual(calls[0][0], "person")
+        self.assertEqual(calls[0][1], "person_jamie")
+        self.assertEqual(calls[0][2]["min_evidence_episodes"], 4)
+        self.assertEqual(calls[1], ("all", {"person_limit": 7, "min_evidence_episodes": 5, "seed_limit": 25, "neighbor_limit": 12, "cluster_limit": 8, "episode_text_limit": 1200}))
+
+    def test_consolidate_memory_requires_person_or_all_people(self) -> None:
+        with self.assertRaisesRegex(ValueError, "person_id"):
+            TailwagMemoryClient(FakeRunner(), _settings()).consolidate_memory()
 
     def test_context_manager_closes_runner(self) -> None:
         runner = FakeRunner()

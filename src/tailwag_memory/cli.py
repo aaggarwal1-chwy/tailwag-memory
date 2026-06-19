@@ -12,6 +12,13 @@ from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import MockOpenAIEmbeddingProvider, OpenAIEmbeddingProvider
 from .ingestion import EventIngestionService
+from .memory_items import (
+    DEFAULT_CONSOLIDATION_CLUSTER_LIMIT,
+    DEFAULT_CONSOLIDATION_EPISODE_TEXT_LIMIT,
+    DEFAULT_CONSOLIDATION_NEIGHBOR_LIMIT,
+    DEFAULT_CONSOLIDATION_SEED_LIMIT,
+    DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
+)
 from .models import EpisodeInput, EventInput, SearchQuery
 from .retrieval import EpisodeRetrievalService, EventRetrievalService, PersonRecognitionService
 from .schema import initialize_schema
@@ -116,6 +123,44 @@ def main(argv: Sequence[str] | None = None) -> int:
     memory_extract_parser = memory_subparsers.add_parser("extract")
     memory_extract_parser.add_argument("--episode-id", required=True, help="stored episode id")
     memory_extract_parser.add_argument("--person-id", help="limit extraction to one linked participant")
+    memory_consolidate_parser = memory_subparsers.add_parser(
+        "consolidate",
+        help="consolidate repeated per-person episode evidence into memory items",
+    )
+    memory_consolidate_target = memory_consolidate_parser.add_mutually_exclusive_group(required=True)
+    memory_consolidate_target.add_argument("--person-id", help="person id to consolidate")
+    memory_consolidate_target.add_argument("--all", action="store_true", help="consolidate people with episode evidence")
+    memory_consolidate_parser.add_argument("--person-limit", type=int, default=100, help="maximum people for --all")
+    memory_consolidate_parser.add_argument(
+        "--min-evidence-episodes",
+        type=int,
+        default=DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
+        help="minimum distinct supporting episodes required for a pattern",
+    )
+    memory_consolidate_parser.add_argument(
+        "--seed-limit",
+        type=int,
+        default=DEFAULT_CONSOLIDATION_SEED_LIMIT,
+        help="maximum recent episodes to use as vector-search seeds",
+    )
+    memory_consolidate_parser.add_argument(
+        "--neighbor-limit",
+        type=int,
+        default=DEFAULT_CONSOLIDATION_NEIGHBOR_LIMIT,
+        help="maximum vector neighbors to inspect per seed episode",
+    )
+    memory_consolidate_parser.add_argument(
+        "--cluster-limit",
+        type=int,
+        default=DEFAULT_CONSOLIDATION_CLUSTER_LIMIT,
+        help="maximum candidate clusters sent to the provider",
+    )
+    memory_consolidate_parser.add_argument(
+        "--episode-text-limit",
+        type=int,
+        default=DEFAULT_CONSOLIDATION_EPISODE_TEXT_LIMIT,
+        help="maximum summary/transcript characters per evidence episode",
+    )
     memory_context_parser = memory_subparsers.add_parser("context")
     memory_context_parser.add_argument("--person-id", required=True, help="person id to summarize")
     memory_context_parser.add_argument("--limit", type=int, default=10, help="maximum context items to retrieve")
@@ -184,6 +229,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                         recent_episode_limit=args.recent_episode_limit,
                     )
                 )
+                return 0
+            if args.memory_command == "consolidate":
+                result = client.consolidate_memory(
+                    person_id=args.person_id,
+                    all_people=args.all,
+                    person_limit=args.person_limit,
+                    min_evidence_episodes=args.min_evidence_episodes,
+                    seed_limit=args.seed_limit,
+                    neighbor_limit=args.neighbor_limit,
+                    cluster_limit=args.cluster_limit,
+                    episode_text_limit=args.episode_text_limit,
+                )
+                print(json.dumps(asdict(result), sort_keys=True))
                 return 0
             try:
                 result = client.extract_memory_for_episode(

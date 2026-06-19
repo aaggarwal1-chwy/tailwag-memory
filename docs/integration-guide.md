@@ -105,6 +105,8 @@ tailwag person context --person-id person_jamie --semantic-scope "chargers"
 tailwag memory context --person-id person_jamie --current-text "robot demo later today"
 tailwag memory extract --episode-id episode_example_001
 tailwag memory extract --episode-id episode_example_001 --person-id person_jamie
+tailwag memory consolidate --person-id person_jamie
+tailwag memory consolidate --all --person-limit 100
 tailwag person search-face --embedding-file examples/face-embedding.json
 tailwag person search-audio --embedding-file examples/audio-embedding.json
 ```
@@ -612,6 +614,32 @@ with TailwagMemoryClient.from_env() as memory:
 The record result includes `episode_id`, `memory_results`, and `memory_errors`. Each per-person memory result includes `person_id`, `update_requested`, `created_memory_ids`, `updated_memory_ids`, `archived_memory_ids`, `skipped_ops`, and `error`. `update_requested` reflects extractor intent; actual changes are the non-empty created, updated, or archived lists.
 
 High-level episode recording checks every participant. Existing-episode CLI backfills default to speaker participants, falling back to all participants when no speaker role is present. Use `--person-id` or `person_id=` to narrow extraction for debugging.
+
+## Consolidate Repeated Person Memory Evidence
+
+Episode memory extraction works one episode at a time. For slower background work, Tailwag can also consolidate repeated per-person episode evidence into the same `MemoryItem` shape:
+
+```python
+with TailwagMemoryClient.from_env() as memory:
+    result = memory.consolidate_memory(person_id="person_jamie")
+```
+
+For local or scheduled runs, use the CLI:
+
+```bash
+tailwag memory consolidate --person-id person_jamie
+tailwag memory consolidate --all --person-limit 100
+```
+
+The consolidation pass uses Neo4j episode summary vector search to reduce candidate evidence before calling OpenAI. It stays person-scoped, requires four distinct supporting episodes by default, and validates every provider-supplied supporting episode ID against the fetched candidate episodes before writing any `SUPPORTED_BY` relationship. Duplicate episode IDs count once, unknown episode IDs do not count, and operations that fall below the threshold are skipped.
+
+The tunable defaults are intentionally isolated for testing:
+
+```bash
+tailwag memory consolidate --person-id person_jamie --min-evidence-episodes 4 --seed-limit 25 --neighbor-limit 12 --cluster-limit 8
+```
+
+This is not the deferred semantic consolidation queue and does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
 
 Memory extraction supports these person-scoped memory item kinds:
 

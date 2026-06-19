@@ -6,7 +6,13 @@ from .db import Neo4jQueryRunner, QueryRunner
 from .embeddings import EmbeddingProvider, MockOpenAIEmbeddingProvider, OpenAIConfigurationError, OpenAIEmbeddingProvider
 from .ingestion import EpisodeIngestionService, EventIngestionService
 from .memory_context import PersonMemoryContextService
-from .memory_items import EpisodeMemoryExtractionService, MemoryItemService
+from .memory_items import (
+    DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
+    EpisodeMemoryExtractionService,
+    MemoryConsolidationService,
+    MemoryItemService,
+    OpenAIMemoryConsolidationProvider,
+)
 from .models import (
     EpisodeInput,
     EpisodeMemoryExtractionResult,
@@ -17,10 +23,12 @@ from .models import (
     EventResult,
     MemoryItemInput,
     MemoryItemResult,
+    MemoryConsolidationResult,
     PersonContextItem,
     PersonContextSource,
     PersonContextTranscriptLine,
     PersonInput,
+    PersonMemoryConsolidationResult,
     PersonMemoryExtractionResult,
     PersonRecognitionResult,
     PlaceInput,
@@ -49,11 +57,15 @@ __all__ = [
     "EventInput",
     "EventResult",
     "EventRetrievalService",
+    "DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES",
+    "MemoryConsolidationResult",
+    "MemoryConsolidationService",
     "MemoryItemInput",
     "MemoryItemResult",
     "MemoryItemService",
     "MockOpenAIEmbeddingProvider",
     "Neo4jQueryRunner",
+    "OpenAIMemoryConsolidationProvider",
     "OpenAIConfigurationError",
     "OpenAIEmbeddingProvider",
     "PersonContextItem",
@@ -62,6 +74,7 @@ __all__ = [
     "PersonContextSynthesisService",
     "PersonContextTranscriptLine",
     "PersonInput",
+    "PersonMemoryConsolidationResult",
     "PersonMemoryContextService",
     "PersonMemoryExtractionResult",
     "PersonRecognitionResult",
