@@ -3,16 +3,16 @@ name = "tailwag-memory"
 version = "0.1.0"
 description = "Neo4j-only hybrid memory service with OpenAI-backed embeddings and person context synthesis."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
-  "neo4j>=5.20.0",
-  "openai>=1.68.0",
-  "slack-sdk>=3.27.0",
+  "neo4j>=5.20.0,<6.0.0",
+  "openai>=1.104.2,<3.0.0",
+  "slack-sdk>=3.27.0,<4.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0.0",
+  "pytest>=8.2.0,<9.0.0",
 ]
 
 [project.scripts]
