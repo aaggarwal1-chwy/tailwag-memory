@@ -149,68 +149,20 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertEqual(query.parameters["email"], "jamie@example.com")
         self.assertEqual(query.parameters["new_person_id"], "person_argos_jamie")
         self.assertIn("updated_at", query.parameters)
-        self.assertIn("toLower(trim(email_match.email)) = toLower($email)", query.query)
-        self.assertIn("WITH collect(email_match) AS email_matches", query.query)
-        self.assertIn(
-            "[person IN email_matches WHERE canonical IS NULL OR person <> canonical]",
-            query.query,
-        )
-        self.assertIn("WHERE size(candidates) = 1", query.query)
-        self.assertIn(
-            "OPTIONAL MATCH (canonical:Person {id: $new_person_id})",
-            query.query,
-        )
-        self.assertIn("WHERE canonical IS NULL OR canonical = matched", query.query)
-        self.assertIn("SET matched.id = $new_person_id", query.query)
-        self.assertIn("matched.updated_at = $updated_at", query.query)
-        self.assertIn("RETURN person.id AS person_id", query.query)
-        text = query.query + repr(query.parameters)
-        self.assertNotIn("org_id", text)
-        self.assertNotIn("identity_status", text)
-        self.assertNotIn("confidence", text)
-
-    def test_rekey_by_email_merges_slack_temp_when_canonical_exists(self) -> None:
-        runner = RecordingQueryRunner(results=[[{"person_id": "person_argos_jamie"}]])
-        service = PersonIngestionService(runner)
-
-        rekeyed = service.rekey_by_email("jamie@example.com", "person_argos_jamie")
-
-        self.assertTrue(rekeyed)
-        query = runner.queries[0]
-        self.assertIn("matched.id STARTS WITH 'slack:'", query.query)
-        self.assertIn(
-            "canonical.display_name = coalesce(canonical.display_name, matched.display_name)",
-            query.query,
-        )
-        self.assertIn(
-            "canonical.email = coalesce(canonical.email, matched.email)",
-            query.query,
-        )
-        self.assertIn(
-            "OPTIONAL MATCH (matched)-[old_participation:PARTICIPATED_IN]->(episode:Episode)",
-            query.query,
-        )
-        self.assertIn(
-            "MERGE (canonical)-[new_participation:PARTICIPATED_IN]->(episode)",
-            query.query,
-        )
-        self.assertIn(
-            "OPTIONAL MATCH (matched)-[old_memory:HAS_MEMORY]->(memory:MemoryItem)",
-            query.query,
-        )
-        self.assertIn("MERGE (canonical)-[:HAS_MEMORY]->(memory)", query.query)
-        self.assertIn(
-            "OPTIONAL MATCH (matched)-[old_attendance:ATTENDED]->(event:Event)",
-            query.query,
-        )
-        self.assertIn(
-            "MERGE (canonical)-[new_attendance:ATTENDED]->(event)",
-            query.query,
-        )
-        self.assertIn("DETACH DELETE matched", query.query)
+        self.assertIn("toLower(trim(p.email)) = toLower($email)", query.query)
+        self.assertIn("WITH collect(p) AS matches", query.query)
+        self.assertIn("WHERE size(matches) = 1", query.query)
+        self.assertIn("WHERE p.id = $new_person_id OR p.id STARTS WITH 'slack:'", query.query)
+        self.assertIn("OPTIONAL MATCH (existing:Person {id: $new_person_id})", query.query)
+        self.assertIn("WHERE existing IS NULL OR existing = p", query.query)
+        self.assertIn("SET p.id = $new_person_id", query.query)
+        self.assertIn("p.updated_at = $updated_at", query.query)
+        self.assertIn("RETURN p.id AS person_id", query.query)
         text = query.query + repr(query.parameters)
         self.assertNotIn("face_embedding", text)
         self.assertNotIn("audio_embedding", text)
+        self.assertNotIn("MERGE (canonical)", query.query)
+        self.assertNotIn("DETACH DELETE", query.query)
         self.assertNotIn("org_id", text)
         self.assertNotIn("identity_status", text)
         self.assertNotIn("confidence", text)
@@ -230,6 +182,25 @@ class PersonIngestionServiceTest(unittest.TestCase):
             service.rekey_by_email("", "person_argos_jamie")
         with self.assertRaisesRegex(ValueError, "new_person_id"):
             service.rekey_by_email("jamie@example.com", " ")
+
+    def test_canonical_id_by_email_returns_unambiguous_argos_person_id(self) -> None:
+        runner = RecordingQueryRunner(results=[[{"person_id": "person_argos_jamie"}]])
+        service = PersonIngestionService(runner)
+
+        person_id = service.canonical_id_by_email(" jamie@example.com ")
+
+        self.assertEqual(person_id, "person_argos_jamie")
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["email"], "jamie@example.com")
+        self.assertIn("toLower(trim(p.email)) = toLower($email)", query.query)
+        self.assertIn("p.id STARTS WITH 'person_'", query.query)
+        self.assertIn("WHERE size(person_ids) = 1", query.query)
+
+    def test_canonical_id_by_email_returns_none_when_unresolved(self) -> None:
+        service = PersonIngestionService(RecordingQueryRunner(results=[[]]))
+
+        self.assertIsNone(service.canonical_id_by_email("jamie@example.com"))
+        self.assertIsNone(service.canonical_id_by_email(""))
 
 
 class EpisodeIngestionServiceTest(unittest.TestCase):

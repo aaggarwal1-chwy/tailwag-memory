@@ -114,7 +114,7 @@ The integration guide is the source of truth for the migration sequence and comp
 Notes:
 
 - `id` comes from the calling system.
-- `email` is optional identity evidence for future linking; it is not the unique person key.
+- `email` is optional identity evidence for guarded canonical convergence; it is not the unique person key.
 - `last_seen` is updated when the person participates in a newer episode, attends a newer event, or receives an explicit person-only identity upsert from the calling system.
 - `identity_status` is intentionally excluded.
 - `face_embedding` and `audio_embedding` are optional biometric vectors supplied by the calling system or upstream recognition models.

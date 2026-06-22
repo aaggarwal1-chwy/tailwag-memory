@@ -7,9 +7,11 @@ import json
 from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from .models import EpisodeInput, EpisodeRecordResult, PersonInput, PlaceInput
+
+PersonIdResolver = Callable[[str], str | None]
 
 
 class SlackConversationClient(Protocol):
@@ -215,6 +217,7 @@ class SlackMemoryPoller:
         *,
         retention_class: str = "standard",
         active_thread_hours: float = 24.0,
+        person_id_resolver: PersonIdResolver | None = None,
     ) -> None:
         """Create a poller for a Slack client and episode recorder."""
         self.client = client
@@ -222,6 +225,7 @@ class SlackMemoryPoller:
         self.state_path = state_path
         self.retention_class = retention_class
         self.active_thread_hours = active_thread_hours
+        self.person_id_resolver = person_id_resolver or _recorder_person_id_resolver(episode_recorder)
 
     def poll_once(
         self,
@@ -299,6 +303,7 @@ class SlackMemoryPoller:
                     messages=messages,
                     client=self.client,
                     retention_class=self.retention_class,
+                    person_id_resolver=self.person_id_resolver,
                 )
                 episode_records.append(
                     self.episode_recorder.record_episode(
@@ -335,6 +340,7 @@ def build_episode_from_slack_thread(
     messages: list[dict[str, Any]],
     client: SlackConversationClient,
     retention_class: str = "standard",
+    person_id_resolver: PersonIdResolver | None = None,
 ) -> EpisodeInput:
     """Convert a Slack thread into an episode input."""
     ordered = sorted([message for message in messages if _is_memory_message(message)], key=lambda item: float(item["ts"]))
@@ -353,13 +359,19 @@ def build_episode_from_slack_thread(
             user_profiles[user_id] = client.user_profile(user_id)
         user_profile = user_profiles[user_id]
         display_name = user_profile.display_name or f"slack:{user_id}"
+        email = _normalize_email(user_profile.email)
 
         if user_id not in seen_users:
+            person_id, resolved_to_canonical = _resolve_slack_person_id(
+                slack_user_id=user_id,
+                email=email,
+                person_id_resolver=person_id_resolver,
+            )
             participants.append(
                 PersonInput(
-                    id=f"slack:{user_id}",
-                    display_name=display_name,
-                    email=_normalize_email(user_profile.email),
+                    id=person_id,
+                    display_name=None if resolved_to_canonical else display_name,
+                    email=None if resolved_to_canonical else email,
                     role="speaker",
                     source="slack",
                 )
@@ -386,6 +398,27 @@ def build_episode_from_slack_thread(
         place=PlaceInput(building_code="SLACK", room_id=channel),
         participants=participants,
     )
+
+
+def _recorder_person_id_resolver(episode_recorder: EpisodeRecorder) -> PersonIdResolver | None:
+    """Return a canonical email resolver exposed by the recorder, when present."""
+    resolver = getattr(episode_recorder, "canonical_person_id_by_email", None)
+    return resolver if callable(resolver) else None
+
+
+def _resolve_slack_person_id(
+    *,
+    slack_user_id: str,
+    email: str | None,
+    person_id_resolver: PersonIdResolver | None,
+) -> tuple[str, bool]:
+    """Resolve a Slack participant to an existing Argos person id when possible."""
+    fallback_person_id = f"slack:{slack_user_id}"
+    if email and person_id_resolver is not None:
+        resolved = str(person_id_resolver(email) or "").strip()
+        if resolved:
+            return resolved, resolved != fallback_person_id
+    return fallback_person_id, False
 
 
 def _is_memory_message(message: dict[str, Any]) -> bool:

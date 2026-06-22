@@ -593,7 +593,7 @@ Runtime behavior should map as follows:
 - After completed attributed live-chat turns, record one Tailwag conversation episode for the buffered segment and let Tailwag extraction create, update, or archive durable person memory items.
 - When face recognition records a recognized interaction, either write a short encounter episode or use a compatibility `record_encounter` implementation that stores short-lived prompt context in Tailwag-backed form.
 - When Slack memory is enabled, prefer episode-based Slack ingestion. If Argos keeps its existing background service controls, the service should call Tailwag polling/recording rather than writing SQLite memory operations.
-- Keep Argos identity linking explicit. Slack people such as `slack:<user_id>` and robot-recognized people should only converge when Argos supplies a shared caller-owned `Person.id` or a deliberate identity-linking step.
+- Keep Argos identity linking explicit. Slack people use existing canonical Argos `person_*` IDs only when Slack email resolves to exactly one canonical person; otherwise they remain temporary `slack:<user_id>` people until Argos supplies a caller-owned `Person.id` and email rekeying converges them.
 
 Compatibility tests in `argos-agent` should cover startup wiring, turn-context prompt output, preferred-language propagation, live-chat segment recording, face-recognition encounter recording, Slack background enable/disable behavior, and any replacement for the old `memory.manage_memory` CLI.
 
@@ -639,7 +639,7 @@ with TailwagMemoryClient.from_env() as memory:
     )
 ```
 
-`rekey_person_by_email()` changes the `Person.id` property in place, so existing Slack episodes, events, and memory items stay attached to the same graph node. Existing `MemoryItem.id` values are not renamed, so Argos should use person-scoped Tailwag APIs and graph relationships after rekey rather than assuming older deterministic memory IDs include the new person ID. The method returns `False` when the email does not identify exactly one person, or when the canonical ID is already used by a different `Person` node. Argos should treat those cases as identity-review work rather than auto-merging people.
+`rekey_person_by_email()` changes one Slack-owned temporary `Person.id` property in place, so existing Slack episodes, events, and memory items stay attached to the same graph node. Existing `MemoryItem.id` values are not renamed, so Argos should use person-scoped Tailwag APIs and graph relationships after rekey rather than assuming older deterministic memory IDs include the new person ID. The method returns `False` when the email does not identify exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when the canonical ID is already used by a different `Person` node. Argos should treat those cases as identity-review work rather than auto-merging people.
 
 If Argos needs to retire an identity or revoke biometric recognition, archive the person instead of deleting the node:
 

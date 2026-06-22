@@ -117,7 +117,7 @@ class PersonIngestionService:
         return bool(rows)
 
     def rekey_by_email(self, email: str, new_person_id: str) -> bool:
-        """Converge one email-matched Slack person onto a caller-owned canonical id."""
+        """Rename one email-matched Slack person to a caller-owned canonical id."""
         rendered_email = str(email or "").strip()
         rendered_person_id = str(new_person_id or "").strip()
         if not rendered_email:
@@ -128,67 +128,18 @@ class PersonIngestionService:
         written_at = utc_now_iso()
         rows = self.runner.run(
             """
-            MATCH (email_match:Person)
-            WHERE email_match.email IS NOT NULL AND toLower(trim(email_match.email)) = toLower($email)
-            WITH collect(email_match) AS email_matches
-            OPTIONAL MATCH (canonical:Person {id: $new_person_id})
-            WITH email_matches, canonical,
-                [person IN email_matches WHERE canonical IS NULL OR person <> canonical] AS merge_matches
-            WITH canonical,
-                CASE
-                    WHEN canonical IS NULL THEN email_matches
-                    WHEN canonical IN email_matches AND size(merge_matches) = 0 THEN [canonical]
-                    ELSE merge_matches
-                END AS candidates
-            WHERE size(candidates) = 1
-            WITH candidates[0] AS matched, canonical
-            WHERE canonical IS NULL OR canonical = matched OR matched.id STARTS WITH 'slack:'
-            CALL {
-                WITH matched, canonical
-                WITH matched, canonical
-                WHERE canonical IS NULL OR canonical = matched
-                SET matched.id = $new_person_id,
-                    matched.updated_at = $updated_at
-                RETURN matched AS person
-                UNION
-                WITH matched, canonical
-                WITH matched, canonical
-                WHERE canonical IS NOT NULL AND canonical <> matched
-                SET canonical.display_name = coalesce(canonical.display_name, matched.display_name),
-                    canonical.email = coalesce(canonical.email, matched.email),
-                    canonical.consent_status = coalesce(canonical.consent_status, matched.consent_status),
-                    canonical.status = coalesce(canonical.status, matched.status),
-                    canonical.archived_at = coalesce(canonical.archived_at, matched.archived_at),
-                    canonical.last_seen = coalesce(canonical.last_seen, matched.last_seen),
-                    canonical.updated_at = $updated_at
-                WITH matched, canonical
-                OPTIONAL MATCH (matched)-[old_participation:PARTICIPATED_IN]->(episode:Episode)
-                FOREACH (_ IN CASE WHEN episode IS NULL THEN [] ELSE [1] END |
-                    MERGE (canonical)-[new_participation:PARTICIPATED_IN]->(episode)
-                    SET new_participation.role = coalesce(new_participation.role, old_participation.role),
-                        new_participation.source = coalesce(new_participation.source, old_participation.source)
-                    DELETE old_participation
-                )
-                WITH DISTINCT matched, canonical
-                OPTIONAL MATCH (matched)-[old_memory:HAS_MEMORY]->(memory:MemoryItem)
-                FOREACH (_ IN CASE WHEN memory IS NULL THEN [] ELSE [1] END |
-                    MERGE (canonical)-[:HAS_MEMORY]->(memory)
-                    DELETE old_memory
-                )
-                WITH DISTINCT matched, canonical
-                OPTIONAL MATCH (matched)-[old_attendance:ATTENDED]->(event:Event)
-                FOREACH (_ IN CASE WHEN event IS NULL THEN [] ELSE [1] END |
-                    MERGE (canonical)-[new_attendance:ATTENDED]->(event)
-                    SET new_attendance.response = coalesce(new_attendance.response, old_attendance.response),
-                        new_attendance.source = coalesce(new_attendance.source, old_attendance.source),
-                        new_attendance.response_time = coalesce(new_attendance.response_time, old_attendance.response_time)
-                    DELETE old_attendance
-                )
-                WITH DISTINCT matched, canonical
-                DETACH DELETE matched
-                RETURN canonical AS person
-            }
-            RETURN person.id AS person_id
+            MATCH (p:Person)
+            WHERE p.email IS NOT NULL AND toLower(trim(p.email)) = toLower($email)
+            WITH collect(p) AS matches
+            WHERE size(matches) = 1
+            WITH matches[0] AS p
+            WHERE p.id = $new_person_id OR p.id STARTS WITH 'slack:'
+            OPTIONAL MATCH (existing:Person {id: $new_person_id})
+            WITH p, existing
+            WHERE existing IS NULL OR existing = p
+            SET p.id = $new_person_id,
+                p.updated_at = $updated_at
+            RETURN p.id AS person_id
             """,
             {
                 "email": rendered_email,
@@ -197,6 +148,28 @@ class PersonIngestionService:
             },
         )
         return bool(rows)
+
+    def canonical_id_by_email(self, email: str) -> str | None:
+        """Return one canonical Argos person id for an email when unambiguous."""
+        rendered_email = str(email or "").strip()
+        if not rendered_email:
+            return None
+
+        rows = self.runner.run(
+            """
+            MATCH (p:Person)
+            WHERE p.email IS NOT NULL
+                AND toLower(trim(p.email)) = toLower($email)
+                AND p.id STARTS WITH 'person_'
+            WITH collect(DISTINCT p.id) AS person_ids
+            WHERE size(person_ids) = 1
+            RETURN person_ids[0] AS person_id
+            """,
+            {"email": rendered_email},
+        )
+        if not rows:
+            return None
+        return str(rows[0].get("person_id") or "").strip() or None
 
 
 class EpisodeIngestionService:

@@ -115,6 +115,26 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(calls, [("rekey", runner, "jamie@example.com", "person_argos_jamie")])
 
+    def test_canonical_person_id_by_email_delegates_without_initializing_embeddings(self) -> None:
+        runner = FakeRunner()
+        calls = []
+
+        class FakePersonIngestion:
+            def __init__(self, runner_arg) -> None:
+                self.runner_arg = runner_arg
+
+            def canonical_id_by_email(self, email: str) -> str | None:
+                calls.append(("canonical", self.runner_arg, email))
+                return "person_jamie"
+
+        client = TailwagMemoryClient(runner, _settings())
+        with patch.object(client, "_embeddings", side_effect=AssertionError("embeddings should not be initialized")):
+            with patch("tailwag_memory.client.PersonIngestionService", FakePersonIngestion):
+                result = client.canonical_person_id_by_email("jamie@example.com")
+
+        self.assertEqual(result, "person_jamie")
+        self.assertEqual(calls, [("canonical", runner, "jamie@example.com")])
+
     def test_record_episode_ingests_and_extracts_memory_by_default(self) -> None:
         runner = FakeRunner()
         calls = []

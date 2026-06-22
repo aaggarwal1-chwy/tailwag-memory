@@ -68,6 +68,10 @@ class TailwagMemoryClient:
         """Rekey one email-matched person to a canonical id without embeddings."""
         return PersonIngestionService(self.runner).rekey_by_email(email, new_person_id)
 
+    def canonical_person_id_by_email(self, email: str) -> str | None:
+        """Return one canonical Argos person id for an email when unambiguous."""
+        return PersonIngestionService(self.runner).canonical_id_by_email(email)
+
     def person_context(
         self,
         person_id: str,

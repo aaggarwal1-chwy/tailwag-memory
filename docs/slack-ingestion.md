@@ -8,11 +8,11 @@ The adapter does not add Slack-specific Neo4j labels or relationships. It maps S
 
 - Slack channel: `Place` with `building_code="SLACK"` and `room_id=<channel_id>`
 - Slack thread/root message: `Episode` with ID `slack:<channel_id>:<thread_ts>`
-- Slack user: `Person` with ID `slack:<user_id>`
-- Slack user email: stored on `Person.email` only when `--include-email` is used and Slack provides it
+- Slack user: existing canonical Argos `person_*` when `--include-email` is used and exactly one canonical person already has the Slack profile email; otherwise `Person` with ID `slack:<user_id>`
+- Slack user email: stored on unresolved Slack-owned people only when `--include-email` is used and Slack provides it
 - Slack participation: `PARTICIPATED_IN` with `source="slack"` and `role="speaker"`
 
-Slack-created people do not include face or audio embeddings. Optional email is identity evidence for a future linking agent; it does not replace the Slack-owned `Person.id`.
+Slack-created people do not include face or audio embeddings. When Slack resolves to an existing canonical Argos person, Slack uses the canonical ID for participation but does not send Slack display name or email into the person upsert, so Argos-owned profile fields remain authoritative. When no canonical email match exists, the Slack-owned temporary person keeps the normalized email as identity evidence for later convergence.
 
 Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. Episode summaries include the root speaker name so person context synthesis does not mistake a reply participant for the person who asked the root question. Person context synthesis also receives those timestamped transcript lines as structured evidence so relative words like `today` can be resolved against the message date.
 

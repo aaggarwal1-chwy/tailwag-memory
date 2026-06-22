@@ -142,7 +142,7 @@ Notes:
 
 ### `rekey_person_by_email(email, new_person_id)`
 
-Changes one existing person's `Person.id` to a caller-owned canonical ID by matching their email address.
+Changes one existing Slack-owned temporary person's `Person.id` to a caller-owned canonical ID by matching their email address.
 
 Parameters:
 
@@ -155,10 +155,10 @@ Returns: `bool`, true when one person was rekeyed.
 
 Notes:
 
-- This endpoint is intended for Slack/email identity convergence to an Argos canonical ID after Argos confirms the match.
+- This endpoint is intended for Slack-first identity convergence to an Argos canonical ID after Argos confirms the match.
 - Rekeying changes the `id` property in place, so existing episode, event, and memory item relationships stay attached to the same graph node.
 - Rekeying does not rename existing `MemoryItem.id` values; use person-scoped APIs and relationships after rekey rather than assuming older deterministic memory IDs include the new person ID.
-- The operation returns false when the email does not match exactly one person, or when `new_person_id` is already used by a different `Person` node.
+- The operation returns false when the email does not match exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when `new_person_id` is already used by a different `Person` node.
 - This endpoint does not generate OpenAI text embeddings and does not require `OPENAI_API_KEY`.
 
 ### `record_episode(episode, *, extract_memory=True)`
@@ -367,7 +367,7 @@ Methods:
 | --- | --- | --- | --- |
 | `upsert(person)` | `PersonInput` | `str` | Create or update a person profile. Omitted fields preserve existing values. |
 | `archive(person_id)` | person ID | `bool` | Mark the person archived and clear stored biometric vectors while keeping historical graph data. |
-| `rekey_by_email(email, new_person_id)` | email, new person ID | `bool` | Replace one email-matched person's ID with a canonical ID while preserving graph relationships; false when the email or canonical ID is not unique-safe. |
+| `rekey_by_email(email, new_person_id)` | email, new person ID | `bool` | Replace one Slack-owned email-matched person's ID with a canonical ID while preserving graph relationships; false when the email or canonical ID is not unique-safe. |
 
 ### `EventIngestionService(runner).ingest(event)`
 
@@ -473,7 +473,7 @@ from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
 settings = load_settings()
 
 with TailwagMemoryClient.from_env() as memory:
-    slack = SlackWebApiClient(settings.slack_bot_token, include_email=False)
+    slack = SlackWebApiClient(settings.slack_bot_token, include_email=True)
     poller = SlackMemoryPoller(
         client=slack,
         episode_recorder=memory,
@@ -488,7 +488,7 @@ print(result.ingested_episode_ids)
 
 Fetches Slack history, replies, and user profiles through the Slack Web API.
 
-### `SlackMemoryPoller(client, episode_recorder, state_path, *, retention_class="standard", active_thread_hours=24.0)`
+### `SlackMemoryPoller(client, episode_recorder, state_path, *, retention_class="standard", active_thread_hours=24.0, person_id_resolver=None)`
 
 Creates a poller that converts Slack threads into Tailwag episodes.
 
@@ -497,10 +497,11 @@ Constructor parameters:
 | Name | Type | Meaning |
 | --- | --- | --- |
 | `client` | `SlackConversationClient` | Slack API client or test fake. |
-| `episode_recorder` | `EpisodeRecorder` | Object with `record_episode(episode, extract_memory=True)`. `TailwagMemoryClient` satisfies this. |
+| `episode_recorder` | `EpisodeRecorder` | Object with `record_episode(episode, extract_memory=True)`. `TailwagMemoryClient` satisfies this and also exposes canonical email resolution. |
 | `state_path` | `Path` | JSON cursor state file. |
 | `retention_class` | `str` | Retention class assigned to Slack episodes. |
 | `active_thread_hours` | `float` | How long standalone roots stay active for later replies. |
+| `person_id_resolver` | `Callable[[str], str \| None] \| None` | Optional normalized-email resolver. When omitted, the poller uses `episode_recorder.canonical_person_id_by_email` when available. |
 
 ### `poll_once(channel, *, backfill_hours=None, force_backfill=False, history_limit=200, reply_limit=200, extract_memory=True)`
 
@@ -532,7 +533,7 @@ Return fields:
 | `ingested_episode_ids` | Recorded episode IDs. |
 | `episode_records` | `EpisodeRecordResult` values from recording. |
 
-### `build_episode_from_slack_thread(channel, messages, client, retention_class="standard")`
+### `build_episode_from_slack_thread(channel, messages, client, retention_class="standard", person_id_resolver=None)`
 
 Converts raw Slack messages into an `EpisodeInput` without writing it.
 
@@ -540,8 +541,10 @@ Slack mapping:
 
 - Slack channel becomes `PlaceInput(building_code="SLACK", room_id=<channel_id>)`.
 - Slack thread/root becomes `EpisodeInput.id="slack:<channel_id>:<thread_ts>"`.
-- Slack users become `PersonInput.id="slack:<user_id>"`.
-- Optional Slack email is stored on `Person.email` only when `include_email=True`.
+- Slack users become an existing canonical Argos `person_*` when `person_id_resolver` returns one for the normalized Slack profile email.
+- Unresolved Slack users become `PersonInput.id="slack:<user_id>"`.
+- Optional Slack email is stored on unresolved Slack-owned `Person.email` only when `include_email=True`.
+- Canonical-resolved Slack participants do not send Slack display name or email into person upsert; the Slack display name is kept in transcript text.
 
 ## Result Models
 
