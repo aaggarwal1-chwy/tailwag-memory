@@ -2,11 +2,36 @@ from __future__ import annotations
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
-from .models import EpisodeInput, EventInput, utc_now_iso
+from .models import EpisodeInput, EventInput, PersonInput, utc_now_iso
 
 
-def _person_upsert_cypher(person_variable: str, id_property: str) -> str:
+def _person_upsert_cypher(
+    person_variable: str,
+    id_property: str,
+    *,
+    set_lifecycle_fields: bool = False,
+    monotonic_last_seen: bool = True,
+    preserve_archived_biometrics: bool = True,
+) -> str:
     """Return Cypher for consent-aware person upserts."""
+    last_seen_assignment = (
+        f"""CASE
+                      WHEN p.last_seen IS NULL OR datetime(p.last_seen) < datetime($last_seen) THEN $last_seen
+                      ELSE p.last_seen
+                    END"""
+        if monotonic_last_seen
+        else "$last_seen"
+    )
+    lifecycle_fields = (
+        """,
+                    p.updated_at = $updated_at,
+                    p.status = 'active',
+                    p.archived_at = NULL"""
+        if set_lifecycle_fields
+        else ""
+    )
+    archived_face_guard = "\n                      WHEN p.status = 'archived' THEN p.face_embedding" if preserve_archived_biometrics else ""
+    archived_audio_guard = "\n                      WHEN p.status = 'archived' THEN p.audio_embedding" if preserve_archived_biometrics else ""
     return f"""
                 MERGE (p:Person {{id: {person_variable}.{id_property}}})
                 SET p.display_name = coalesce({person_variable}.display_name, p.display_name),
@@ -14,18 +39,114 @@ def _person_upsert_cypher(person_variable: str, id_property: str) -> str:
                     p.consent_status = coalesce({person_variable}.consent_status, p.consent_status),
                     p.face_embedding = CASE
                       WHEN {person_variable}.consent_status IS NOT NULL AND {person_variable}.consent_status <> 'consented' THEN NULL
+                      {archived_face_guard}
                       ELSE coalesce({person_variable}.face_embedding, p.face_embedding)
                     END,
                     p.audio_embedding = CASE
                       WHEN {person_variable}.consent_status IS NOT NULL AND {person_variable}.consent_status <> 'consented' THEN NULL
+                      {archived_audio_guard}
                       ELSE coalesce({person_variable}.audio_embedding, p.audio_embedding)
                     END,
                     p.created_at = coalesce(p.created_at, $created_at),
-                    p.last_seen = CASE
-                      WHEN p.last_seen IS NULL OR datetime(p.last_seen) < datetime($last_seen) THEN $last_seen
-                      ELSE p.last_seen
-                    END
+                    p.last_seen = {last_seen_assignment}{lifecycle_fields}
                 """
+
+
+class PersonIngestionService:
+    """Persist low-level person records without episode or event context."""
+
+    def __init__(self, runner: QueryRunner) -> None:
+        """Store dependencies for person ingestion."""
+        self.runner = runner
+
+    def upsert(self, person: PersonInput) -> str:
+        """Upsert a person profile and return its id."""
+        written_at = utc_now_iso()
+        person_data = {
+            "id": person.id,
+            "display_name": person.display_name,
+            "email": person.email,
+            "consent_status": person.consent_status,
+            "face_embedding": person.face_embedding,
+            "audio_embedding": person.audio_embedding,
+        }
+
+        self.runner.run(
+            """
+            WITH $person AS person
+            """
+            + _person_upsert_cypher(
+                "person",
+                "id",
+                set_lifecycle_fields=True,
+                monotonic_last_seen=False,
+                preserve_archived_biometrics=False,
+            )
+            + """
+            RETURN p.id AS person_id
+            """,
+            {
+                "person": person_data,
+                "created_at": written_at,
+                "updated_at": written_at,
+                "last_seen": written_at,
+            },
+        )
+
+        return person.id
+
+    def archive(self, person_id: str) -> bool:
+        """Archive a person by id while preserving profile fields and relationships."""
+        written_at = utc_now_iso()
+        rows = self.runner.run(
+            """
+            MATCH (p:Person {id: $person_id})
+            SET p.status = 'archived',
+                p.archived_at = $archived_at,
+                p.updated_at = $updated_at,
+                p.face_embedding = NULL,
+                p.audio_embedding = NULL
+            RETURN p.id AS person_id
+            """,
+            {
+                "person_id": person_id,
+                "archived_at": written_at,
+                "updated_at": written_at,
+            },
+        )
+        return bool(rows)
+
+    def rekey_by_email(self, email: str, new_person_id: str) -> bool:
+        """Replace one email-matched person id with a caller-owned canonical id."""
+        rendered_email = str(email or "").strip()
+        rendered_person_id = str(new_person_id or "").strip()
+        if not rendered_email:
+            raise ValueError("email is required")
+        if not rendered_person_id:
+            raise ValueError("new_person_id is required")
+
+        written_at = utc_now_iso()
+        rows = self.runner.run(
+            """
+            MATCH (p:Person)
+            WHERE p.email IS NOT NULL AND toLower(trim(p.email)) = toLower($email)
+            WITH collect(p) AS matches
+            WHERE size(matches) = 1
+            WITH matches[0] AS p
+            OPTIONAL MATCH (existing:Person {id: $new_person_id})
+            WITH p, existing
+            WHERE existing IS NULL OR existing = p
+            SET p.id = $new_person_id,
+                p.updated_at = $updated_at
+            RETURN p.id AS person_id
+            """,
+            {
+                "email": rendered_email,
+                "new_person_id": rendered_person_id,
+                "updated_at": written_at,
+            },
+        )
+        return bool(rows)
 
 
 class EpisodeIngestionService:

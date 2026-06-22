@@ -104,6 +104,9 @@ The integration guide is the source of truth for the migration sequence and comp
   face_embedding,
   audio_embedding,
   last_seen,
+  status,
+  archived_at,
+  updated_at,
   created_at
 })
 ```
@@ -112,11 +115,12 @@ Notes:
 
 - `id` comes from the calling system.
 - `email` is optional identity evidence for future linking; it is not the unique person key.
-- `last_seen` is updated when the person participates in a newer episode.
+- `last_seen` is updated when the person participates in a newer episode, attends a newer event, or receives an explicit person-only identity upsert from the calling system.
 - `identity_status` is intentionally excluded.
 - `face_embedding` and `audio_embedding` are optional biometric vectors supplied by the calling system or upstream recognition models.
+- `status` can be set to `archived` by person-only archive. Archived people keep historical graph data, but stored biometric vectors are removed and recognition excludes them.
 - Raw face images and raw audio are not stored by this package.
-- On first encounter, the caller should provide consent/profile data. Later episode payloads can reference the existing person by `id` only.
+- On first encounter or explicit identity enrollment, the caller should provide consent/profile data. Later episode payloads can reference the existing person by `id` only. Re-enrolling an archived person should use the explicit person-only upsert path.
 
 ### Episode
 

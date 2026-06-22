@@ -165,6 +165,7 @@ class PersonRecognitionServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters["limit"], 3)
         self.assertEqual(runner.queries[0].parameters["candidate_limit"], 25)
         self.assertIn("node.consent_status = 'consented'", runner.queries[0].query)
+        self.assertIn("coalesce(node.status, 'active') <> 'archived'", runner.queries[0].query)
         self.assertIn("LIMIT $limit", runner.queries[0].query)
 
     def test_audio_search_uses_person_audio_index(self) -> None:
@@ -176,6 +177,7 @@ class PersonRecognitionServiceTest(unittest.TestCase):
         self.assertIn("db.index.vector.queryNodes('person_audio_embedding'", runner.queries[0].query)
         self.assertEqual(runner.queries[0].parameters["limit"], 4)
         self.assertIn("node.consent_status = 'consented'", runner.queries[0].query)
+        self.assertIn("coalesce(node.status, 'active') <> 'archived'", runner.queries[0].query)
 
 
 class EventRetrievalServiceTest(unittest.TestCase):

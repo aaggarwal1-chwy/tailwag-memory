@@ -193,6 +193,7 @@ class PersonRecognitionService:
             _vector_search_clause(index_name, "node", "candidate_limit")
             + """
             WHERE node.consent_status = 'consented'
+              AND coalesce(node.status, 'active') <> 'archived'
             RETURN node.id AS person_id,
                    node.display_name AS display_name,
                    node.consent_status AS consent_status,

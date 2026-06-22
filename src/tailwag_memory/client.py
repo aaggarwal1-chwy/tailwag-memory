@@ -5,7 +5,7 @@ from datetime import datetime
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
-from .ingestion import EpisodeIngestionService
+from .ingestion import EpisodeIngestionService, PersonIngestionService
 from .memory_context import PersonMemoryContextService
 from .memory_items import (
     DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
@@ -14,7 +14,13 @@ from .memory_items import (
     OpenAIMemoryConsolidationProvider,
     OpenAIMemoryExtractionProvider,
 )
-from .models import EpisodeInput, EpisodeMemoryExtractionResult, EpisodeRecordResult, MemoryConsolidationResult
+from .models import (
+    EpisodeInput,
+    EpisodeMemoryExtractionResult,
+    EpisodeRecordResult,
+    MemoryConsolidationResult,
+    PersonInput,
+)
 from .retrieval import PersonContextRetrievalService
 from .synthesis import OpenAIPersonContextProvider, PersonContextSynthesisService
 
@@ -49,6 +55,18 @@ class TailwagMemoryClient:
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         """Close the client when leaving a context manager."""
         self.close()
+
+    def upsert_person(self, person: PersonInput) -> str:
+        """Create or update a person profile without generating embeddings."""
+        return PersonIngestionService(self.runner).upsert(person)
+
+    def archive_person(self, person_id: str) -> bool:
+        """Archive a person profile while preserving historical graph data."""
+        return PersonIngestionService(self.runner).archive(person_id)
+
+    def rekey_person_by_email(self, email: str, new_person_id: str) -> bool:
+        """Rekey one email-matched person to a canonical id without embeddings."""
+        return PersonIngestionService(self.runner).rekey_by_email(email, new_person_id)
 
     def person_context(
         self,

@@ -100,6 +100,67 @@ with TailwagMemoryClient.from_env() as memory:
     ...
 ```
 
+### `upsert_person(person)`
+
+Creates or updates a standalone person profile without recording an episode or event.
+
+Parameters:
+
+| Name | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `person` | `PersonInput` | yes | Caller-owned person identity/profile payload. |
+
+Returns: `str` person ID.
+
+Notes:
+
+- This endpoint does not generate OpenAI text embeddings and does not require `OPENAI_API_KEY`.
+- Omitted profile fields preserve existing `Person` values.
+- Person-only upserts mark the person active, clear `archived_at`, and update `last_seen` to the write time.
+- Standalone profile writes use `id`, `display_name`, `email`, `consent_status`, `face_embedding`, and `audio_embedding`; `role` and `source` remain episode/event relationship provenance.
+- Non-consented `consent_status` values clear stored biometric vectors through the same consent-aware person upsert rules used by episode and event ingestion.
+
+### `archive_person(person_id)`
+
+Archives a person profile by ID.
+
+Parameters:
+
+| Name | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `person_id` | `str` | yes | Caller-owned `Person.id`. |
+
+Returns: `bool`, true when a matching person was archived.
+
+Notes:
+
+- Archiving preserves historical graph data, including prior episode, event, and memory item relationships.
+- Archiving removes stored biometric vectors by clearing `face_embedding` and `audio_embedding`.
+- Archived people are excluded from biometric recognition.
+- Archived people are not deleted; callers should keep using caller-owned IDs if they need to re-enroll or inspect historical context.
+- Archive is not a full retention deletion mechanism; retention and deletion policy remains caller-owned.
+
+### `rekey_person_by_email(email, new_person_id)`
+
+Changes one existing person's `Person.id` to a caller-owned canonical ID by matching their email address.
+
+Parameters:
+
+| Name | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `email` | `str` | yes | Email identity evidence already stored on exactly one `Person`. |
+| `new_person_id` | `str` | yes | New caller-owned canonical `Person.id`. |
+
+Returns: `bool`, true when one person was rekeyed.
+
+Notes:
+
+- This endpoint is intended for Slack/email identity convergence to an Argos canonical ID after Argos confirms the match.
+- Rekeying changes the `id` property in place, so existing episode, event, and memory item relationships stay attached to the same graph node.
+- Rekeying does not rename existing `MemoryItem.id` values; use person-scoped APIs and relationships after rekey rather than assuming older deterministic memory IDs include the new person ID.
+- The operation returns false when the email does not match exactly one person, or when `new_person_id` is already used by a different `Person` node.
+- This endpoint does not generate OpenAI text embeddings and does not require `OPENAI_API_KEY`.
+
 ### `record_episode(episode, *, extract_memory=True)`
 
 Stores an episode, place, participants, participant relationships, summary embedding, and transcript embedding. By default it also runs transcript-derived memory extraction for the episode participants.
@@ -295,6 +356,18 @@ Parameters:
 | `episode` | `EpisodeInput` | Episode payload. |
 
 Returns: `str` episode ID.
+
+### `PersonIngestionService(runner)`
+
+Stores standalone person identity/profile updates without episode, event, or OpenAI embedding work.
+
+Methods:
+
+| Endpoint | Parameters | Returns | Meaning |
+| --- | --- | --- | --- |
+| `upsert(person)` | `PersonInput` | `str` | Create or update a person profile. Omitted fields preserve existing values. |
+| `archive(person_id)` | person ID | `bool` | Mark the person archived and clear stored biometric vectors while keeping historical graph data. |
+| `rekey_by_email(email, new_person_id)` | email, new person ID | `bool` | Replace one email-matched person's ID with a canonical ID while preserving graph relationships; false when the email or canonical ID is not unique-safe. |
 
 ### `EventIngestionService(runner).ingest(event)`
 

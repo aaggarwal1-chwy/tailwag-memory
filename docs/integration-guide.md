@@ -597,6 +597,63 @@ Runtime behavior should map as follows:
 
 Compatibility tests in `argos-agent` should cover startup wiring, turn-context prompt output, preferred-language propagation, live-chat segment recording, face-recognition encounter recording, Slack background enable/disable behavior, and any replacement for the old `memory.manage_memory` CLI.
 
+## Enroll Or Update Argos Person Identity
+
+Argos should keep ownership of robot/runtime identity decisions and pass the caller-owned `Person.id` into Tailwag. Use `upsert_person()` when Argos creates or refreshes a known person profile outside a live episode, such as after face enrollment, speaker enrollment, profile import, or a deliberate identity-linking step.
+
+```python
+from tailwag_memory import PersonInput, TailwagMemoryClient
+
+person = PersonInput(
+    id="argos:person_jamie",
+    display_name="Jamie",
+    email="jamie@example.com",
+    consent_status="consented",
+    face_embedding=[0.01] * 64,
+    audio_embedding=[0.02] * 64,
+)
+
+with TailwagMemoryClient.from_env() as memory:
+    person_id = memory.upsert_person(person)
+```
+
+Later identity refreshes can send only the fields Argos wants to change. Omitted fields preserve the existing Tailwag `Person` values:
+
+```python
+with TailwagMemoryClient.from_env() as memory:
+    memory.upsert_person(
+        PersonInput(
+            id="argos:person_jamie",
+            display_name="Jamie A.",
+        )
+    )
+```
+
+When Slack has already created a person such as `slack:U0123456789`, Argos can use Slack/email identity convergence to rekey that node to an Argos canonical ID after it confirms the shared email identity:
+
+```python
+with TailwagMemoryClient.from_env() as memory:
+    rekeyed = memory.rekey_person_by_email(
+        email="jamie@example.com",
+        new_person_id="argos:person_jamie",
+    )
+```
+
+`rekey_person_by_email()` changes the `Person.id` property in place, so existing Slack episodes, events, and memory items stay attached to the same graph node. Existing `MemoryItem.id` values are not renamed, so Argos should use person-scoped Tailwag APIs and graph relationships after rekey rather than assuming older deterministic memory IDs include the new person ID. The method returns `False` when the email does not identify exactly one person, or when the canonical ID is already used by a different `Person` node. Argos should treat those cases as identity-review work rather than auto-merging people.
+
+If Argos needs to retire an identity or revoke biometric recognition, archive the person instead of deleting the node:
+
+```python
+with TailwagMemoryClient.from_env() as memory:
+    archived = memory.archive_person("argos:person_jamie")
+```
+
+Archived people keep historical graph data, including prior episodes, events, and memory items, so old prompt context and audit trails remain inspectable by caller-owned ID. Archiving removes stored biometric vectors by clearing `face_embedding` and `audio_embedding`, and archived profiles are excluded from biometric recognition. Archive is not a full retention deletion mechanism; retention and deletion policy remains caller-owned.
+
+Re-enrollment is an explicit Argos identity decision. Normal episode or event ingestion can still reference an archived person by ID for historical continuity, but it should not be used to reactivate or reseed biometric vectors for that profile. Call `upsert_person()` after Argos decides the identity should become active again.
+
+`upsert_person()`, `archive_person()`, and `rekey_person_by_email()` do not create episode text embeddings and do not initialize OpenAI-backed embedding providers. They still require Neo4j configuration because they write person records.
+
 ## Record Episodes With Internal Memory Extraction
 
 For an Argos-style runtime, new live conversation memory should enter Tailwag as normal episodes through the high-level client. Tailwag stores the episode and internally checks whether transcript-derived memory items should be created, updated, or archived. Argos runtime code should not call low-level memory item services directly except inside a compatibility adapter.
@@ -753,3 +810,4 @@ The consuming repo should depend on the `EmbeddingProvider` behavior rather than
 - Keep biometric vector usage tied to consent and retention policies in the calling system.
 - Episode text is sent to OpenAI for embeddings, and recent person-related evidence is sent to OpenAI for context synthesis.
 - Transcript memory extraction sends transcripts and selected existing memory item candidates to OpenAI.
+- `upsert_person()`, `archive_person()`, and `rekey_person_by_email()` are profile-only writes; they do not call OpenAI. Archived people retain historical graph data while stored biometric vectors are removed.

@@ -1,6 +1,11 @@
 from tailwag_memory.db import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
-from tailwag_memory.ingestion import EpisodeIngestionService, EventIngestionService, _person_upsert_cypher
+from tailwag_memory.ingestion import (
+    EpisodeIngestionService,
+    EventIngestionService,
+    PersonIngestionService,
+    _person_upsert_cypher,
+)
 from tailwag_memory.models import EpisodeInput, EventAttendeeInput, EventInput, PersonInput, PlaceInput
 import unittest
 
@@ -41,8 +46,139 @@ class PersonUpsertCypherTest(unittest.TestCase):
         self.assertIn("p.email = coalesce(attendee.email, p.email)", attendee_clause)
         self.assertIn("person.consent_status <> 'consented'", participant_clause)
         self.assertIn("attendee.consent_status <> 'consented'", attendee_clause)
+        self.assertIn("p.status = 'archived' THEN p.face_embedding", participant_clause)
+        self.assertIn("p.status = 'archived' THEN p.audio_embedding", attendee_clause)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", participant_clause)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", attendee_clause)
+
+
+class PersonIngestionServiceTest(unittest.TestCase):
+    def test_upsert_writes_active_person_profile_and_biometrics(self) -> None:
+        runner = RecordingQueryRunner()
+        service = PersonIngestionService(runner)
+
+        person_id = service.upsert(
+            PersonInput(
+                id="person_external_jamie",
+                display_name="Jamie",
+                email="jamie@example.com",
+                consent_status="consented",
+                face_embedding=[0.1] * 8,
+                audio_embedding=[0.2] * 8,
+            )
+        )
+
+        self.assertEqual(person_id, "person_external_jamie")
+        self.assertEqual(len(runner.queries), 1)
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["person"]["id"], "person_external_jamie")
+        self.assertEqual(query.parameters["person"]["display_name"], "Jamie")
+        self.assertEqual(query.parameters["person"]["email"], "jamie@example.com")
+        self.assertEqual(query.parameters["person"]["consent_status"], "consented")
+        self.assertEqual(query.parameters["person"]["face_embedding"], [0.1] * 8)
+        self.assertEqual(query.parameters["person"]["audio_embedding"], [0.2] * 8)
+        self.assertEqual(query.parameters["created_at"], query.parameters["updated_at"])
+        self.assertEqual(query.parameters["last_seen"], query.parameters["updated_at"])
+        self.assertIn("WITH $person AS person", query.query)
+        self.assertIn("MERGE (p:Person {id: person.id})", query.query)
+        self.assertIn("p.created_at = coalesce(p.created_at, $created_at)", query.query)
+        self.assertIn("p.updated_at = $updated_at", query.query)
+        self.assertIn("p.last_seen = $last_seen", query.query)
+        self.assertIn("p.status = 'active'", query.query)
+        self.assertIn("p.archived_at = NULL", query.query)
+        self.assertIn("person.consent_status <> 'consented'", query.query)
+        self.assertNotIn("p.status = 'archived' THEN p.face_embedding", query.query)
+        self.assertNotIn("p.status = 'archived' THEN p.audio_embedding", query.query)
+
+    def test_upsert_query_excludes_org_identity_and_confidence(self) -> None:
+        runner = RecordingQueryRunner()
+        service = PersonIngestionService(runner)
+
+        service.upsert(PersonInput(id="person_external_jamie"))
+        query = runner.queries[0]
+        text = query.query + repr(query.parameters)
+
+        self.assertNotIn("org_id", text)
+        self.assertNotIn("identity_status", text)
+        self.assertNotIn("confidence", text)
+
+    def test_archive_updates_lifecycle_and_clears_biometrics(self) -> None:
+        runner = RecordingQueryRunner(results=[[{"person_id": "person_external_jamie"}]])
+        service = PersonIngestionService(runner)
+
+        archived = service.archive("person_external_jamie")
+
+        self.assertTrue(archived)
+        self.assertEqual(len(runner.queries), 1)
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["person_id"], "person_external_jamie")
+        self.assertEqual(query.parameters["archived_at"], query.parameters["updated_at"])
+        self.assertIn("MATCH (p:Person {id: $person_id})", query.query)
+        self.assertIn("p.status = 'archived'", query.query)
+        self.assertIn("p.archived_at = $archived_at", query.query)
+        self.assertIn("p.updated_at = $updated_at", query.query)
+        self.assertIn("p.face_embedding = NULL", query.query)
+        self.assertIn("p.audio_embedding = NULL", query.query)
+        self.assertNotIn("DELETE", query.query)
+        self.assertNotIn("DETACH", query.query)
+        self.assertNotIn("p.display_name", query.query)
+        self.assertNotIn("p.email", query.query)
+        self.assertNotIn("p.consent_status", query.query)
+        text = query.query + repr(query.parameters)
+        self.assertNotIn("org_id", text)
+        self.assertNotIn("identity_status", text)
+        self.assertNotIn("confidence", text)
+
+    def test_archive_returns_false_when_person_is_missing(self) -> None:
+        runner = RecordingQueryRunner(results=[[]])
+        service = PersonIngestionService(runner)
+
+        archived = service.archive("person_missing")
+
+        self.assertFalse(archived)
+
+    def test_rekey_by_email_updates_one_person_to_canonical_id(self) -> None:
+        runner = RecordingQueryRunner(results=[[{"person_id": "person_argos_jamie"}]])
+        service = PersonIngestionService(runner)
+
+        rekeyed = service.rekey_by_email(" jamie@example.com ", " person_argos_jamie ")
+
+        self.assertTrue(rekeyed)
+        self.assertEqual(len(runner.queries), 1)
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["email"], "jamie@example.com")
+        self.assertEqual(query.parameters["new_person_id"], "person_argos_jamie")
+        self.assertIn("updated_at", query.parameters)
+        self.assertIn("toLower(trim(p.email)) = toLower($email)", query.query)
+        self.assertIn("WITH collect(p) AS matches", query.query)
+        self.assertIn("WHERE size(matches) = 1", query.query)
+        self.assertIn("OPTIONAL MATCH (existing:Person {id: $new_person_id})", query.query)
+        self.assertIn("WHERE existing IS NULL OR existing = p", query.query)
+        self.assertIn("SET p.id = $new_person_id", query.query)
+        self.assertIn("p.updated_at = $updated_at", query.query)
+        text = query.query + repr(query.parameters)
+        self.assertNotIn("MERGE", query.query)
+        self.assertNotIn("DELETE", query.query)
+        self.assertNotIn("DETACH", query.query)
+        self.assertNotIn("org_id", text)
+        self.assertNotIn("identity_status", text)
+        self.assertNotIn("confidence", text)
+
+    def test_rekey_by_email_returns_false_when_no_unique_safe_match(self) -> None:
+        runner = RecordingQueryRunner(results=[[]])
+        service = PersonIngestionService(runner)
+
+        rekeyed = service.rekey_by_email("jamie@example.com", "person_argos_jamie")
+
+        self.assertFalse(rekeyed)
+
+    def test_rekey_by_email_rejects_blank_inputs(self) -> None:
+        service = PersonIngestionService(RecordingQueryRunner())
+
+        with self.assertRaisesRegex(ValueError, "email"):
+            service.rekey_by_email("", "person_argos_jamie")
+        with self.assertRaisesRegex(ValueError, "new_person_id"):
+            service.rekey_by_email("jamie@example.com", " ")
 
 
 class EpisodeIngestionServiceTest(unittest.TestCase):

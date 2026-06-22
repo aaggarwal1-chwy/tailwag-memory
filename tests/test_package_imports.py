@@ -1,3 +1,4 @@
+import inspect
 import unittest
 
 import tailwag_memory
@@ -31,6 +32,7 @@ from tailwag_memory import (
     PersonContextSource,
     PersonContextSynthesisService,
     PersonContextTranscriptLine,
+    PersonIngestionService,
     PersonInput,
     PersonMemoryConsolidationResult,
     PersonMemoryContextService,
@@ -79,6 +81,7 @@ class PackageImportTest(unittest.TestCase):
             "PersonContextSource",
             "PersonContextSynthesisService",
             "PersonContextTranscriptLine",
+            "PersonIngestionService",
             "PersonInput",
             "PersonMemoryConsolidationResult",
             "PersonMemoryContextService",
@@ -123,6 +126,7 @@ class PackageImportTest(unittest.TestCase):
             PersonContextSource,
             PersonContextSynthesisService,
             PersonContextTranscriptLine,
+            PersonIngestionService,
             PersonInput,
             PersonMemoryConsolidationResult,
             PersonMemoryContextService,
@@ -145,6 +149,14 @@ class PackageImportTest(unittest.TestCase):
         self.assertIs(tailwag_memory.EpisodeInput, EpisodeInput)
         self.assertIs(tailwag_memory.EpisodeIngestionService, EpisodeIngestionService)
         self.assertIs(tailwag_memory.EpisodeRetrievalService, EpisodeRetrievalService)
+
+    def test_client_exposes_email_rekey_contract(self) -> None:
+        signature = inspect.signature(TailwagMemoryClient.rekey_person_by_email)
+
+        self.assertEqual(list(signature.parameters), ["self", "email", "new_person_id"])
+        self.assertEqual(signature.parameters["email"].annotation, "str")
+        self.assertEqual(signature.parameters["new_person_id"].annotation, "str")
+        self.assertEqual(signature.return_annotation, "bool")
 
 
 if __name__ == "__main__":

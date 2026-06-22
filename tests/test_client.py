@@ -48,6 +48,73 @@ def _episode() -> EpisodeInput:
 
 
 class TailwagMemoryClientTest(unittest.TestCase):
+    def test_upsert_person_delegates_without_initializing_embeddings(self) -> None:
+        runner = FakeRunner()
+        calls = []
+        person = PersonInput(
+            id="person_jamie",
+            display_name="Jamie",
+            email="jamie@example.com",
+            consent_status="consented",
+            face_embedding=[0.1] * 8,
+        )
+
+        class FakePersonIngestion:
+            def __init__(self, runner_arg) -> None:
+                self.runner_arg = runner_arg
+
+            def upsert(self, person_arg: PersonInput) -> str:
+                calls.append(("upsert", self.runner_arg, person_arg))
+                return person_arg.id
+
+        client = TailwagMemoryClient(runner, _settings())
+        with patch.object(client, "_embeddings", side_effect=AssertionError("embeddings should not be initialized")):
+            with patch("tailwag_memory.client.PersonIngestionService", FakePersonIngestion):
+                result = client.upsert_person(person)
+
+        self.assertEqual(result, "person_jamie")
+        self.assertEqual(calls, [("upsert", runner, person)])
+
+    def test_archive_person_delegates_without_initializing_embeddings(self) -> None:
+        runner = FakeRunner()
+        calls = []
+
+        class FakePersonIngestion:
+            def __init__(self, runner_arg) -> None:
+                self.runner_arg = runner_arg
+
+            def archive(self, person_id: str) -> bool:
+                calls.append(("archive", self.runner_arg, person_id))
+                return True
+
+        client = TailwagMemoryClient(runner, _settings())
+        with patch.object(client, "_embeddings", side_effect=AssertionError("embeddings should not be initialized")):
+            with patch("tailwag_memory.client.PersonIngestionService", FakePersonIngestion):
+                result = client.archive_person("person_jamie")
+
+        self.assertTrue(result)
+        self.assertEqual(calls, [("archive", runner, "person_jamie")])
+
+    def test_rekey_person_by_email_delegates_without_initializing_embeddings(self) -> None:
+        runner = FakeRunner()
+        calls = []
+
+        class FakePersonIngestion:
+            def __init__(self, runner_arg) -> None:
+                self.runner_arg = runner_arg
+
+            def rekey_by_email(self, email: str, new_person_id: str) -> bool:
+                calls.append(("rekey", self.runner_arg, email, new_person_id))
+                return True
+
+        client = TailwagMemoryClient(runner, _settings())
+        with patch.object(client, "_embeddings", side_effect=AssertionError("embeddings should not be initialized")):
+            with patch("tailwag_memory.client.PersonIngestionService", FakePersonIngestion):
+                result = client.rekey_person_by_email("jamie@example.com", "person_argos_jamie")
+
+        self.assertTrue(result)
+        self.assertEqual(calls, [("rekey", runner, "jamie@example.com", "person_argos_jamie")])
+
     def test_record_episode_ingests_and_extracts_memory_by_default(self) -> None:
         runner = FakeRunner()
         calls = []

@@ -4,7 +4,7 @@ from .client import TailwagMemoryClient
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner, QueryRunner
 from .embeddings import EmbeddingProvider, MockOpenAIEmbeddingProvider, OpenAIConfigurationError, OpenAIEmbeddingProvider
-from .ingestion import EpisodeIngestionService, EventIngestionService
+from .ingestion import EpisodeIngestionService, EventIngestionService, PersonIngestionService
 from .memory_context import PersonMemoryContextService
 from .memory_items import (
     DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
@@ -73,6 +73,7 @@ __all__ = [
     "PersonContextSource",
     "PersonContextSynthesisService",
     "PersonContextTranscriptLine",
+    "PersonIngestionService",
     "PersonInput",
     "PersonMemoryConsolidationResult",
     "PersonMemoryContextService",
