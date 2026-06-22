@@ -8,6 +8,7 @@ Neo4j-only hybrid memory service with OpenAI-backed embeddings and unified perso
 - [Project-scoped Codex custom agents](.codex/agents/)
 - [Implementation plan](docs/implementation-plan.md)
 - [Agent and subagent trigger matrix](docs/agent-trigger-matrix.md)
+- [Memory endpoints reference](docs/memory-endpoints.md)
 - [Python package integration guide](docs/integration-guide.md)
 - [Slack ingestion guide](docs/slack-ingestion.md)
 
@@ -106,7 +107,7 @@ For Slack polling, also add your bot token:
 SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
-For package usage, JSON payload shapes, retrieval examples, and command workflows, see the [Python package integration guide](docs/integration-guide.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md).
+For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package usage, JSON payload shapes, retrieval examples, and command workflows, see the [Python package integration guide](docs/integration-guide.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md).
 
 Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
 Episode summaries, transcripts, and memory item summaries are sent to OpenAI for text embeddings. Durable memory context is rendered locally, and recent event and episode context is sent to OpenAI when generating the synthesized part of person context. When `--semantic-scope` is provided for person context, the package first narrows episode evidence to vector-matched episodes for that person; unrelated recent history and events are not included.

@@ -4,6 +4,8 @@
 
 `tailwag-memory` is intended to be used by another Python repo as a package. The calling system owns IDs, generates or supplies biometric embeddings, and calls the memory services directly.
 
+For a concise reference to the Python memory endpoints, parameters, and return shapes, see [Memory Endpoints Reference](memory-endpoints.md).
+
 The package connects to Neo4j through environment variables and stores:
 
 - episodes
