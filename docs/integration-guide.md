@@ -565,9 +565,39 @@ for match in face_matches:
     print(match.person_id, match.display_name, match.score)
 ```
 
+## Replace The Argos Memory Folder
+
+When `argos-agent` replaces its whole `argos_src/memory` folder with this package, the migration should not be treated as a simple import rename. Argos currently uses that folder as a realtime memory runtime: startup wiring, prompt context compilation, face-recognition encounter tracking, live-chat extraction, Slack polling, and memory CLI helpers all call memory APIs directly.
+
+The intended integration is:
+
+- Tailwag owns durable memory storage, episode/event ingestion, memory extraction, vector retrieval, and person context synthesis.
+- Argos owns robot/runtime identity, turn ownership, transcription, summaries, face and speaker recognition, profile config, and realtime prompt assembly.
+- A small Argos compatibility adapter should keep the old Argos-facing runtime contract while delegating persistence and retrieval to Tailwag.
+
+The adapter should preserve these Argos-facing exports or equivalent call sites:
+
+- `MemoryStore`: backed by Tailwag services instead of SQLite. It should cover `upsert_item`, `update_item`, `archive_item`, `get_item`, `list_items`, `list_active_items`, plus compatibility methods such as `record_encounter` and `list_recent_encounters`.
+- `MemoryContextCompiler`: backed by Tailwag person context and retrieval. It should still expose `person_context(...)` with `profile_lines`, `followup_lines`, and `preferred_language`, and `site_blocks(...)` for prompt-visible location memory.
+- `PreferenceExtractor`: convert completed Argos `PreferenceSegment` buffers into `EpisodeInput` records and call `TailwagMemoryClient.record_episode(..., extract_memory=True)`.
+- `SlackMemoryService`: either wrap Tailwag Slack polling or intentionally keep Argos background scheduling while writing Slack activity as Tailwag episodes.
+
+Argos startup should construct the adapter where it currently constructs `MemoryStore`, `MemoryContextCompiler`, `PreferenceExtractor`, and `SlackMemoryService`. The old `memory_store.db_path` setting should become deprecated or ignored in Tailwag mode, with Neo4j and OpenAI configuration coming from Tailwag settings or environment variables.
+
+Runtime behavior should map as follows:
+
+- On agent startup, initialize Tailwag configuration and construct the compatibility adapter. Run schema initialization through an operator/admin path, not repeatedly during every realtime turn.
+- On each realtime turn, use the adapter compiler to populate the existing Argos prompt fields: person profile lines, follow-up lines, preferred language, and site memory blocks.
+- After completed attributed live-chat turns, record one Tailwag conversation episode for the buffered segment and let Tailwag extraction create, update, or archive durable person memory items.
+- When face recognition records a recognized interaction, either write a short encounter episode or use a compatibility `record_encounter` implementation that stores short-lived prompt context in Tailwag-backed form.
+- When Slack memory is enabled, prefer episode-based Slack ingestion. If Argos keeps its existing background service controls, the service should call Tailwag polling/recording rather than writing SQLite memory operations.
+- Keep Argos identity linking explicit. Slack people such as `slack:<user_id>` and robot-recognized people should only converge when Argos supplies a shared caller-owned `Person.id` or a deliberate identity-linking step.
+
+Compatibility tests in `argos-agent` should cover startup wiring, turn-context prompt output, preferred-language propagation, live-chat segment recording, face-recognition encounter recording, Slack background enable/disable behavior, and any replacement for the old `memory.manage_memory` CLI.
+
 ## Record Episodes With Internal Memory Extraction
 
-For an Argos-style runtime, the caller should send normal episodes to the high-level Tailwag client. Tailwag stores the episode and internally checks whether transcript-derived memory items should be created, updated, or archived. Argos should not call low-level memory item services directly.
+For an Argos-style runtime, new live conversation memory should enter Tailwag as normal episodes through the high-level client. Tailwag stores the episode and internally checks whether transcript-derived memory items should be created, updated, or archived. Argos runtime code should not call low-level memory item services directly except inside a compatibility adapter.
 
 ```python
 from tailwag_memory import EpisodeInput, PersonInput, PlaceInput, TailwagMemoryClient

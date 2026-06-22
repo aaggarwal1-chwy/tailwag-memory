@@ -47,6 +47,7 @@ Implemented now:
 - CLI-first local workflow
 - Slack channel polling as a source adapter into conversation episodes
 - event attendee relationships for source-provided accepted attendees
+- Argos memory-folder replacement plan documented as a package-consumer compatibility path
 
 Deferred for later:
 
@@ -74,6 +75,21 @@ Deferred for later:
 - `MemoryItem` is the approved narrow path for transcript-derived person memory. It does not open scope for a broad `SemanticFact` ontology or triple store.
 - Per-person memory consolidation may use Neo4j episode vector indexes to reduce candidate evidence, but it still writes only `MemoryItem` records and `SUPPORTED_BY` episode links.
 - This pre-release plan describes current behavior and intended boundaries; it does not promise backward compatibility for earlier local-only shapes.
+
+## Argos Replacement Boundary
+
+Replacing `argos-agent/argos_src/memory` requires an Argos-side compatibility adapter, not a direct folder copy. Tailwag should be treated as the durable memory engine and Python package, while Argos keeps ownership of realtime turn ownership, robot identity, face and speaker recognition, transcription, profile configuration, and prompt assembly.
+
+The Argos adapter should preserve the runtime-facing contracts currently used by `argos_src/memory`:
+
+- `MemoryStore`-style item reads and writes, with Tailwag-backed persistence.
+- `MemoryContextCompiler.person_context(...)` returning profile lines, follow-up lines, and preferred language for the existing Argos prompt path.
+- `MemoryContextCompiler.site_blocks(...)` or an equivalent site-memory prompt hook for location-aware context.
+- `PreferenceExtractor.extract_and_store_segment(...)`, implemented by converting completed live-chat segments into Tailwag `EpisodeInput` records and using high-level episode recording with memory extraction.
+- Slack background service behavior, implemented by episode-based Tailwag Slack ingestion or a wrapper that preserves Argos startup controls while avoiding SQLite memory writes.
+- Face-recognition encounter behavior, implemented as short-lived Tailwag-backed prompt context or encounter episodes.
+
+The integration guide is the source of truth for the migration sequence and compatibility test expectations. The current Tailwag package does not promise a drop-in `argos_src.memory` module; the compatibility boundary belongs in the consuming Argos repo unless explicitly moved into this package later.
 
 ## Initial Graph Model
 
