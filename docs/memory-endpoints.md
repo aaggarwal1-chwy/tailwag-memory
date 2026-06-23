@@ -23,6 +23,7 @@ export NEO4J_PASSWORD=tailwag-memory
 export OPENAI_API_KEY=sk-your-token-here
 export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
+export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
@@ -40,7 +41,7 @@ finally:
     runner.close()
 ```
 
-`OPENAI_API_KEY` is required when production code uses the OpenAI provider for embeddings, memory extraction, consolidation, or vector search. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
+`OPENAI_API_KEY` is required when production code uses the OpenAI provider for embeddings, memory extraction, consolidation, or vector search. `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by extraction and consolidation providers. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
 
 ## Quick Start
 
@@ -211,6 +212,30 @@ Notes:
 - If `semantic_scope` is supplied, an embedding provider is required. Rendered episode lines still come from the bounded recent episode section.
 - The returned string is suitable for prompts, not a structured API contract.
 
+Example output:
+
+```text
+[PERSON MEMORY]
+Boundaries:
+- boundary: avoid loud surprise greetings
+
+Preferences:
+- preferred language: Spanish
+- likes: hands-on robot demos
+
+Pets:
+- pet: Luna (dog): recovering well after surgery
+
+Facts:
+- working on robot social memory extraction
+
+Potential Follow-Ups:
+- Cape Cod trip with their parents planned for the weekend of 2026-06-20.
+
+Recent Episodes:
+- 2026-06-16: Jamie mentioned Luna had a vet visit tomorrow.
+```
+
 ### `extract_memory_for_episode(episode_id, person_id=None)`
 
 Loads a stored episode and runs memory extraction.
@@ -225,6 +250,8 @@ Parameters:
 Returns: `EpisodeMemoryExtractionResult`.
 
 Use this for backfills or debugging extraction after an episode already exists.
+
+The record result includes `episode_id`, `memory_results`, and `memory_errors`. Each per-person memory result includes `person_id`, `update_requested`, `created_memory_ids`, `updated_memory_ids`, `archived_memory_ids`, `skipped_ops`, and `error`. `update_requested` reflects extractor intent; actual changes are the non-empty created, updated, or archived lists.
 
 ### `consolidate_memory(*, person_id=None, all_people=False, person_limit=100, min_evidence_episodes=4, seed_limit=25, neighbor_limit=12, cluster_limit=8, episode_text_limit=1200)`
 
@@ -248,8 +275,11 @@ Returns: `MemoryConsolidationResult`.
 Notes:
 
 - The service validates provider-supplied supporting episode IDs before writing `SUPPORTED_BY`.
+- Duplicate episode IDs count once, unknown episode IDs do not count, and operations that fall below `min_evidence_episodes` are skipped.
 - Consolidation can merge related memories into one active merged memory. Source memories are marked `superseded`, linked to the merged memory with `SUPERSEDED_BY`, and excluded from normal endpoint/query results.
 - This is slower background work; normal live ingestion should use `record_episode()`.
+- The tunable defaults are intentionally isolated for tests and scheduled jobs: `min_evidence_episodes`, `seed_limit`, `neighbor_limit`, `cluster_limit`, and `episode_text_limit`.
+- Consolidation is not the deferred asynchronous semantic consolidation queue/orchestrator and does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
 
 ## Input Models
 
@@ -295,6 +325,8 @@ Omitted profile fields preserve existing `Person` values on later writes.
 
 `EpisodeInput.from_dict(payload)` parses the same shape from a dictionary.
 
+See `examples/episode.json` and `examples/existing-person-episode.json` for complete JSON payload examples.
+
 ### `EventInput` And `EventAttendeeInput`
 
 `EventInput` stores place-linked happenings such as scheduled meetings or office events.
@@ -318,6 +350,8 @@ Omitted profile fields preserve existing `Person` values on later writes.
 | `response` | `str` | no | `"accepted"` | Attendance response. |
 
 `EventInput.from_dict(payload)` parses the same shape from a dictionary.
+
+See `examples/event.json` for a complete JSON payload example. Use `"accepted_attendees": []` when no attendee people are known.
 
 ### `MemoryItemInput`
 
@@ -368,6 +402,7 @@ Methods:
 | `upsert(person)` | `PersonInput` | `str` | Create or update a person profile. Omitted fields preserve existing values. |
 | `archive(person_id)` | person ID | `bool` | Mark the person archived and clear stored biometric vectors while keeping historical graph data. |
 | `rekey_by_email(email, new_person_id)` | email, new person ID | `bool` | Replace one Slack-owned email-matched person's ID with a canonical ID while preserving graph relationships; false when the email or canonical ID is not unique-safe. |
+| `canonical_id_by_email(email)` | email | `str \| None` | Return the one canonical `person_*` ID for an exact email match, or `None` when the match is absent, ambiguous, or not canonical. |
 
 ### `EventIngestionService(runner).ingest(event)`
 
@@ -463,6 +498,8 @@ Most callers should use the high-level client. Use these services to inject cust
 
 Custom consolidation providers may return `merge` operations with `memory_ids`, merged `kind`/`key`/`summary`, timestamps, empty `metadata`, and validated `supported_episode_ids`. Merge operations preserve distinct details in the merged memory and supersede the source memories.
 
+The extractor and consolidation providers reject identity-owned directory facts such as title, team, manager, cost center, business function, and leadership org. Those should stay in the calling system's identity or directory layer.
+
 ## Slack Endpoints
 
 Slack management is Tailwag-owned. Downstream systems should ingest Slack through Tailwag and consume the resulting memories through normal person/place/context retrieval.
@@ -512,6 +549,8 @@ Constructor parameters:
 
 Runs one Slack channel polling pass.
 
+For continuous package-level polling, callers should run `poll_once()` in their own interval loop and let the saved state cursor advance between passes. Use `force_backfill=True` only for one-shot backfills, not continuous loops. See [Slack Ingestion Guide](slack-ingestion.md#package-api) for the full package example.
+
 Parameters:
 
 | Name | Type | Meaning |
@@ -538,7 +577,7 @@ Return fields:
 | `ingested_episode_ids` | Recorded episode IDs. |
 | `episode_records` | `EpisodeRecordResult` values from recording. |
 
-### `build_episode_from_slack_thread(channel, messages, client, retention_class="standard", person_id_resolver=None)`
+### `build_episode_from_slack_thread(*, channel, messages, client, retention_class="standard", person_id_resolver=None)`
 
 Converts raw Slack messages into an `EpisodeInput` without writing it.
 
@@ -574,7 +613,7 @@ Common return types:
 
 - Caller-owned IDs are the stable integration keys. Do not use Neo4j internal IDs.
 - Run schema initialization before ingestion or retrieval.
-- The configured embedding dimension must match Neo4j vector indexes and supplied biometric vectors.
+- The configured embedding dimension must match Neo4j vector indexes and supplied biometric vectors for vector search compatibility.
 - Do not pass raw face images or raw audio into Tailwag. Pass embeddings only.
 - Direct memory item writes are advanced. Prefer episode recording plus extraction for live systems.
 - `fact` memories must remain narrow person-prompt context, not broad ontology facts.

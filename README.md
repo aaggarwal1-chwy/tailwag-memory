@@ -6,10 +6,12 @@ Neo4j-only hybrid memory service with OpenAI-backed embeddings and deterministic
 
 - [Repository agent instructions](AGENTS.md)
 - [Project-scoped Codex custom agents](.codex/agents/)
-- [Implementation plan](docs/implementation-plan.md)
+- [Architecture](docs/architecture.md)
+- [Argos migration guide](docs/argos-migration.md)
 - [Agent and subagent trigger matrix](docs/agent-trigger-matrix.md)
 - [Memory endpoints reference](docs/memory-endpoints.md)
 - [Python package integration guide](docs/integration-guide.md)
+- [CLI reference](docs/cli-reference.md)
 - [Slack ingestion guide](docs/slack-ingestion.md)
 
 ## Current Scope
@@ -47,7 +49,7 @@ Delayed intentionally:
 - `Activity`
 - `Utterance`
 - `SemanticFact`
-- semantic consolidation queue
+- asynchronous semantic consolidation queue or orchestrator
 - confidence ratings and confidence properties
 - `org_id`
 - external vector databases
@@ -101,13 +103,15 @@ For OpenAI-backed embeddings, transcript memory extraction, and memory consolida
 OPENAI_API_KEY=sk-your-token-here
 ```
 
+Memory extraction and consolidation use `TAILWAG_SYNTHESIS_MODEL`, which defaults to the value in `.env.example`.
+
 For Slack polling, also add your bot token:
 
 ```bash
 SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
-For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package usage, JSON payload shapes, retrieval examples, and command workflows, see the [Python package integration guide](docs/integration-guide.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md).
+For the current graph model and scope boundaries, see the [architecture](docs/architecture.md). For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package setup and integration ownership, see the [Python package integration guide](docs/integration-guide.md). For local commands, see the [CLI reference](docs/cli-reference.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md). For replacing Argos memory behavior, see the [Argos migration guide](docs/argos-migration.md).
 
 Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
 Episode summaries, transcripts, and memory item summaries are sent to OpenAI for text embeddings when the OpenAI provider is configured. Person context is assembled deterministically from durable memory items, visible follow-ups, and recent episode lines. When `--semantic-scope` is provided for person context, the package uses vector matching to rank durable memory items; rendered episode context remains the bounded recent episode lines.

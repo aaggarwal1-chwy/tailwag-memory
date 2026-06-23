@@ -103,6 +103,71 @@ Use `--state-file` to override it.
 
 Polling state is written by serializing to a temporary file in the state directory and then replacing the target file. If the existing state file is corrupt or has the wrong JSON shape, polling fails before calling Slack or ingesting episodes. When saving, the poller reloads the current on-disk state and merges the channels touched by this poll so progress for other channels is preserved. The state file is not a file-locking protocol and does not claim concurrent same-channel polling safety.
 
+## Package API
+
+Slack ingestion is also available from Python. Import Slack adapter classes from `tailwag_memory.slack_ingestion`; they are not exported from the top-level `tailwag_memory` package.
+
+```python
+from pathlib import Path
+
+from tailwag_memory import TailwagMemoryClient, load_settings
+from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+
+settings = load_settings()
+
+with TailwagMemoryClient.from_env() as memory:
+    slack = SlackWebApiClient(settings.slack_bot_token, include_email=True)
+    poller = SlackMemoryPoller(
+        client=slack,
+        episode_recorder=memory,
+        state_path=Path(".tailwag/slack-state.json"),
+    )
+    result = poller.poll_once(
+        "C0123456789",
+        backfill_hours=2,
+        extract_memory=True,
+    )
+
+print(result.ingested_episode_ids)
+```
+
+Package callers that need continuous polling own the loop and call `poll_once()` on an interval:
+
+```python
+import time
+from pathlib import Path
+
+from tailwag_memory import TailwagMemoryClient, load_settings
+from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+
+settings = load_settings()
+
+with TailwagMemoryClient.from_env() as memory:
+    slack = SlackWebApiClient(settings.slack_bot_token, include_email=True)
+    poller = SlackMemoryPoller(
+        client=slack,
+        episode_recorder=memory,
+        state_path=Path(".tailwag/slack-state.json"),
+        active_thread_hours=24.0,
+    )
+
+    while True:
+        result = poller.poll_once(
+            "C0123456789",
+            history_limit=200,
+            reply_limit=200,
+            extract_memory=True,
+        )
+        print(result.ingested_episode_ids)
+        time.sleep(60)
+```
+
+`TailwagMemoryClient` satisfies the poller's episode recorder contract, so package-level polling records the same episode and memory extraction result shapes as the CLI. `include_email=True` mirrors `--include-email`; `extract_memory=False` mirrors `--skip-memory-extraction`; `force_backfill=True` requires `backfill_hours`.
+
+The same runtime requirements still apply: the Slack token must have the needed scopes, episode recording needs Neo4j configuration, and production episode embeddings need OpenAI configuration. A first package poll without `backfill_hours` only arms the cursor, just like the CLI. Use `force_backfill=True` only for one-shot package backfills; continuous loops should rely on the saved state cursor so they do not replay the same backfill window.
+
+Advanced callers can pass a fake Slack client that implements `history(channel, oldest, limit)`, `replies(channel, thread_ts, limit)`, and `user_profile(user_id)` for tests, or a custom `person_id_resolver` to map normalized Slack email addresses to caller-owned person IDs. `build_episode_from_slack_thread(channel=..., messages=..., client=...)` is available when a caller wants to convert Slack messages into an `EpisodeInput` without writing it. See [Memory Endpoints Reference](memory-endpoints.md#slack-endpoints) for constructor parameters and return fields.
+
 ## Inspect Generated Memories
 
 Search generated Slack memories through the CLI:
@@ -126,5 +191,5 @@ LIMIT 20;
 - The poller creates one episode per Slack root message or thread.
 - Replies update the same stable episode ID instead of creating a new episode.
 - Newly seen standalone root messages stay in the active-thread watchlist for `--active-thread-hours` so a later first reply can refresh the same episode. The default watch window is 24 hours.
-- Deleted, join, and leave system messages are skipped.
+- Deleted, bot, join, and leave system messages are skipped.
 - The state cursor advances after an empty history check, or after discovered threads are ingested successfully.

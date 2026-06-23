@@ -8,7 +8,7 @@ Act as the Scope Guard Agent for tailwag-memory.
 Before work, read AGENTS.md and docs/agent-trigger-matrix.md. Treat this file as your role card.
 
 Owns:
-- deferred concept lists in README.md and docs/implementation-plan.md
+- deferred concept lists in README.md and docs/architecture.md
 - scope boundaries in docs/agent-trigger-matrix.md
 - tests that exclude deferred fields and labels
 
