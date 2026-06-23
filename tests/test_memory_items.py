@@ -734,6 +734,74 @@ class MemoryItemMarkdownTest(unittest.TestCase):
 
 
 class PersonMemoryContextServiceTest(unittest.TestCase):
+    def test_markdown_for_person_includes_boundaries_before_preferences_and_facts_with_recent_episodes(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "person_id": "person_jamie",
+                        "memory_id": "mem_pref",
+                        "kind": "preference",
+                        "key": "preferred_language",
+                        "summary": "preferred language: Spanish",
+                        "source": "live_chat",
+                        "status": "active",
+                        "observed_at": "2026-06-18T09:00:00+00:00",
+                    },
+                    {
+                        "person_id": "person_jamie",
+                        "memory_id": "mem_fact",
+                        "kind": "fact",
+                        "key": "robot_memory_project",
+                        "summary": "working on robot social memory extraction",
+                        "source": "live_chat",
+                        "status": "active",
+                        "observed_at": "2026-06-17T09:00:00+00:00",
+                    },
+                    {
+                        "person_id": "person_jamie",
+                        "memory_id": "mem_boundary",
+                        "kind": "boundary",
+                        "key": "avoid_loud_greetings",
+                        "summary": "boundary: avoid loud surprise greetings",
+                        "source": "live_chat",
+                        "status": "active",
+                        "observed_at": "2026-06-16T09:00:00+00:00",
+                    },
+                ],
+                [
+                    {
+                        "episode_id": "episode_1",
+                        "summary": "Jamie mentioned Luna had a vet visit tomorrow.",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                    }
+                ],
+            ]
+        )
+        service = PersonMemoryContextService(runner)
+
+        markdown = service.markdown_for_person(
+            "person_jamie",
+            now=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
+            memory_limit=12,
+            recent_episode_limit=1,
+        )
+
+        self.assertIn("Boundaries:", markdown)
+        self.assertIn("- boundary: avoid loud surprise greetings", markdown)
+        self.assertIn("Preferences:", markdown)
+        self.assertIn("- preferred language: Spanish", markdown)
+        self.assertIn("Facts:", markdown)
+        self.assertIn("- working on robot social memory extraction", markdown)
+        self.assertIn("Recent Episodes:", markdown)
+        self.assertIn("- 2026-06-16: Jamie mentioned Luna had a vet visit tomorrow.", markdown)
+        self.assertLess(markdown.index("Boundaries:"), markdown.index("Preferences:"))
+        self.assertLess(markdown.index("Boundaries:"), markdown.index("Facts:"))
+        self.assertLess(markdown.index("Facts:"), markdown.index("Recent Episodes:"))
+        self.assertEqual(runner.queries[0].parameters["person_id"], "person_jamie")
+        self.assertEqual(runner.queries[0].parameters["statuses"], ["active"])
+        self.assertEqual(runner.queries[1].parameters, {"person_id": "person_jamie", "limit": 1})
+
     def test_markdown_for_person_uses_shared_recent_episode_rows(self) -> None:
         runner = RecordingQueryRunner(
             results=[
