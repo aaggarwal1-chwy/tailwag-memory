@@ -13,6 +13,7 @@ from .models import (
     PersonRecognitionResult,
     SearchQuery,
 )
+from .vector_queries import vector_search_clause as _vector_search_clause
 
 
 _TRANSCRIPT_LINE_RE = re.compile(r"^\[(?P<timestamp>[^\]]+)\]\s+(?P<speaker>[^:]+):\s*(?P<text>.*)$")
@@ -21,25 +22,6 @@ _MARKDOWN_CONTROL_CHARS = str.maketrans({char: "" for char in "#*[]>`|"})
 UNKNOWN_PERSON_CONTEXT_MESSAGE = "the database does not have a record of this person"
 NO_SCOPED_PERSON_EVIDENCE_MESSAGE_PREFIX = "no episodes matched the semantic scope:"
 _MAX_CONTEXT_LINE_CHARS = 500
-_VECTOR_INDEX_LABELS = {
-    "episode_summary_embedding": "Episode",
-    "episode_transcript_embedding": "Episode",
-    "person_face_embedding": "Person",
-    "person_audio_embedding": "Person",
-    "memory_item_summary_embedding": "MemoryItem",
-}
-
-
-def _vector_search_clause(index_name: str, variable: str, limit_parameter: str) -> str:
-    """Return a Neo4j vector search clause for a known index."""
-    label = _VECTOR_INDEX_LABELS.get(index_name)
-    if label is None:
-        raise ValueError(f"unsupported vector index: {index_name}")
-    return f"""
-            CALL db.index.vector.queryNodes('{index_name}', ${limit_parameter}, $embedding)
-            YIELD node AS {variable}, score
-            WHERE {variable}:{label}
-            """
 
 
 def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: int) -> list[dict[str, object]]:

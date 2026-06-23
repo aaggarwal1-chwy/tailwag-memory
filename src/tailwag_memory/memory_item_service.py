@@ -18,6 +18,7 @@ from .memory_item_helpers import (
     stable_memory_id,
 )
 from .models import MemoryItemInput, MemoryItemMergeResult, MemoryItemResult, utc_now_iso
+from .vector_queries import vector_search_clause
 
 
 class MemoryItemService:
@@ -380,13 +381,14 @@ class MemoryItemService:
         now: datetime | None = None,
     ) -> list[MemoryItemResult]:
         """Return active memory items ranked by summary similarity."""
+        requested_limit = max(1, int(limit or 10))
+        candidate_limit = max(requested_limit * 5, 25)
         rows = self.runner.run(
-            """
-            MATCH (:Person {id: $person_id})-[:HAS_MEMORY]->(node:MemoryItem)
+            vector_search_clause("memory_item_summary_embedding", "node", "candidate_limit")
+            + """
+            MATCH (:Person {id: $person_id})-[:HAS_MEMORY]->(node)
             WHERE node.status = 'active'
-              AND node.summary_embedding IS NOT NULL
               AND NOT EXISTS { MATCH (node)-[:SUPERSEDED_BY]->(:MemoryItem) }
-            WITH node, vector.similarity.cosine(node.summary_embedding, $embedding) AS score
             RETURN $person_id AS person_id,
                    node.id AS memory_id,
                    node.kind AS kind,
@@ -403,15 +405,16 @@ class MemoryItemService:
                    node.metadata_json AS metadata_json,
                    score AS score
             ORDER BY score DESC
-            LIMIT $limit
+            LIMIT $candidate_limit
             """,
             {
                 "embedding": self.embeddings.embed(text),
                 "person_id": str(person_id or "").strip(),
-                "limit": max(1, int(limit or 10)),
+                "candidate_limit": candidate_limit,
             },
         )
-        return [item for item in (self._row_to_item(row) for row in rows) if not _is_expired(item, now=now)]
+        items = [item for item in (self._row_to_item(row) for row in rows) if not _is_expired(item, now=now)]
+        return items[:requested_limit]
 
     def candidate_items(
         self,

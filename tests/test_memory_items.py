@@ -181,10 +181,71 @@ class MemoryItemServiceTest(unittest.TestCase):
 
         self.assertEqual(results[0].memory_id, "mem_1")
         self.assertEqual(results[0].score, 0.87)
+        self.assertIn("db.index.vector.queryNodes('memory_item_summary_embedding'", runner.queries[0].query)
         self.assertIn("HAS_MEMORY", runner.queries[0].query)
-        self.assertIn("vector.similarity.cosine", runner.queries[0].query)
         self.assertIn("SUPERSEDED_BY", runner.queries[0].query)
-        self.assertEqual(runner.queries[0].parameters["limit"], 3)
+        self.assertNotIn("vector.similarity.cosine", runner.queries[0].query)
+        self.assertEqual(runner.queries[0].parameters["candidate_limit"], 25)
+
+    def test_vector_search_overfetches_before_filtering_expired_items(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "person_id": "person_jamie",
+                        "memory_id": "mem_expired",
+                        "kind": "followup",
+                        "key": "old_trip",
+                        "summary": "Old trip follow-up.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "expires_at": "2026-06-20T00:00:00+00:00",
+                        "score": 0.99,
+                    },
+                    {
+                        "person_id": "person_jamie",
+                        "memory_id": "mem_1",
+                        "kind": "fact",
+                        "key": "robot_memory",
+                        "summary": "Working on robot memory.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "score": 0.90,
+                    },
+                    {
+                        "person_id": "person_jamie",
+                        "memory_id": "mem_2",
+                        "kind": "preference",
+                        "key": "demos",
+                        "summary": "Likes hands-on demos.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "score": 0.80,
+                    },
+                    {
+                        "person_id": "person_jamie",
+                        "memory_id": "mem_3",
+                        "kind": "fact",
+                        "key": "extra",
+                        "summary": "Extra valid memory.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "score": 0.70,
+                    },
+                ]
+            ]
+        )
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        results = service.vector_search(
+            person_id="person_jamie",
+            text="robot memory",
+            limit=2,
+            now=datetime(2026, 6, 21, 0, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual([item.memory_id for item in results], ["mem_1", "mem_2"])
+        self.assertEqual(runner.queries[0].parameters["candidate_limit"], 25)
 
     def test_vector_search_excludes_superseded_audit_memories(self) -> None:
         runner = RecordingQueryRunner()
