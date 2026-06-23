@@ -183,7 +183,18 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertEqual(results[0].score, 0.87)
         self.assertIn("HAS_MEMORY", runner.queries[0].query)
         self.assertIn("vector.similarity.cosine", runner.queries[0].query)
+        self.assertIn("SUPERSEDED_BY", runner.queries[0].query)
         self.assertEqual(runner.queries[0].parameters["limit"], 3)
+
+    def test_vector_search_excludes_superseded_audit_memories(self) -> None:
+        runner = RecordingQueryRunner()
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        self.assertEqual(service.vector_search(person_id="person_jamie", text="family", limit=3), [])
+
+        query = runner.queries[0].query
+        self.assertIn("node.status = 'active'", query)
+        self.assertIn("SUPERSEDED_BY", query)
 
     def test_list_active_items_filters_expired_followups(self) -> None:
         runner = RecordingQueryRunner(
@@ -267,6 +278,122 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertTrue(service.update_item("mem_fact", source_ref=None))
 
         self.assertEqual(runner.queries[1].parameters["source_ref"], "")
+
+    def test_merge_items_copies_support_and_supersedes_source_memories(self) -> None:
+        merged_id = stable_memory_id(person_id="person_jamie", kind="fact", key="family")
+        runner = RecordingQueryRunner(
+            results=[
+                [{"memory_id": "mem_old_spouse"}, {"memory_id": "mem_old_kids"}],
+                [],
+                [{"linked_count": 3}],
+                [{"linked_count": 1}],
+                [{"memory_id": "mem_old_kids"}, {"memory_id": "mem_old_spouse"}],
+            ]
+        )
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        result = service.merge_items(
+            person_id="person_jamie",
+            merged_item=MemoryItemInput(
+                kind="fact",
+                key="family",
+                summary="family: spouse Alex; children Maya and Leo",
+                source="calling-system",
+                source_ref="consolidation",
+            ),
+            source_memory_ids=["mem_old_spouse", "mem_old_kids"],
+            supported_by_episode_ids=["ep_new"],
+        )
+
+        self.assertEqual(result.merged_memory_id, merged_id)
+        self.assertEqual(result.superseded_memory_ids, ["mem_old_spouse", "mem_old_kids"])
+        self.assertEqual(result.linked_episode_count, 4)
+        self.assertEqual(result.skipped_source_memory_ids, [])
+        self.assertEqual(runner.queries[0].parameters["memory_ids"], ["mem_old_spouse", "mem_old_kids"])
+        self.assertEqual(runner.queries[1].parameters["memory_id"], merged_id)
+        self.assertIn("MERGE (merged)-[:SUPPORTED_BY]->(episode)", runner.queries[2].query)
+        self.assertEqual(runner.queries[3].parameters["episode_ids"], ["ep_new"])
+        self.assertIn("source.status = 'superseded'", runner.queries[4].query)
+        self.assertIn("MERGE (source)-[:SUPERSEDED_BY]->(merged)", runner.queries[4].query)
+
+    def test_merge_items_uses_relationship_ownership_not_recomputed_memory_ids(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"memory_id": "mem_from_slack_person_id"}],
+                [],
+                [{"linked_count": 1}],
+                [{"memory_id": "mem_from_slack_person_id"}],
+            ]
+        )
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        result = service.merge_items(
+            person_id="person_argos_jamie",
+            merged_item=MemoryItemInput(
+                kind="fact",
+                key="family",
+                summary="family: spouse Alex",
+                source="calling-system",
+            ),
+            source_memory_ids=["mem_from_slack_person_id"],
+        )
+
+        self.assertEqual(result.skipped_source_memory_ids, [])
+        self.assertEqual(result.superseded_memory_ids, ["mem_from_slack_person_id"])
+        ownership_query = runner.queries[0]
+        self.assertIn("(:Person {id: $person_id})-[:HAS_MEMORY]->(m:MemoryItem)", ownership_query.query)
+        self.assertEqual(ownership_query.parameters["person_id"], "person_argos_jamie")
+
+    def test_merge_items_reports_source_memories_not_visible_for_person(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[[{"memory_id": "mem_valid"}], [], [], [{"memory_id": "mem_valid"}]]
+        )
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        result = service.merge_items(
+            person_id="person_jamie",
+            merged_item=MemoryItemInput(
+                kind="fact",
+                key="family",
+                summary="family: spouse Alex",
+                source="calling-system",
+            ),
+            source_memory_ids=["mem_valid", "mem_other_person"],
+        )
+
+        self.assertEqual(result.superseded_memory_ids, ["mem_valid"])
+        self.assertEqual(result.skipped_source_memory_ids, ["mem_other_person"])
+
+    def test_merge_items_rejects_all_invalid_sources_before_creating_memory(self) -> None:
+        runner = RecordingQueryRunner(results=[[]])
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        with self.assertRaisesRegex(ValueError, "at least one source memory"):
+            service.merge_items(
+                person_id="person_jamie",
+                merged_item=MemoryItemInput(
+                    kind="fact",
+                    key="family",
+                    summary="family: spouse Alex",
+                    source="calling-system",
+                ),
+                source_memory_ids=["mem_other_person"],
+            )
+
+        self.assertEqual(len(runner.queries), 1)
+        self.assertFalse(any("MERGE (m:MemoryItem" in query.query for query in runner.queries))
+
+    def test_get_and_list_items_exclude_superseded_audit_memories(self) -> None:
+        runner = RecordingQueryRunner()
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        self.assertIsNone(service.get_item("mem_old"))
+        self.assertEqual(service.list_items(person_id="person_jamie", statuses=("superseded",), limit=5), [])
+
+        self.assertIn("coalesce(m.status, 'active') <> 'superseded'", runner.queries[0].query)
+        self.assertIn("SUPERSEDED_BY", runner.queries[0].query)
+        self.assertIn("coalesce(m.status, 'active') <> 'superseded'", runner.queries[1].query)
+        self.assertIn("SUPERSEDED_BY", runner.queries[1].query)
 
     def test_rejects_invalid_observed_at(self) -> None:
         service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
@@ -534,6 +661,64 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
         self.assertEqual(result.archived_memory_ids, [])
         self.assertIn("unknown_memory_id", {item["reason"] for item in result.skipped_ops})
         self.assertEqual(runner.queries[-1].parameters["episode_ids"], ["ep1", "ep2", "ep3", "ep4"])
+
+    def test_consolidation_merges_related_candidate_memories(self) -> None:
+        class FakeConsolidationProvider:
+            def consolidate(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "merge",
+                            "memory_ids": ["mem_spouse", "mem_kids"],
+                            "kind": "fact",
+                            "key": "family",
+                            "summary": "family: spouse Alex; children Maya and Leo",
+                            "supported_episode_ids": ["ep1", "ep2", "ep3", "ep4"],
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        spouse = {
+            "memory_id": "mem_spouse",
+            "person_id": "person_jamie",
+            "kind": "fact",
+            "key": "spouse",
+            "summary": "spouse: Alex",
+            "source": "live_chat",
+            "status": "active",
+        }
+        kids = {
+            "memory_id": "mem_kids",
+            "person_id": "person_jamie",
+            "kind": "fact",
+            "key": "kids",
+            "summary": "children: Maya and Leo",
+            "source": "live_chat",
+            "status": "active",
+        }
+        runner = RecordingQueryRunner(
+            results=[
+                [_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3"), _seed_row("ep4")],
+                [_neighbor_row("ep1"), _neighbor_row("ep2"), _neighbor_row("ep3"), _neighbor_row("ep4")],
+                [spouse, kids],
+                [{"memory_id": "mem_spouse"}, {"memory_id": "mem_kids"}],
+                [],
+                [{"linked_count": 2}],
+                [{"linked_count": 4}],
+                [{"memory_id": "mem_kids"}, {"memory_id": "mem_spouse"}],
+            ]
+        )
+        service = MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), FakeConsolidationProvider())
+
+        result = service.consolidate_person("person_jamie", cluster_limit=1)
+
+        merged_id = stable_memory_id(person_id="person_jamie", kind="fact", key="family")
+        self.assertEqual(result.created_memory_ids, [merged_id])
+        self.assertEqual(result.superseded_memory_ids, ["mem_spouse", "mem_kids"])
+        self.assertEqual(result.skipped_ops, [])
+        self.assertTrue(any("SUPERSEDED_BY" in query.query for query in runner.queries))
 
     def test_consolidation_rejects_nonempty_provider_metadata(self) -> None:
         class FakeConsolidationProvider:
@@ -1237,11 +1422,16 @@ class OpenAIMemoryConsolidationProviderTest(unittest.TestCase):
         text_format = client.responses.kwargs["text"]["format"]
         self.assertEqual(text_format["name"], "memory_consolidation")
         op_schema = text_format["schema"]["properties"]["ops"]["items"]
+        self.assertIn("merge", op_schema["properties"]["op"]["enum"])
+        self.assertIn("memory_ids", op_schema["properties"])
+        self.assertIn("memory_ids", op_schema["required"])
         self.assertIn("supported_episode_ids", op_schema["properties"])
         self.assertIn("supported_episode_ids", op_schema["required"])
         developer_prompt = client.responses.kwargs["input"][0]["content"]
         self.assertIn("Do not invent episode IDs", developer_prompt)
         self.assertIn("required minimum number", developer_prompt)
+        self.assertIn("Merge related memories", developer_prompt)
+        self.assertIn("source memory IDs", developer_prompt)
         user_payload = json.loads(client.responses.kwargs["input"][1]["content"])
         self.assertEqual(user_payload["min_evidence_episodes"], 4)
         self.assertEqual(user_payload["episode_clusters"][0][0]["episode_id"], "ep1")

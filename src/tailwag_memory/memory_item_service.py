@@ -17,7 +17,7 @@ from .memory_item_helpers import (
     _validate_update_fields,
     stable_memory_id,
 )
-from .models import MemoryItemInput, MemoryItemResult, utc_now_iso
+from .models import MemoryItemInput, MemoryItemMergeResult, MemoryItemResult, utc_now_iso
 
 
 class MemoryItemService:
@@ -208,11 +208,84 @@ class MemoryItemService:
             return int(rows[0]["linked_count"])
         return len(unique_episode_ids)
 
+    def merge_items(
+        self,
+        *,
+        person_id: str,
+        merged_item: MemoryItemInput,
+        source_memory_ids: list[str],
+        supported_by_episode_ids: list[str] | None = None,
+        merged_memory_id: str | None = None,
+    ) -> MemoryItemMergeResult:
+        """Merge related person memories into one active memory item."""
+        rendered_person_id = str(person_id or "").strip()
+        if not rendered_person_id:
+            raise ValueError("person_id is required")
+        source_ids = _unique_nonempty(source_memory_ids)
+        if not source_ids:
+            raise ValueError("source_memory_ids is required")
+
+        validated = _validate_item(merged_item)
+        rendered_merged_id = str(merged_memory_id or "").strip()
+        if rendered_merged_id:
+            valid_merged_ids = self._visible_memory_ids_for_person(
+                rendered_person_id,
+                [rendered_merged_id],
+            )
+            if rendered_merged_id not in valid_merged_ids:
+                raise ValueError("merged_memory_id must be an active memory for person")
+
+        valid_source_ids = self._visible_memory_ids_for_person(rendered_person_id, source_ids)
+        valid_source_set = set(valid_source_ids)
+        skipped_source_ids = [memory_id for memory_id in source_ids if memory_id not in valid_source_set]
+        if not valid_source_ids:
+            raise ValueError("at least one source memory must be visible for person")
+
+        if rendered_merged_id:
+            self.update_item(
+                rendered_merged_id,
+                summary=validated.summary,
+                source_ref=validated.source_ref,
+                status="active",
+                observed_at=validated.observed_at,
+                due_at=validated.due_at,
+                expires_at=validated.expires_at,
+                metadata=validated.metadata,
+            )
+        else:
+            rendered_merged_id = self.upsert_item(person_id=rendered_person_id, item=validated)
+
+        redundant_source_ids = [memory_id for memory_id in valid_source_ids if memory_id != rendered_merged_id]
+
+        copied_count = self._copy_supported_episodes(
+            person_id=rendered_person_id,
+            merged_memory_id=rendered_merged_id,
+            source_memory_ids=redundant_source_ids,
+        )
+        linked_count = self.link_supported_episodes(
+            rendered_merged_id,
+            list(supported_by_episode_ids or []),
+        )
+        superseded_ids = self._mark_superseded(
+            person_id=rendered_person_id,
+            merged_memory_id=rendered_merged_id,
+            source_memory_ids=redundant_source_ids,
+        )
+        return MemoryItemMergeResult(
+            person_id=rendered_person_id,
+            merged_memory_id=rendered_merged_id,
+            superseded_memory_ids=superseded_ids,
+            linked_episode_count=copied_count + linked_count,
+            skipped_source_memory_ids=skipped_source_ids,
+        )
+
     def get_item(self, memory_id: str) -> MemoryItemResult | None:
         """Return one memory item by id when present."""
         rows = self.runner.run(
             """
             MATCH (p:Person)-[:HAS_MEMORY]->(m:MemoryItem {id: $memory_id})
+            WHERE coalesce(m.status, 'active') <> 'superseded'
+              AND NOT EXISTS { MATCH (m)-[:SUPERSEDED_BY]->(:MemoryItem) }
             RETURN p.id AS person_id,
                    m.id AS memory_id,
                    m.kind AS kind,
@@ -249,6 +322,8 @@ class MemoryItemService:
             WHERE (size($kinds) = 0 OR m.kind IN $kinds)
               AND (size($statuses) = 0 OR m.status IN $statuses)
               AND ($source = '' OR m.source = $source)
+              AND coalesce(m.status, 'active') <> 'superseded'
+              AND NOT EXISTS { MATCH (m)-[:SUPERSEDED_BY]->(:MemoryItem) }
             RETURN $person_id AS person_id,
                    m.id AS memory_id,
                    m.kind AS kind,
@@ -310,6 +385,7 @@ class MemoryItemService:
             MATCH (:Person {id: $person_id})-[:HAS_MEMORY]->(node:MemoryItem)
             WHERE node.status = 'active'
               AND node.summary_embedding IS NOT NULL
+              AND NOT EXISTS { MATCH (node)-[:SUPERSEDED_BY]->(:MemoryItem) }
             WITH node, vector.similarity.cosine(node.summary_embedding, $embedding) AS score
             RETURN $person_id AS person_id,
                    node.id AS memory_id,
@@ -381,6 +457,92 @@ class MemoryItemService:
 
         return selected
 
+    def _visible_memory_ids_for_person(self, person_id: str, memory_ids: list[str]) -> list[str]:
+        """Return non-superseded memory IDs owned by a person."""
+        unique_ids = _unique_nonempty(memory_ids)
+        if not unique_ids:
+            return []
+        rows = self.runner.run(
+            """
+            MATCH (:Person {id: $person_id})-[:HAS_MEMORY]->(m:MemoryItem)
+            WHERE m.id IN $memory_ids
+              AND coalesce(m.status, 'active') <> 'superseded'
+              AND NOT EXISTS { MATCH (m)-[:SUPERSEDED_BY]->(:MemoryItem) }
+            RETURN m.id AS memory_id
+            """,
+            {"person_id": person_id, "memory_ids": unique_ids},
+        )
+        found = {str(row.get("memory_id") or "").strip() for row in rows}
+        return [memory_id for memory_id in unique_ids if memory_id in found]
+
+    def _copy_supported_episodes(
+        self,
+        *,
+        person_id: str,
+        merged_memory_id: str,
+        source_memory_ids: list[str],
+    ) -> int:
+        """Copy support episode links from source memories to a merged memory."""
+        source_ids = _unique_nonempty(source_memory_ids)
+        if not source_ids:
+            return 0
+        rows = self.runner.run(
+            """
+            MATCH (p:Person {id: $person_id})-[:HAS_MEMORY]->(merged:MemoryItem {id: $merged_memory_id})
+            MATCH (p)-[:HAS_MEMORY]->(source:MemoryItem)
+            WHERE source.id IN $source_memory_ids
+              AND source.id <> merged.id
+              AND coalesce(source.status, 'active') <> 'superseded'
+              AND NOT EXISTS { MATCH (source)-[:SUPERSEDED_BY]->(:MemoryItem) }
+            MATCH (source)-[:SUPPORTED_BY]->(episode:Episode)
+            MERGE (merged)-[:SUPPORTED_BY]->(episode)
+            RETURN count(DISTINCT episode.id) AS linked_count
+            """,
+            {
+                "person_id": person_id,
+                "merged_memory_id": merged_memory_id,
+                "source_memory_ids": source_ids,
+            },
+        )
+        if rows and isinstance(rows[0].get("linked_count"), int):
+            return int(rows[0]["linked_count"])
+        return 0
+
+    def _mark_superseded(
+        self,
+        *,
+        person_id: str,
+        merged_memory_id: str,
+        source_memory_ids: list[str],
+    ) -> list[str]:
+        """Mark source memories as superseded by a merged memory."""
+        source_ids = _unique_nonempty(source_memory_ids)
+        if not source_ids:
+            return []
+        rows = self.runner.run(
+            """
+            MATCH (p:Person {id: $person_id})-[:HAS_MEMORY]->(merged:MemoryItem {id: $merged_memory_id})
+            MATCH (p)-[:HAS_MEMORY]->(source:MemoryItem)
+            WHERE source.id IN $source_memory_ids
+              AND source.id <> merged.id
+              AND coalesce(source.status, 'active') <> 'superseded'
+              AND NOT EXISTS { MATCH (source)-[:SUPERSEDED_BY]->(:MemoryItem) }
+            SET source.status = 'superseded',
+                source.updated_at = $now
+            MERGE (source)-[:SUPERSEDED_BY]->(merged)
+            RETURN source.id AS memory_id
+            ORDER BY source.id
+            """,
+            {
+                "person_id": person_id,
+                "merged_memory_id": merged_memory_id,
+                "source_memory_ids": source_ids,
+                "now": utc_now_iso(),
+            },
+        )
+        superseded = {str(row.get("memory_id") or "").strip() for row in rows}
+        return [memory_id for memory_id in source_ids if memory_id in superseded]
+
     def _row_to_item(self, row: dict[str, Any]) -> MemoryItemResult:
         """Convert a Neo4j row into a memory item result."""
         return MemoryItemResult(
@@ -400,4 +562,3 @@ class MemoryItemService:
             metadata=_json_loads(row.get("metadata_json")),
             score=row.get("score") if isinstance(row.get("score"), float) else None,
         )
-

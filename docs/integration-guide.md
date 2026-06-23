@@ -575,7 +575,7 @@ The intended integration is:
 
 The adapter should preserve these Argos-facing exports or equivalent call sites:
 
-- `MemoryStore`: backed by Tailwag services instead of SQLite. It should cover `upsert_item`, `update_item`, `archive_item`, `get_item`, `list_items`, `list_active_items`, plus compatibility methods such as `record_encounter` and `list_recent_encounters`.
+- `MemoryStore`: backed by Tailwag services instead of SQLite. It should cover `upsert_item`, `update_item`, `archive_item`, `merge_items`, `get_item`, `list_items`, `list_active_items`, plus compatibility methods such as `record_encounter` and `list_recent_encounters`.
 - `MemoryContextCompiler`: backed by Tailwag person context and retrieval. It should still expose `person_context(...)` with `profile_lines`, `followup_lines`, and `preferred_language`, and `site_blocks(...)` for prompt-visible location memory.
 - `PreferenceExtractor`: convert completed Argos `PreferenceSegment` buffers into `EpisodeInput` records and call `TailwagMemoryClient.record_episode(..., extract_memory=True)`.
 - `SlackMemoryService`: either wrap Tailwag Slack polling or intentionally keep Argos background scheduling while writing Slack activity as Tailwag episodes.
@@ -635,7 +635,7 @@ with TailwagMemoryClient.from_env() as memory:
     )
 ```
 
-`rekey_person_by_email()` changes one Slack-owned temporary `Person.id` property in place, so existing Slack episodes, events, and memory items stay attached to the same graph node. Existing `MemoryItem.id` values are not renamed, so Argos should use person-scoped Tailwag APIs and graph relationships after rekey rather than assuming older deterministic memory IDs include the new person ID. The method returns `False` when the email does not identify exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when the canonical ID is already used by a different `Person` node. Argos should treat those cases as identity-review work rather than auto-merging people.
+`rekey_person_by_email()` changes one Slack-owned temporary `Person.id` property in place, so existing Slack episodes, events, and memory items stay attached to the same graph node. Existing `MemoryItem.id` values are not renamed, so Argos should treat memory IDs as opaque stable IDs and use person-scoped Tailwag APIs plus graph relationships after rekey rather than assuming older deterministic memory IDs include the new person ID. The method returns `False` when the email does not identify exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when the canonical ID is already used by a different `Person` node. Argos should treat those cases as identity-review work rather than auto-merging people.
 
 If Argos needs to retire an identity or revoke biometric recognition, archive the person instead of deleting the node:
 
@@ -702,7 +702,7 @@ High-level episode recording checks every participant. Existing-episode CLI back
 
 ## Consolidate Repeated Person Memory Evidence
 
-Episode memory extraction works one episode at a time. For slower background work, Tailwag can also consolidate repeated per-person episode evidence into the same `MemoryItem` shape:
+Episode memory extraction works one episode at a time. For slower background work, Tailwag can also consolidate repeated or related per-person episode evidence into the same `MemoryItem` shape:
 
 ```python
 with TailwagMemoryClient.from_env() as memory:
@@ -717,6 +717,8 @@ tailwag memory consolidate --all --person-limit 100
 ```
 
 The consolidation pass uses Neo4j episode summary vector search to reduce candidate evidence before calling OpenAI. It stays person-scoped, requires four distinct supporting episodes by default, and validates every provider-supplied supporting episode ID against the fetched candidate episodes before writing any `SUPPORTED_BY` relationship. Duplicate episode IDs count once, unknown episode IDs do not count, and operations that fall below the threshold are skipped.
+
+When multiple memories are related but carry distinct useful details, consolidation can create or update one active merged memory that preserves the details in one place. Source memories are marked `superseded`, linked to the merged memory with `SUPERSEDED_BY`, and retained only as developer audit records. Normal endpoint and query APIs do not return superseded memories.
 
 The tunable defaults are intentionally isolated for testing:
 
@@ -734,7 +736,7 @@ Memory extraction supports these person-scoped memory item kinds:
 - `fact`: narrow person-prompt context that helps future conversation, such as durable personal projects or recurring personal context. Do not use it for ontology triples, inferred traits, directory attributes, or general world knowledge. `note` is intentionally not a separate kind.
 - `followup`: short-lived conversational opportunities. These require `expires_at` and are visible while the current time is between `due_at` and `expires_at`, inclusive. Missing `due_at` means immediately visible.
 
-Memory item identity is person-scoped by `(person_id, kind, key)`, so the same preference or fact extracted from live chat and Slack-derived source adapters converges into one durable memory item. Slack polling is available through the built-in Source Adapter CLI path and writes the same episode and memory item shapes as caller-supplied records. The extractor rejects identity-owned directory facts such as title, team, manager, cost center, business function, and leadership org. Those should stay in the calling system's identity or directory layer.
+Memory item identity is person-scoped by `(person_id, kind, key)` at create time, so the same preference or fact extracted from live chat and Slack-derived source adapters converges into one durable memory item. After person rekeying, existing memory IDs remain opaque historical IDs and ownership comes from `HAS_MEMORY`. Slack polling is available through the built-in Source Adapter CLI path and writes the same episode and memory item shapes as caller-supplied records. The extractor rejects identity-owned directory facts such as title, team, manager, cost center, business function, and leadership org. Those should stay in the calling system's identity or directory layer.
 
 ## Unified Context Shape
 

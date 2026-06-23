@@ -26,13 +26,14 @@ Implemented now:
 - `ATTENDED`
 - `HAS_MEMORY`
 - `SUPPORTED_BY`
+- `SUPERSEDED_BY`
 - OpenAI-backed episode embeddings
 - OpenAI-backed memory item embeddings
 - Neo4j 5.26 local Docker runtime
 - Neo4j constraints and vector indexes for episode text, person biometric vectors, and `MemoryItem.summary_embedding`
 - deterministic/vector-derived person context with durable memory sections and recent episode lines
 - transcript-derived person memory items
-- per-person memory consolidation from repeated episode evidence into `MemoryItem`
+- per-person memory consolidation and merged memories from repeated or related episode evidence into `MemoryItem`
 - optional `Person.face_embedding`
 - optional `Person.audio_embedding`
 - graph and vector retrieval services

@@ -124,15 +124,17 @@ MEMORY_EXTRACTION_TEXT_FORMAT = {
 }
 MEMORY_CONSOLIDATION_DEVELOPER_PROMPT = (
     "Consolidate repeated person memory patterns from supplied episode clusters for a workplace social agent. "
-    "Extract only durable person memory for the target person. Every create, update, or archive operation must be "
+    "Extract only durable person memory for the target person. Every create, update, archive, or merge operation must be "
     "supported by distinct episode IDs from the supplied clusters. Do not invent episode IDs. Create or update memory "
     "only when at least the required minimum number of supplied episodes directly support the same narrow claim. "
+    "Merge related memories when one active merged memory can preserve all non-duplicative durable details in one place; "
+    "do not silently discard conflicting details. "
     "Allowed kinds are preference, boundary, pet, fact, and followup. Facts must be narrow person-prompt context, "
     "not ontology triples, inferred traits, directory attributes, current task status, short-lived problems, "
     "or general world knowledge. Near-term hooks, open tasks, transient blockers, meetings, appointments, and "
     "same-day bugs must be followup, not fact or preference, and followups require expires_at. Do not store org chart, "
-    "title, manager, team, cost center, or inferred personality. Prefer updating existing memories over creating "
-    "duplicates. Return JSON only with update and ops."
+    "title, manager, team, cost center, or inferred personality. Prefer updating or merging existing memories over "
+    "creating duplicates. For merge ops, memory_ids contains source memory IDs to supersede. Return JSON only with update and ops."
 )
 MEMORY_CONSOLIDATION_TEXT_FORMAT = {
     "format": {
@@ -150,8 +152,12 @@ MEMORY_CONSOLIDATION_TEXT_FORMAT = {
                         "type": "object",
                         "additionalProperties": False,
                         "properties": {
-                            "op": {"type": "string", "enum": ["create", "update", "archive", "noop"]},
+                            "op": {"type": "string", "enum": ["create", "update", "archive", "merge", "noop"]},
                             "memory_id": {"type": "string"},
+                            "memory_ids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
                             "kind": {"type": "string", "enum": ["preference", "boundary", "pet", "fact", "followup"]},
                             "key": {"type": "string"},
                             "summary": {"type": "string"},
@@ -172,6 +178,7 @@ MEMORY_CONSOLIDATION_TEXT_FORMAT = {
                         "required": [
                             "op",
                             "memory_id",
+                            "memory_ids",
                             "kind",
                             "key",
                             "summary",

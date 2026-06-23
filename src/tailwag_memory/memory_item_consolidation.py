@@ -111,6 +111,7 @@ class MemoryConsolidationService:
             created_memory_ids=applied["created"],
             updated_memory_ids=applied["updated"],
             archived_memory_ids=applied["archived"],
+            superseded_memory_ids=applied["superseded"],
             skipped_ops=applied["skipped"],
             candidate_episode_ids=candidate_episode_ids,
             provider_called=True,
@@ -262,7 +263,13 @@ def _apply_consolidation_operations(
     min_evidence_episodes: int,
 ) -> dict[str, list[Any]]:
     """Apply provider consolidation operations after validating evidence IDs."""
-    applied: dict[str, list[Any]] = {"created": [], "updated": [], "archived": [], "skipped": []}
+    applied: dict[str, list[Any]] = {
+        "created": [],
+        "updated": [],
+        "archived": [],
+        "superseded": [],
+        "skipped": [],
+    }
     if not isinstance(operations, dict) or not operations.get("update"):
         return applied
     candidate_by_id = {item.memory_id: item for item in candidate_memories}
@@ -297,6 +304,47 @@ def _apply_consolidation_operations(
                 )
                 memory_service.link_supported_episodes(memory_id, support)
                 applied["created"].append(memory_id)
+            except ValueError as exc:
+                applied["skipped"].append({"reason": str(exc), "op": raw})
+            continue
+        if op == "merge":
+            raw_memory_ids = raw.get("memory_ids")
+            if not isinstance(raw_memory_ids, list):
+                applied["skipped"].append({"reason": "missing_memory_ids", "op": raw})
+                continue
+            source_memory_ids = _unique_nonempty([str(value or "") for value in raw_memory_ids])
+            unknown_memory_ids = [memory_id for memory_id in source_memory_ids if memory_id not in candidate_by_id]
+            for memory_id in unknown_memory_ids:
+                applied["skipped"].append({"reason": "unknown_memory_id", "memory_id": memory_id, "op": raw})
+            valid_source_memory_ids = [memory_id for memory_id in source_memory_ids if memory_id in candidate_by_id]
+            if not valid_source_memory_ids:
+                applied["skipped"].append({"reason": "no_valid_source_memory_ids", "op": raw})
+                continue
+            try:
+                metadata = _consolidation_metadata(raw, default={})
+                merge_result = memory_service.merge_items(
+                    person_id=person_id,
+                    merged_item=MemoryItemInput(
+                        kind=str(raw.get("kind") or ""),
+                        key=str(raw.get("key") or ""),
+                        summary=str(raw.get("summary") or ""),
+                        source=normalize_memory_source(source),
+                        source_ref=source_ref,
+                        observed_at=observed_at,
+                        due_at=str(raw.get("due_at") or ""),
+                        expires_at=str(raw.get("expires_at") or ""),
+                        metadata=metadata,
+                    ),
+                    source_memory_ids=valid_source_memory_ids,
+                    supported_by_episode_ids=support,
+                )
+                if merge_result.merged_memory_id not in candidate_by_id:
+                    applied["created"].append(merge_result.merged_memory_id)
+                else:
+                    applied["updated"].append(merge_result.merged_memory_id)
+                applied["superseded"].extend(merge_result.superseded_memory_ids)
+                for skipped_id in merge_result.skipped_source_memory_ids:
+                    applied["skipped"].append({"reason": "invalid_source_memory_id", "memory_id": skipped_id, "op": raw})
             except ValueError as exc:
                 applied["skipped"].append({"reason": str(exc), "op": raw})
             continue

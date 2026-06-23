@@ -257,6 +257,17 @@ class MemoryItemResult:
 
 
 @dataclass(frozen=True)
+class MemoryItemMergeResult:
+    """Result for merging related memory items into one active memory."""
+
+    person_id: str
+    merged_memory_id: str
+    superseded_memory_ids: list[str] = field(default_factory=list)
+    linked_episode_count: int = 0
+    skipped_source_memory_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class PersonMemoryExtractionResult:
     """Per-person result for episode memory extraction."""
 
@@ -291,6 +302,7 @@ class PersonMemoryConsolidationResult:
     candidate_episode_ids: list[str] = field(default_factory=list)
     provider_called: bool = False
     error: str | None = None
+    superseded_memory_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

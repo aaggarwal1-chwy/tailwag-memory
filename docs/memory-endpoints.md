@@ -228,7 +228,7 @@ Use this for backfills or debugging extraction after an episode already exists.
 
 ### `consolidate_memory(*, person_id=None, all_people=False, person_limit=100, min_evidence_episodes=4, seed_limit=25, neighbor_limit=12, cluster_limit=8, episode_text_limit=1200)`
 
-Consolidates repeated episode evidence into durable per-person memory items.
+Consolidates repeated or related episode evidence into durable per-person memory items.
 
 Parameters:
 
@@ -248,6 +248,7 @@ Returns: `MemoryConsolidationResult`.
 Notes:
 
 - The service validates provider-supplied supporting episode IDs before writing `SUPPORTED_BY`.
+- Consolidation can merge related memories into one active merged memory. Source memories are marked `superseded`, linked to the merged memory with `SUPERSEDED_BY`, and excluded from normal endpoint/query results.
 - This is slower background work; normal live ingestion should use `record_episode()`.
 
 ## Input Models
@@ -334,9 +335,9 @@ Advanced callers can mutate durable person memories directly.
 | `due_at` | `str` | no | `""` | Follow-up visibility start. Empty means immediately visible. |
 | `expires_at` | `str` | no | `""` | Follow-up expiry. Required for active follow-ups. |
 | `metadata` | `dict[str, Any]` | no | `{}` | Structured caller metadata. |
-| `memory_id` | `str \| None` | no | `None` | Must match Tailwag deterministic ID if supplied. |
+| `memory_id` | `str \| None` | no | `None` | Must match Tailwag deterministic ID for direct creates if supplied. Existing IDs should be treated as opaque after person rekeys. |
 
-Memory identity is deterministic by `(person_id, kind, key)`.
+Memory identity is deterministic by `(person_id, kind, key)` at create time. After a person ID is rekeyed, existing `MemoryItem.id` values are not renamed; use person-scoped APIs and graph relationships instead of parsing IDs.
 
 ## Lower-Level Write Endpoints
 
@@ -390,11 +391,14 @@ Methods:
 | `update_item(...)` | `memory_id`, optional `summary`, `source_ref`, `status`, `observed_at`, `due_at`, `expires_at`, `metadata`, `supported_by_episode_id` | `bool` | Update an existing item. Omitted fields preserve existing values. |
 | `archive_item(memory_id)` | `memory_id` | `bool` | Set status to `archived`. |
 | `link_supported_episodes(memory_id, episode_ids)` | memory ID and episode IDs | `int` | Link existing episodes as support evidence. |
+| `merge_items(...)` | `person_id`, `merged_item`, `source_memory_ids`, optional `supported_by_episode_ids`, optional `merged_memory_id` | `MemoryItemMergeResult` | Merge related source memories into one active merged memory. Copies support evidence, marks sources `superseded`, and writes `SUPERSEDED_BY`. |
 | `get_item(memory_id)` | memory ID | `MemoryItemResult \| None` | Fetch one memory item. |
 | `list_items(...)` | `person_id`, `kinds=()`, `statuses=()`, `source=""`, `limit=100` | `list[MemoryItemResult]` | Fetch filtered memory items. |
 | `list_active_items(...)` | `person_id`, `kinds=()`, `source=""`, `now=None`, `limit=100` | `list[MemoryItemResult]` | Fetch active, unexpired items. |
 | `vector_search(...)` | `person_id`, `text`, `limit=10`, `now=None` | `list[MemoryItemResult]` | Rank active memory items by summary similarity. |
 | `candidate_items(...)` | `person_id`, `transcript`, `limit=12` | `list[MemoryItemResult]` | Select existing memories relevant to extraction. |
+
+Normal `MemoryItemService` read methods do not return superseded memories. Superseded memories remain in Neo4j only as developer audit records and point to their merged memory with `SUPERSEDED_BY`.
 
 ## Lower-Level Read Endpoints
 
@@ -456,6 +460,8 @@ Most callers should use the high-level client. Use these services to inject cust
 | --- | --- | --- | --- |
 | `consolidate_person(...)` | `person_id`, `min_evidence_episodes=4`, `seed_limit=25`, `neighbor_limit=12`, `cluster_limit=8`, `episode_text_limit=1200` | `PersonMemoryConsolidationResult` | Consolidate repeated evidence for one person. |
 | `consolidate_all(...)` | `person_limit=100`, `min_evidence_episodes=4`, `seed_limit=25`, `neighbor_limit=12`, `cluster_limit=8`, `episode_text_limit=1200` | `MemoryConsolidationResult` | Consolidate across people. |
+
+Custom consolidation providers may return `merge` operations with `memory_ids`, merged `kind`/`key`/`summary`, timestamps, empty `metadata`, and validated `supported_episode_ids`. Merge operations preserve distinct details in the merged memory and supersede the source memories.
 
 ## Slack Endpoints
 
@@ -557,9 +563,10 @@ Common return types:
 | `PersonContextSource` | `person_id`, `display_name`, `items`. |
 | `PersonContextItem` | `item_id`, `item_type`, `text`, timestamps, place, role, source, score, transcript lines. |
 | `MemoryItemResult` | `memory_id`, `person_id`, `kind`, `key`, `summary`, `source`, status/timestamps, metadata, optional `score`. |
+| `MemoryItemMergeResult` | `person_id`, `merged_memory_id`, superseded source IDs, linked episode count, skipped source IDs. |
 | `PersonMemoryExtractionResult` | `person_id`, `update_requested`, created/updated/archived IDs, skipped ops, optional error. |
 | `EpisodeMemoryExtractionResult` | `episode_id`, per-person memory results, memory errors. |
-| `PersonMemoryConsolidationResult` | `person_id`, update flag, created/updated/archived IDs, skipped ops, candidate episode IDs, provider flag, optional error. |
+| `PersonMemoryConsolidationResult` | `person_id`, update flag, created/updated/archived/superseded IDs, skipped ops, candidate episode IDs, provider flag, optional error. |
 | `MemoryConsolidationResult` | per-person consolidation results and errors. |
 | `EpisodeRecordResult` | stored episode ID plus extraction result fields. |
 

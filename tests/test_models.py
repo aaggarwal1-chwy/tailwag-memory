@@ -1,4 +1,4 @@
-from tailwag_memory.models import EpisodeInput, EventInput
+from tailwag_memory.models import EpisodeInput, EventInput, MemoryItemMergeResult, PersonMemoryConsolidationResult
 import unittest
 
 
@@ -122,6 +122,23 @@ class EventInputTest(unittest.TestCase):
         self.assertEqual(attendee.source, "outlook")
         self.assertEqual(attendee.response, "accepted")
         self.assertEqual(attendee.response_time, "2026-06-15T18:00:00+00:00")
+
+
+class MemoryModelTest(unittest.TestCase):
+    def test_memory_merge_result_defaults_are_independent(self) -> None:
+        first = MemoryItemMergeResult(person_id="person_jamie", merged_memory_id="mem_family")
+        second = MemoryItemMergeResult(person_id="person_casey", merged_memory_id="mem_family")
+
+        first.superseded_memory_ids.append("mem_old")
+        first.skipped_source_memory_ids.append("mem_skip")
+
+        self.assertEqual(second.superseded_memory_ids, [])
+        self.assertEqual(second.skipped_source_memory_ids, [])
+
+    def test_consolidation_result_tracks_superseded_memory_ids(self) -> None:
+        result = PersonMemoryConsolidationResult(person_id="person_jamie")
+
+        self.assertEqual(result.superseded_memory_ids, [])
 
 
 if __name__ == "__main__":

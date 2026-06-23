@@ -202,11 +202,13 @@ Notes:
 
 - Memory items are person-scoped durable or short-lived prompt memories extracted from transcripts.
 - Durable memory identity is deterministic by the service-generated `MemoryItem.id`, derived from `(person_id, kind, key)`, so the same memory extracted from live chat and Slack converges into one item; `source` and `source_ref` remain provenance fields, not identity fields.
+- After person rekeying, existing `MemoryItem.id` values remain opaque historical IDs; person ownership comes from `HAS_MEMORY`, not from recomputing IDs.
 - Allowed kinds are `preference`, `boundary`, `pet`, `fact`, and `followup`.
 - `note` is intentionally excluded; durable ongoing person-prompt context belongs in `fact`.
 - `fact` must stay narrow: no ontology triples, inferred traits, directory attributes, or general world knowledge.
 - `followup` items require `expires_at` and are visible when the current time is between `due_at` and `expires_at`, inclusive. Missing `due_at` means immediately visible.
 - Identity-owned directory facts such as title, team, manager, cost center, and leadership org are intentionally excluded.
+- Related or redundant memories can be merged into one active merged memory. Superseded source memories are kept only as developer audit records, marked `status = "superseded"`, and excluded from normal endpoint/query APIs.
 
 ## Initial Relationships
 
@@ -229,7 +231,11 @@ Notes:
 (:Person)-[:HAS_MEMORY]->(:MemoryItem)
 
 (:MemoryItem)-[:SUPPORTED_BY]->(:Episode)
+
+(:MemoryItem)-[:SUPERSEDED_BY]->(:MemoryItem)
 ```
+
+`SUPERSEDED_BY` points from a superseded source memory to the active merged memory that replaces it.
 
 `PARTICIPATED_IN.source` records how the calling system decided the person participated in the episode. Example values include `face_recognition`, `speaker_recognition`, `manual`, `caller`, `demo`, or `example`. It is provenance for the relationship, not a confidence score. If multiple signals are used later, the caller can choose a combined value such as `face_and_audio` or the model can be expanded to store richer evidence.
 

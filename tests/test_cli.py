@@ -537,6 +537,7 @@ class CliTest(unittest.TestCase):
                         PersonMemoryConsolidationResult(
                             person_id="person_jamie",
                             created_memory_ids=["mem_1"],
+                            superseded_memory_ids=["mem_old"],
                             candidate_episode_ids=["ep1", "ep2", "ep3", "ep4"],
                             provider_called=True,
                         )
@@ -556,6 +557,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(calls[0]["min_evidence_episodes"], 4)
         output = json.loads(stdout.getvalue())
         self.assertEqual(output["person_results"][0]["created_memory_ids"], ["mem_1"])
+        self.assertEqual(output["person_results"][0]["superseded_memory_ids"], ["mem_old"])
         self.assertTrue(runner.closed)
 
     def test_memory_consolidate_all_outputs_json(self) -> None:
