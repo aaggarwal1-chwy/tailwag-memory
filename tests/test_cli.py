@@ -503,76 +503,17 @@ class CliTest(unittest.TestCase):
         self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
         self.assertTrue(runner.closed)
 
-    def test_memory_context_command_uses_unified_context(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            openai_api_key="test-key",
-        )
-        runner = FakeRunner(settings)
-        calls = []
+    def test_memory_help_excludes_context_command(self) -> None:
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as raised:
+                main(["memory", "--help"])
 
-        class FakeClient:
-            def __init__(self, runner_arg, settings_arg) -> None:
-                pass
-
-            def person_context(
-                self,
-                person_id: str,
-                limit: int = 10,
-                semantic_scope: str | None = None,
-                *,
-                current_text: str | None = None,
-                memory_limit: int = 12,
-                recent_episode_limit: int = 5,
-            ) -> str:
-                calls.append(
-                    {
-                        "person_id": person_id,
-                        "limit": limit,
-                        "semantic_scope": semantic_scope,
-                        "current_text": current_text,
-                        "memory_limit": memory_limit,
-                        "recent_episode_limit": recent_episode_limit,
-                    }
-                )
-                return "[PERSON MEMORY]\nFacts:\n- working on robot memory"
-
-        with patch("tailwag_memory.cli.load_settings", return_value=settings):
-            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
-                    stdout = StringIO()
-                    with redirect_stdout(stdout):
-                        exit_code = main(
-                            [
-                                "memory",
-                                "context",
-                                "--person-id",
-                                "person_jamie",
-                                "--semantic-scope",
-                                "chargers",
-                                "--current-text",
-                                "robot demo",
-                            ]
-                        )
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(
-            calls,
-            [
-                {
-                    "person_id": "person_jamie",
-                    "limit": 10,
-                    "semantic_scope": "chargers",
-                    "current_text": "robot demo",
-                    "memory_limit": 12,
-                    "recent_episode_limit": 5,
-                }
-            ],
-        )
-        self.assertIn("[PERSON MEMORY]", stdout.getvalue())
+        self.assertEqual(raised.exception.code, 0)
+        help_text = stdout.getvalue()
+        self.assertIn("extract", help_text)
+        self.assertIn("consolidate", help_text)
+        self.assertNotIn("context", help_text)
 
     def test_memory_consolidate_person_outputs_json(self) -> None:
         settings = Settings(

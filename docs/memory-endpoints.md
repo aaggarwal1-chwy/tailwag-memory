@@ -23,7 +23,6 @@ export NEO4J_PASSWORD=tailwag-memory
 export OPENAI_API_KEY=sk-your-token-here
 export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
-export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
@@ -41,7 +40,7 @@ finally:
     runner.close()
 ```
 
-`OPENAI_API_KEY` is required for production embeddings, memory extraction, consolidation, vector search, and synthesized person context. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
+`OPENAI_API_KEY` is required when production code uses the OpenAI provider for embeddings, memory extraction, consolidation, or vector search. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
 
 ## Quick Start
 
@@ -190,26 +189,26 @@ Notes:
 
 ### `person_context(person_id, limit=10, semantic_scope=None, *, current_text=None, now=None, memory_limit=12, recent_episode_limit=5)`
 
-Returns prompt-ready context for a person. The output combines deterministic durable memory markdown with synthesized context from recent or semantically scoped evidence.
+Returns prompt-ready context for a person. The output combines deterministic durable memory markdown, visible follow-ups, and bounded recent episode lines.
 
 Parameters:
 
 | Name | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `person_id` | `str` | yes | Caller-owned `Person.id`. |
-| `limit` | `int` | no | Maximum related episode/event items used for synthesized context. |
-| `semantic_scope` | `str \| None` | no | Topic used to vector-filter episode evidence before synthesis. |
+| `limit` | `int` | no | Reserved retrieval limit for lower-level person context evidence. Episode lines in high-level context are controlled by `recent_episode_limit`. |
+| `semantic_scope` | `str \| None` | no | Topic reused for durable memory ranking when `current_text` is omitted, and for a scoped episode no-match check. |
 | `current_text` | `str \| None` | no | Current utterance/task used to vector-rank durable memory items. When omitted, `semantic_scope` is reused for durable memory ranking. |
-| `now` | `datetime \| None` | no | Reference time for follow-up visibility in deterministic memory context. |
+| `now` | `datetime \| None` | no | Reference time for follow-up visibility in the deterministic durable memory section. |
 | `memory_limit` | `int` | no | Maximum durable memory lines per section. |
-| `recent_episode_limit` | `int` | no | Maximum recent episode summary lines in deterministic memory context. |
+| `recent_episode_limit` | `int` | no | Maximum recent episode summary lines in the deterministic durable memory section. |
 
 Returns: `str`.
 
 Notes:
 
-- If no person exists, synthesized context returns `the database does not have a record of this person`.
-- If `semantic_scope` is supplied, an embedding provider is required and unrelated recent history is not used for synthesis.
+- If no person exists, person context returns `the database does not have a record of this person`.
+- If `semantic_scope` is supplied, an embedding provider is required. Rendered episode lines still come from the bounded recent episode section.
 - The returned string is suitable for prompts, not a structured API contract.
 
 ### `extract_memory_for_episode(episode_id, person_id=None)`
@@ -429,7 +428,7 @@ Only people with `consent_status="consented"` are returned.
 
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
-| `source_for_person(person_id, limit=10, semantic_scope=None)` | person ID and optional scope | `PersonContextSource \| None` | Structured recent or scoped evidence for synthesis. |
+| `source_for_person(person_id, limit=10, semantic_scope=None)` | person ID and optional scope | `PersonContextSource \| None` | Structured recent or vector-scoped evidence for advanced callers. |
 
 When `semantic_scope` is provided, `embeddings` is required.
 

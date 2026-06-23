@@ -22,7 +22,6 @@ from .models import (
     PersonInput,
 )
 from .retrieval import PersonContextRetrievalService
-from .synthesis import OpenAIPersonContextProvider, PersonContextSynthesisService
 
 
 class TailwagMemoryClient:
@@ -83,7 +82,7 @@ class TailwagMemoryClient:
         memory_limit: int = 12,
         recent_episode_limit: int = 5,
     ) -> str:
-        """Return combined durable and synthesized context for a person."""
+        """Return deterministic durable and retrieved context for a person."""
         memory_context = PersonMemoryContextService(self.runner, self._embeddings()).markdown_for_person(
             person_id,
             current_text=current_text or semantic_scope,
@@ -91,18 +90,12 @@ class TailwagMemoryClient:
             memory_limit=memory_limit,
             recent_episode_limit=recent_episode_limit,
         )
-        embeddings = self._embeddings()
-        retrieval = PersonContextRetrievalService(self.runner, embeddings)
-        provider = OpenAIPersonContextProvider(
-            api_key=self.settings.openai_api_key,
-            model=self.settings.synthesis_model,
-        )
-        synthesized_context = PersonContextSynthesisService(retrieval, provider).context_for_person(
+        retrieved_context = PersonContextRetrievalService(self.runner, self._embeddings()).markdown_for_person(
             person_id,
             limit=limit,
             semantic_scope=semantic_scope,
         )
-        return "\n\n".join(part for part in [memory_context, synthesized_context] if part)
+        return "\n\n".join(part for part in [memory_context, retrieved_context] if part)
 
     def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
         """Store an episode and optionally extract durable memory items."""

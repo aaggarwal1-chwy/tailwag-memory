@@ -41,7 +41,6 @@ from .retrieval import (
     PersonRecognitionService,
 )
 from .schema import initialize_schema
-from .synthesis import PersonContextSynthesisService
 
 __all__ = [
     "EmbeddingProvider",
@@ -71,7 +70,6 @@ __all__ = [
     "PersonContextItem",
     "PersonContextRetrievalService",
     "PersonContextSource",
-    "PersonContextSynthesisService",
     "PersonContextTranscriptLine",
     "PersonIngestionService",
     "PersonInput",

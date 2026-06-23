@@ -1122,6 +1122,8 @@ class OpenAIMemoryExtractionProviderTest(unittest.TestCase):
         self.assertEqual(metadata_schema["additionalProperties"], False)
         self.assertEqual(metadata_schema["properties"], {})
         developer_prompt = client.responses.kwargs["input"][0]["content"]
+        self.assertIn("stay relevant for weeks at a time", developer_prompt)
+        self.assertIn("Insignificant observations", developer_prompt)
         self.assertIn("future conversation more fruitful", developer_prompt)
         self.assertIn("bugs being debugged today", developer_prompt)
         self.assertIn("must be followup, not fact or preference", developer_prompt)

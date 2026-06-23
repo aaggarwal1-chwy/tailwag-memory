@@ -216,9 +216,9 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(result.episode_id, "episode_1")
         self.assertEqual(calls, [{"episode_id": "episode_1", "person_id": "person_jamie", "speaker_only": True}])
 
-    def test_person_context_returns_unified_memory_and_synthesis_context(self) -> None:
+    def test_person_context_returns_durable_memory_without_redundant_retrieved_context(self) -> None:
         memory_calls = []
-        synthesis_calls = []
+        retrieval_calls = []
 
         class FakeMemoryContext:
             def __init__(self, runner_arg, embeddings) -> None:
@@ -236,22 +236,22 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 memory_calls.append((person_id, current_text, now, memory_limit, recent_episode_limit))
                 return "[PERSON MEMORY]\nPreferences:\n- likes robot demos"
 
-        class FakeSynthesis:
-            def __init__(self, retrieval, provider) -> None:
+        class FakeRetrieval:
+            def __init__(self, runner_arg, embeddings) -> None:
                 pass
 
-            def context_for_person(
+            def markdown_for_person(
                 self,
                 person_id: str,
                 limit: int = 10,
                 semantic_scope: str | None = None,
             ) -> str:
-                synthesis_calls.append((person_id, limit, semantic_scope))
-                return "Jamie recently asked about chargers."
+                retrieval_calls.append((person_id, limit, semantic_scope))
+                return ""
 
         now = datetime(2026, 6, 18, tzinfo=timezone.utc)
         with patch("tailwag_memory.client.PersonMemoryContextService", FakeMemoryContext):
-            with patch("tailwag_memory.client.PersonContextSynthesisService", FakeSynthesis):
+            with patch("tailwag_memory.client.PersonContextRetrievalService", FakeRetrieval):
                 context = TailwagMemoryClient(FakeRunner(), _settings()).person_context(
                     "person_jamie",
                     limit=3,
@@ -264,10 +264,10 @@ class TailwagMemoryClientTest(unittest.TestCase):
 
         self.assertEqual(
             context,
-            "[PERSON MEMORY]\nPreferences:\n- likes robot demos\n\nJamie recently asked about chargers.",
+            "[PERSON MEMORY]\nPreferences:\n- likes robot demos",
         )
         self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4, 2)])
-        self.assertEqual(synthesis_calls, [("person_jamie", 3, "chargers")])
+        self.assertEqual(retrieval_calls, [("person_jamie", 3, "chargers")])
 
     def test_consolidate_memory_routes_single_person_and_all_people(self) -> None:
         calls = []

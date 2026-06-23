@@ -17,7 +17,7 @@ The package connects to Neo4j through environment variables and stores:
 - memory item summary embeddings
 - optional person face embeddings
 - optional person audio embeddings
-- unified person context generated from durable memory items, visible follow-ups, recent episodes, related episodes, and accepted-attendee events
+- deterministic/vector-derived person context assembled from durable memory items, visible follow-ups, and recent episode lines
 
 ## Install From Another Local Repo
 
@@ -44,12 +44,11 @@ export NEO4J_PASSWORD=tailwag-memory
 export OPENAI_API_KEY=sk-your-token-here
 export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
-export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
 The embedding dimension must match every vector index and vector payload used by the service.
-`OPENAI_API_KEY` is required for production episode embeddings, vector search, and person context synthesis. Tests should inject `MockOpenAIEmbeddingProvider` or fake synthesis providers instead of calling OpenAI.
+`OPENAI_API_KEY` is required when production code uses the OpenAI provider for episode embeddings, memory item embeddings, vector search, memory extraction, or consolidation. Tests should inject `MockOpenAIEmbeddingProvider` or fake providers instead of calling OpenAI.
 `SLACK_BOT_TOKEN` is only required when polling Slack.
 
 ## CLI Workflows
@@ -104,7 +103,6 @@ tailwag search --building-code SLACK --room-id C0123456789 "conversation"
 tailwag event by-place --building-code MAIN --room-id 101
 tailwag person context --person-id person_jamie
 tailwag person context --person-id person_jamie --semantic-scope "chargers"
-tailwag memory context --person-id person_jamie --current-text "robot demo later today"
 tailwag memory extract --episode-id episode_example_001
 tailwag memory extract --episode-id episode_example_001 --person-id person_jamie
 tailwag memory consolidate --person-id person_jamie
@@ -231,7 +229,7 @@ When `display_name`, `email`, `consent_status`, `face_embedding`, or `audio_embe
 
 ## Poll Slack Into Episodes
 
-Slack channel polling creates normal conversation episodes. The channel is stored as a virtual place with `building_code="SLACK"` and `room_id` set to the Slack channel ID. Slack users become people with IDs such as `slack:U0123456789`; email is stored separately on `Person.email` only when `--include-email` is used and Slack provides it, and face and audio embeddings are left unset. Slack transcripts resolve user mentions to display names and include timestamped speaker lines. Slack episode summaries include the root speaker name to preserve attribution when a person context paragraph is synthesized later.
+Slack channel polling creates normal conversation episodes. The channel is stored as a virtual place with `building_code="SLACK"` and `room_id` set to the Slack channel ID. Slack users become people with IDs such as `slack:U0123456789`; email is stored separately on `Person.email` only when `--include-email` is used and Slack provides it, and face and audio embeddings are left unset. Slack transcripts resolve user mentions to display names and include timestamped speaker lines. Slack episode summaries include the root speaker name so deterministic person context keeps thread attribution clear.
 
 ```bash
 tailwag slack poll --channel C0123456789 --once
@@ -499,7 +497,7 @@ with TailwagMemoryClient.from_env() as memory:
 print(context)
 ```
 
-`person_context()` returns one context surface. It starts with deterministic durable memory sections when active memory items or recent episode lines exist, then appends the synthesized natural-language person context.
+`person_context()` returns one deterministic context surface. It includes durable memory sections, visible follow-ups, and a bounded `Recent Episodes` section when available.
 
 To retrieve memory items against the user's current utterance or task, pass `current_text`:
 
@@ -511,24 +509,22 @@ with TailwagMemoryClient.from_env() as memory:
     )
 ```
 
-To forcibly narrow synthesized episode evidence by topic, pass `semantic_scope`. This runs vector search over episode summaries and transcripts for that person before synthesis. When `current_text` is omitted, `semantic_scope` is also used to retrieve semantically related durable memory items:
+To retrieve durable memory items against a topic, pass `semantic_scope`. When `current_text` is omitted, `semantic_scope` is used to retrieve semantically related durable memory items. Rendered episode lines still come from the bounded `Recent Episodes` section:
 
 ```python
 with TailwagMemoryClient.from_env() as memory:
     context = memory.person_context("person_jamie", semantic_scope="chargers")
 ```
 
-The synthesized paragraph combines recent episodes where the person participated and recent events where the person is an accepted attendee. If no `Person` node exists and there are no memory items, the method returns exactly:
+The returned context combines durable memory items and recent episode lines from episodes where the person participated. If no `Person` node exists and there are no memory items, the method returns exactly:
 
 ```text
 the database does not have a record of this person
 ```
 
-If the person exists but has no related recent events or episodes, the method returns a local deterministic paragraph without calling OpenAI.
+If the person exists but has no related episodes, the method returns local deterministic context.
 
-Person context synthesis sends OpenAI an explicit `current_time`, evidence timestamps, and structured Slack transcript lines when available. The synthesis prompt tells the model to resolve relative phrases like `today`, `tomorrow`, and `later this week` against the evidence timestamp before suggesting a follow-up, so already elapsed meetings are not treated as upcoming.
-
-Scoped person context is episode-only in the current model. If no vector-matched episodes are found for the person and semantic scope, the method returns a local deterministic paragraph without calling OpenAI. It does not fall back to unrelated recent history or event descriptions.
+If no vector-matched episodes are found for the person and semantic scope, the method may include a local no-match note. It does not render a separate scoped episode-evidence section.
 
 ## Search Events By Place
 
@@ -573,7 +569,7 @@ When `argos-agent` replaces its whole `argos_src/memory` folder with this packag
 
 The intended integration is:
 
-- Tailwag owns durable memory storage, episode/event ingestion, memory extraction, vector retrieval, and person context synthesis.
+- Tailwag owns durable memory storage, episode/event ingestion, memory extraction, vector retrieval, and deterministic/vector-derived person context.
 - Argos owns robot/runtime identity, turn ownership, transcription, summaries, face and speaker recognition, profile config, and realtime prompt assembly.
 - A small Argos compatibility adapter should keep the old Argos-facing runtime contract while delegating persistence and retrieval to Tailwag.
 
@@ -801,13 +797,13 @@ The consuming repo should depend on the `EmbeddingProvider` behavior rather than
 - Start Neo4j before calling services.
 - Run schema initialization before ingestion or retrieval.
 - Use caller-owned IDs for people, episodes, and events.
-- Set `OPENAI_API_KEY` before production ingestion, vector search, or person context synthesis.
+- Set `OPENAI_API_KEY` before production ingestion or vector search when using the OpenAI embedding provider.
 - Set `OPENAI_API_KEY` before production transcript memory extraction.
 - Send consent/profile information on the first encounter, then reference existing people by ID on later memories.
 - Use only `building_code` and `room_id` for places in the current scope.
 - Use `Event` for place-linked happenings that may reference people as attendees/participants.
 - Do not pass raw face images or raw audio into this package.
 - Keep biometric vector usage tied to consent and retention policies in the calling system.
-- Episode text is sent to OpenAI for embeddings, and recent person-related evidence is sent to OpenAI for context synthesis.
+- Episode text and memory item summaries are sent to OpenAI for embeddings when using the OpenAI embedding provider.
 - Transcript memory extraction sends transcripts and selected existing memory item candidates to OpenAI.
 - `upsert_person()`, `archive_person()`, and `rekey_person_by_email()` are profile-only writes; they do not call OpenAI. Archived people retain historical graph data while stored biometric vectors are removed.

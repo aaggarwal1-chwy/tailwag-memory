@@ -32,11 +32,10 @@ Implemented now:
 - OpenAI-backed episode embeddings
 - OpenAI-backed memory item embeddings
 - Neo4j 5.26 local Docker runtime
-- OpenAI-backed natural-language person context synthesis
+- deterministic/vector-derived person context
 - transcript-derived person memory extraction and markdown context formatting
 - per-person repeated-evidence memory consolidation into `MemoryItem`
-- durable memory context plus recent episode/event context in `person_context`
-- memory context CLI command
+- durable memory sections plus recent episode lines in `person_context`
 - optional caller-supplied person face embeddings
 - optional caller-supplied person audio embeddings
 - Neo4j constraints and vector indexes for `Episode.summary_embedding`, `Episode.transcript_embedding`, `Person.face_embedding`, `Person.audio_embedding`, and `MemoryItem.summary_embedding`
@@ -327,7 +326,6 @@ tailwag-memory/
     memory_items.py
     retrieval.py
     slack_ingestion.py
-    synthesis.py
     cli.py
   scripts/
     seed_demo.py
@@ -348,7 +346,6 @@ tailwag-memory/
     test_retrieval.py
     test_memory_items.py
     test_slack_ingestion.py
-    test_synthesis.py
     test_examples.py
 ```
 
@@ -435,7 +432,6 @@ tailwag search --building-code MAIN --room-id 101 "projector"
 tailwag event by-place --building-code MAIN --room-id 101
 tailwag person context --person-id person_jamie
 tailwag person context --person-id person_jamie --semantic-scope "chargers"
-tailwag memory context --person-id person_jamie --current-text "robot demo later today"
 tailwag person search-face --embedding-file examples/face-embedding.json
 tailwag person search-audio --embedding-file examples/audio-embedding.json
 ```

@@ -89,7 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     context_parser.add_argument("--semantic-scope", help="optional semantic focus for OpenAI-backed vector retrieval")
     context_parser.add_argument("--current-text", help="optional current utterance or task for memory item retrieval")
     context_parser.add_argument("--memory-limit", type=int, default=12, help="maximum durable memory items per section")
-    context_parser.add_argument("--recent-episode-limit", type=int, default=5, help="maximum recent episode lines in memory context")
+    context_parser.add_argument("--recent-episode-limit", type=int, default=5, help="maximum recent episode lines in person context")
 
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("text", help="query text")
@@ -161,19 +161,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=DEFAULT_CONSOLIDATION_EPISODE_TEXT_LIMIT,
         help="maximum summary/transcript characters per evidence episode",
     )
-    memory_context_parser = memory_subparsers.add_parser("context")
-    memory_context_parser.add_argument("--person-id", required=True, help="person id to summarize")
-    memory_context_parser.add_argument("--limit", type=int, default=10, help="maximum context items to retrieve")
-    memory_context_parser.add_argument("--semantic-scope", help="optional semantic focus for OpenAI-backed vector retrieval")
-    memory_context_parser.add_argument("--current-text", help="optional current utterance or task for memory item retrieval")
-    memory_context_parser.add_argument("--memory-limit", type=int, default=12, help="maximum durable memory items per section")
-    memory_context_parser.add_argument(
-        "--recent-episode-limit",
-        type=int,
-        default=5,
-        help="maximum recent episode lines in memory context",
-    )
-
     args = parser.parse_args(argv)
     if args.command == "db" and args.db_command == "wipe" and not args.yes:
         parser.error("db wipe requires --yes because it deletes all Neo4j data.")
@@ -218,18 +205,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "memory":
             client = TailwagMemoryClient(runner, settings)
-            if args.memory_command == "context":
-                print(
-                    client.person_context(
-                        args.person_id,
-                        limit=args.limit,
-                        semantic_scope=args.semantic_scope,
-                        current_text=args.current_text,
-                        memory_limit=args.memory_limit,
-                        recent_episode_limit=args.recent_episode_limit,
-                    )
-                )
-                return 0
             if args.memory_command == "consolidate":
                 result = client.consolidate_memory(
                     person_id=args.person_id,

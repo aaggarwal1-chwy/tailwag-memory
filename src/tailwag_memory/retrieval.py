@@ -16,6 +16,11 @@ from .models import (
 
 
 _TRANSCRIPT_LINE_RE = re.compile(r"^\[(?P<timestamp>[^\]]+)\]\s+(?P<speaker>[^:]+):\s*(?P<text>.*)$")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+_MARKDOWN_CONTROL_CHARS = str.maketrans({char: "" for char in "#*[]>`|"})
+UNKNOWN_PERSON_CONTEXT_MESSAGE = "the database does not have a record of this person"
+NO_SCOPED_PERSON_EVIDENCE_MESSAGE_PREFIX = "no episodes matched the semantic scope:"
+_MAX_CONTEXT_LINE_CHARS = 500
 _VECTOR_INDEX_LABELS = {
     "episode_summary_embedding": "Episode",
     "episode_transcript_embedding": "Episode",
@@ -60,6 +65,23 @@ def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: i
             """,
         {"person_id": person_id, "limit": limit},
     )
+
+
+def format_person_context_evidence_markdown(
+    source: PersonContextSource | None,
+    *,
+    person_id: str,
+    semantic_scope: str | None = None,
+    limit: int = 10,
+) -> str:
+    """Render retrieved person context evidence as deterministic markdown."""
+    if source is None:
+        return UNKNOWN_PERSON_CONTEXT_MESSAGE
+
+    scope = _normalize_optional_text(semantic_scope)
+    if scope is not None and not source.items:
+        return f"{NO_SCOPED_PERSON_EVIDENCE_MESSAGE_PREFIX} {_sanitize_markdown_line(scope)}"
+    return ""
 
 
 class EpisodeRetrievalService:
@@ -276,24 +298,16 @@ class PersonContextRetrievalService:
         semantic_scope: str | None = None,
     ) -> PersonContextSource | None:
         """Return context source data for a person when present."""
-        person_rows = self.runner.run(
-            """
-            MATCH (p:Person {id: $person_id})
-            RETURN p.id AS person_id,
-                   p.display_name AS display_name
-            LIMIT 1
-            """,
-            {"person_id": person_id},
-        )
-        if not person_rows:
+        person_source = self._person_source(person_id)
+        if person_source is None:
             return None
 
         scope = self._normalize_semantic_scope(semantic_scope)
         if scope is not None:
             items = self._scoped_items_for_person(person_id, scope, limit)
             return PersonContextSource(
-                person_id=str(person_rows[0]["person_id"]),
-                display_name=str(person_rows[0]["display_name"]) if person_rows[0].get("display_name") else None,
+                person_id=person_source.person_id,
+                display_name=person_source.display_name,
                 items=items,
             )
 
@@ -322,9 +336,47 @@ class PersonContextRetrievalService:
         items = [self._row_to_context_item(row) for row in episode_rows + event_rows]
         items.sort(key=lambda item: item.start_time, reverse=True)
         return PersonContextSource(
-            person_id=str(person_rows[0]["person_id"]),
-            display_name=str(person_rows[0]["display_name"]) if person_rows[0].get("display_name") else None,
+            person_id=person_source.person_id,
+            display_name=person_source.display_name,
             items=items[:limit],
+        )
+
+    def markdown_for_person(
+        self,
+        person_id: str,
+        limit: int = 10,
+        semantic_scope: str | None = None,
+    ) -> str:
+        """Return deterministic markdown evidence for a person."""
+        bounded_limit = _bounded_limit(limit)
+        scope = self._normalize_semantic_scope(semantic_scope)
+        if scope is not None:
+            source = self.source_for_person(person_id, limit=bounded_limit, semantic_scope=scope)
+        else:
+            source = self._person_source(person_id)
+        return format_person_context_evidence_markdown(
+            source,
+            person_id=person_id,
+            semantic_scope=scope,
+            limit=bounded_limit,
+        )
+
+    def _person_source(self, person_id: str) -> PersonContextSource | None:
+        """Return person identity context when present."""
+        rows = self.runner.run(
+            """
+            MATCH (p:Person {id: $person_id})
+            RETURN p.id AS person_id,
+                   p.display_name AS display_name
+            LIMIT 1
+            """,
+            {"person_id": person_id},
+        )
+        if not rows:
+            return None
+        return PersonContextSource(
+            person_id=str(rows[0]["person_id"]),
+            display_name=str(rows[0]["display_name"]) if rows[0].get("display_name") else None,
         )
 
     def _normalize_semantic_scope(self, semantic_scope: str | None) -> str | None:
@@ -430,3 +482,29 @@ class PersonContextRetrievalService:
                 )
             )
         return lines
+
+
+def _bounded_limit(limit: int) -> int:
+    """Return a non-negative rendering/retrieval limit."""
+    try:
+        return max(0, int(limit))
+    except (TypeError, ValueError):
+        return 10
+
+
+def _normalize_optional_text(value: str | None) -> str | None:
+    """Normalize optional user text."""
+    if value is None:
+        return None
+    rendered = str(value).strip()
+    return rendered or None
+
+
+def _sanitize_markdown_line(value: str | None) -> str:
+    """Normalize retrieved text for prompt-ready markdown output."""
+    rendered = _CONTROL_CHARS_RE.sub(" ", str(value or ""))
+    rendered = " ".join(rendered.split())
+    rendered = rendered.translate(_MARKDOWN_CONTROL_CHARS).lstrip("- ").strip()
+    if len(rendered) <= _MAX_CONTEXT_LINE_CHARS:
+        return rendered
+    return rendered[: _MAX_CONTEXT_LINE_CHARS - 3].rstrip() + "..."

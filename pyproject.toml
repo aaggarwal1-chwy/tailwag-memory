@@ -1,7 +1,7 @@
 [project]
 name = "tailwag-memory"
 version = "0.1.0"
-description = "Neo4j-only hybrid memory service with OpenAI-backed embeddings and person context synthesis."
+description = "Neo4j-only hybrid memory service with OpenAI-backed embeddings and deterministic/vector-derived person context."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

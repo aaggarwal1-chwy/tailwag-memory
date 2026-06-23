@@ -209,6 +209,99 @@ class EventRetrievalServiceTest(unittest.TestCase):
 
 
 class PersonContextRetrievalServiceTest(unittest.TestCase):
+    def test_markdown_for_person_returns_unknown_person_message(self) -> None:
+        service = PersonContextRetrievalService(RecordingQueryRunner(results=[[]]))
+
+        markdown = service.markdown_for_person("person_missing")
+
+        self.assertEqual(markdown, "the database does not have a record of this person")
+
+    def test_markdown_for_person_returns_empty_for_known_unscoped_person(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie", "display_name": "Jamie"}],
+            ]
+        )
+        service = PersonContextRetrievalService(runner)
+
+        markdown = service.markdown_for_person("person_jamie")
+
+        self.assertEqual(markdown, "")
+        self.assertEqual(len(runner.queries), 1)
+        self.assertIn("MATCH (p:Person", runner.queries[0].query)
+        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
+
+    def test_markdown_for_person_does_not_render_recent_episode_summaries(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie", "display_name": "# Jamie"}],
+            ]
+        )
+        service = PersonContextRetrievalService(runner)
+
+        markdown = service.markdown_for_person("person_jamie", limit=10)
+
+        self.assertEqual(markdown, "")
+        self.assertNotIn("Episode Summaries:", markdown)
+        self.assertNotIn("Jamie asked about chargers.", markdown)
+        self.assertNotIn("event_1", markdown)
+        self.assertNotIn("Design review", markdown)
+        self.assertNotIn("Transcript snippets:", markdown)
+        self.assertNotIn("2026-06-16T14:00:00+00:00 Jamie: Any chargers?", markdown)
+        self.assertEqual(len(runner.queries), 1)
+        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
+
+    def test_markdown_for_person_scoped_no_match_does_not_fallback_to_events(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie", "display_name": "Jamie"}],
+                [],
+                [],
+            ]
+        )
+        service = PersonContextRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        markdown = service.markdown_for_person("person_jamie", semantic_scope=" chargers ")
+
+        self.assertEqual(markdown, "no episodes matched the semantic scope: chargers")
+        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[1].query)
+        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[2].query)
+        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
+        self.assertTrue(all("ORDER BY e.start_time DESC" not in query.query for query in runner.queries[1:]))
+
+    def test_markdown_for_person_does_not_render_scoped_episode_summaries(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie", "display_name": "Jamie"}],
+                [
+                    {
+                        "item_id": "episode_1",
+                        "item_type": "episode",
+                        "text": "Summary: Jamie asked about chargers.\nTranscript:\nJamie: Any chargers?",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "end_time": None,
+                        "building_code": "MAIN",
+                        "room_id": "101",
+                        "role": "speaker",
+                        "source": "caller",
+                        "score": 0.8819,
+                    }
+                ],
+                [],
+            ]
+        )
+        service = PersonContextRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        markdown = service.markdown_for_person("person_jamie", limit=1, semantic_scope="chargers")
+
+        self.assertEqual(markdown, "")
+        self.assertNotIn("Episode Summaries:", markdown)
+        self.assertNotIn("Jamie asked about chargers.", markdown)
+        self.assertNotIn("episode_1", markdown)
+        self.assertNotIn("score=0.882", markdown)
+        self.assertNotIn("Jamie: Any chargers?", markdown)
+        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
+
     def test_source_for_person_combines_recent_episodes_and_events(self) -> None:
         runner = RecordingQueryRunner(
             results=[

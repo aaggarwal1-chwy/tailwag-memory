@@ -1,6 +1,6 @@
 # tailwag-memory
 
-Neo4j-only hybrid memory service with OpenAI-backed embeddings and unified person context.
+Neo4j-only hybrid memory service with OpenAI-backed embeddings and deterministic/vector-derived person context.
 
 ## Documentation
 
@@ -30,8 +30,7 @@ Implemented now:
 - OpenAI-backed memory item embeddings
 - Neo4j 5.26 local Docker runtime
 - Neo4j constraints and vector indexes for episode text, person biometric vectors, and `MemoryItem.summary_embedding`
-- unified person context with durable memory context plus recent episode/event context and OpenAI-backed synthesis
-- memory context CLI command
+- deterministic/vector-derived person context with durable memory sections and recent episode lines
 - transcript-derived person memory items
 - per-person memory consolidation from repeated episode evidence into `MemoryItem`
 - optional `Person.face_embedding`
@@ -95,7 +94,7 @@ Initialize the Neo4j schema before ingesting or querying data:
 tailwag schema init
 ```
 
-For OpenAI-backed embeddings, person context synthesis, and transcript memory extraction, add your API key to the ignored repo-local `.env` file:
+For OpenAI-backed embeddings, transcript memory extraction, and memory consolidation, add your API key to the ignored repo-local `.env` file:
 
 ```bash
 OPENAI_API_KEY=sk-your-token-here
@@ -110,7 +109,7 @@ SLACK_BOT_TOKEN=xoxb-your-token-here
 For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package usage, JSON payload shapes, retrieval examples, and command workflows, see the [Python package integration guide](docs/integration-guide.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md).
 
 Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
-Episode summaries, transcripts, and memory item summaries are sent to OpenAI for text embeddings. Durable memory context is rendered locally, and recent event and episode context is sent to OpenAI when generating the synthesized part of person context. When `--semantic-scope` is provided for person context, the package first narrows episode evidence to vector-matched episodes for that person; unrelated recent history and events are not included.
+Episode summaries, transcripts, and memory item summaries are sent to OpenAI for text embeddings when the OpenAI provider is configured. Person context is assembled deterministically from durable memory items, visible follow-ups, and recent episode lines. When `--semantic-scope` is provided for person context, the package uses vector matching to rank durable memory items; rendered episode context remains the bounded recent episode lines.
 Memory item extraction sends caller-provided transcripts and a small set of existing candidate memory items to OpenAI when high-level episode recording or explicit memory backfill is used. Memory consolidation sends bounded, person-scoped episode evidence clusters and existing memory items to OpenAI. `MemoryItem` is the narrow approved semantic-memory path for durable person preferences, boundaries, pets, facts, and follow-ups; it is not a broad ontology or triple store.
 
 ## Tests

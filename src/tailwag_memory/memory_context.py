@@ -10,10 +10,10 @@ from .retrieval import recent_episode_rows_for_person
 
 
 class PersonMemoryContextService:
-    """Build markdown memory context for a person."""
+    """Build durable memory markdown for a person."""
 
     def __init__(self, runner: QueryRunner, embeddings: EmbeddingProvider | None = None) -> None:
-        """Store dependencies for memory context rendering."""
+        """Store dependencies for durable memory rendering."""
         self.runner = runner
         self.embeddings = embeddings
 
@@ -26,7 +26,7 @@ class PersonMemoryContextService:
         memory_limit: int = 12,
         recent_episode_limit: int = 5,
     ) -> str:
-        """Return markdown memory context for a person."""
+        """Return durable memory markdown for a person."""
         memory_service = MemoryItemService(self.runner, self.embeddings or _NoopEmbeddingProvider())
         items = memory_service.list_active_items(person_id=person_id, limit=max(memory_limit * 3, 30), now=now)
         if current_text and self.embeddings is not None:
