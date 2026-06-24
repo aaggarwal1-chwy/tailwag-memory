@@ -4,6 +4,7 @@ from typing import Any
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
+from .episode_normalization import normalize_robot_speaker_labels
 from .memory_item_helpers import _PRESERVE, _operation_metadata, normalize_memory_source
 from .memory_item_protocols import MemoryExtractionProvider
 from .memory_item_service import MemoryItemService
@@ -167,6 +168,7 @@ class EpisodeMemoryExtractionService:
         speaker_only: bool = False,
     ) -> EpisodeMemoryExtractionResult:
         """Extract memory for selected participants in an episode."""
+        episode = normalize_robot_speaker_labels(episode)
         participants = self._target_participants(episode, person_id=person_id, speaker_only=speaker_only)
         results: list[PersonMemoryExtractionResult] = []
         errors: list[dict[str, str]] = []
@@ -287,4 +289,3 @@ class EpisodeMemoryExtractionService:
             return list(episode.participants)
         speakers = [participant for participant in episode.participants if participant.role == "speaker"]
         return speakers or list(episode.participants)
-

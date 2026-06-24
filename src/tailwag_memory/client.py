@@ -5,6 +5,7 @@ from datetime import datetime
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
+from .episode_normalization import normalize_robot_speaker_labels
 from .ingestion import EpisodeIngestionService, PersonIngestionService
 from .memory_context import PersonMemoryContextService
 from .memory_items import (
@@ -99,6 +100,7 @@ class TailwagMemoryClient:
 
     def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
         """Store an episode and optionally extract durable memory items."""
+        episode = normalize_robot_speaker_labels(episode)
         episode_id = EpisodeIngestionService(self.runner, self._embeddings()).ingest(episode)
         if not extract_memory:
             return EpisodeRecordResult(episode_id=episode_id)

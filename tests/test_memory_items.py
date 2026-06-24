@@ -1121,6 +1121,35 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
         self.assertEqual([call["target_display_name"] for call in provider.calls], ["Jamie", "Casey"])
         self.assertEqual(result.memory_errors, [])
 
+    def test_extract_for_episode_normalizes_robot_user_label_before_provider_call(self) -> None:
+        class FakeExtractionProvider:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def extract(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"update": False, "ops": []}
+
+        provider = FakeExtractionProvider()
+        runner = RecordingQueryRunner(results=[[], []])
+        service = EpisodeMemoryExtractionService(runner, MockOpenAIEmbeddingProvider(dimension=8), provider)
+        episode = EpisodeInput(
+            id="episode_1",
+            episode_type="conversation",
+            start_time="2026-06-18T10:00:00+00:00",
+            end_time=None,
+            summary="User: I like robot demos. Assistant: Noted.",
+            transcript="User: I like robot demos.\nAssistant: Noted.",
+            retention_class="standard",
+            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
+            participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+        )
+
+        service.extract_for_episode(episode)
+
+        self.assertEqual(provider.calls[0]["target_display_name"], "Jamie")
+        self.assertEqual(provider.calls[0]["transcript"], "Jamie: I like robot demos.\nAssistant: Noted.")
+
     def test_extract_for_stored_episode_defaults_to_speakers_and_falls_back_to_all(self) -> None:
         class FakeExtractionProvider:
             def __init__(self) -> None:
@@ -1159,6 +1188,44 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
 
         self.assertEqual([item.person_id for item in result.memory_results], ["person_jamie"])
         self.assertEqual(provider.people, ["person_jamie"])
+
+    def test_extract_for_stored_episode_normalizes_robot_user_label_before_provider_call(self) -> None:
+        class FakeExtractionProvider:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def extract(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"update": False, "ops": []}
+
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "id": "episode_1",
+                        "episode_type": "conversation",
+                        "start_time": "2026-06-18T10:00:00+00:00",
+                        "summary": "User: I like robot demos. Assistant: Noted.",
+                        "transcript": "User: I like robot demos.\nAssistant: Noted.",
+                        "retention_class": "standard",
+                        "building_code": "ARGOS",
+                        "room_id": "realtime",
+                    }
+                ],
+                [
+                    {"id": "person_jamie", "display_name": "Jamie", "role": "speaker", "source": "live_chat"},
+                ],
+                [],
+                [],
+            ]
+        )
+        provider = FakeExtractionProvider()
+        service = EpisodeMemoryExtractionService(runner, MockOpenAIEmbeddingProvider(dimension=8), provider)
+
+        service.extract_for_stored_episode("episode_1")
+
+        self.assertEqual(provider.calls[0]["target_display_name"], "Jamie")
+        self.assertEqual(provider.calls[0]["transcript"], "Jamie: I like robot demos.\nAssistant: Noted.")
 
     def test_extract_for_episode_returns_per_person_error_without_failing_episode(self) -> None:
         class FakeExtractionProvider:

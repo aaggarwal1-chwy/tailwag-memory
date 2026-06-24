@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
+from .episode_normalization import normalize_robot_speaker_labels
 from .models import EpisodeInput, EventInput, PersonInput, utc_now_iso
 
 
@@ -182,6 +183,7 @@ class EpisodeIngestionService:
 
     def ingest(self, episode: EpisodeInput) -> str:
         """Write an episode graph snapshot and return its id."""
+        episode = normalize_robot_speaker_labels(episode)
         written_at = utc_now_iso()
         summary_embedding = self.embeddings.embed(episode.summary)
         transcript_embedding = self.embeddings.embed(episode.transcript)

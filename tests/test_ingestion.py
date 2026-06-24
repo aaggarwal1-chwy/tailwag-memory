@@ -232,6 +232,50 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", runner.queries[0].query)
         self.assertIn("person.consent_status <> 'consented'", runner.queries[0].query)
 
+    def test_ingest_normalizes_robot_user_label_before_storage_and_embeddings(self) -> None:
+        class RecordingEmbeddingProvider:
+            def __init__(self) -> None:
+                self.texts = []
+
+            def embed(self, text: str) -> list[float]:
+                self.texts.append(text)
+                return [float(len(self.texts))] * 8
+
+        runner = RecordingQueryRunner()
+        embeddings = RecordingEmbeddingProvider()
+        service = EpisodeIngestionService(runner, embeddings)
+        episode = EpisodeInput(
+            id="episode_external_001",
+            episode_type="conversation",
+            start_time="2026-06-15T10:00:00+00:00",
+            end_time="2026-06-15T10:05:00+00:00",
+            summary="User: I like robot demos. Assistant: Noted.",
+            transcript="User: I like robot demos.\nAssistant: Noted.",
+            retention_class="standard",
+            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
+            participants=[
+                PersonInput(
+                    id="person_jamie",
+                    display_name="Jamie",
+                    role="speaker",
+                    source="live_chat",
+                )
+            ],
+        )
+
+        service.ingest(episode)
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["summary"], "Jamie: I like robot demos. Assistant: Noted.")
+        self.assertEqual(query.parameters["transcript"], "Jamie: I like robot demos.\nAssistant: Noted.")
+        self.assertEqual(
+            embeddings.texts,
+            [
+                "Jamie: I like robot demos. Assistant: Noted.",
+                "Jamie: I like robot demos.\nAssistant: Noted.",
+            ],
+        )
+
     def test_ingest_query_excludes_org_identity_and_confidence(self) -> None:
         runner = RecordingQueryRunner()
         service = EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8))

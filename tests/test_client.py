@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from tailwag_memory.client import TailwagMemoryClient
 from tailwag_memory.config import Settings
+from tailwag_memory.episode_normalization import normalize_robot_speaker_labels
 from tailwag_memory.models import (
     EpisodeInput,
     EpisodeMemoryExtractionResult,
@@ -175,6 +176,132 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(result.episode_id, "episode_1")
         self.assertEqual(result.memory_results[0].created_memory_ids, ["mem_1"])
         self.assertEqual(result.memory_errors, [])
+
+    def test_record_episode_normalizes_robot_user_label_for_single_speaker(self) -> None:
+        runner = FakeRunner()
+        calls = []
+        episode = EpisodeInput(
+            id="episode_1",
+            episode_type="conversation",
+            start_time="2026-06-18T10:00:00+00:00",
+            end_time=None,
+            summary="User: I like robot demos. Assistant: I'll remember that. User: Thanks.",
+            transcript="User: I like robot demos.\nAssistant: I'll remember that.\nUser: Thanks.",
+            retention_class="standard",
+            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
+            participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+        )
+
+        class FakeIngestion:
+            def __init__(self, runner_arg, embeddings) -> None:
+                pass
+
+            def ingest(self, episode_arg: EpisodeInput) -> str:
+                calls.append(("ingest", episode_arg))
+                return episode_arg.id
+
+        class FakeExtraction:
+            def __init__(self, runner_arg, embeddings, provider) -> None:
+                pass
+
+            def extract_for_episode(self, episode_arg: EpisodeInput, *, speaker_only: bool):
+                calls.append(("extract", episode_arg, speaker_only))
+                return EpisodeMemoryExtractionResult(episode_id=episode_arg.id)
+
+        with patch("tailwag_memory.client.EpisodeIngestionService", FakeIngestion):
+            with patch("tailwag_memory.client.EpisodeMemoryExtractionService", FakeExtraction):
+                TailwagMemoryClient(runner, _settings()).record_episode(episode)
+
+        ingested = calls[0][1]
+        extracted = calls[1][1]
+        self.assertEqual(ingested.summary, "Jamie: I like robot demos. Assistant: I'll remember that. Jamie: Thanks.")
+        self.assertEqual(ingested.transcript, "Jamie: I like robot demos.\nAssistant: I'll remember that.\nJamie: Thanks.")
+        self.assertIs(extracted, ingested)
+        self.assertEqual(calls[1][2], False)
+
+    def test_robot_user_label_uses_person_id_when_display_name_is_missing(self) -> None:
+        episode = EpisodeInput(
+            id="episode_1",
+            episode_type="conversation",
+            start_time="2026-06-18T10:00:00+00:00",
+            end_time=None,
+            summary="User: I like robot demos.",
+            transcript="User: I like robot demos.",
+            retention_class="standard",
+            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
+            participants=[PersonInput(id="person_jamie", role="speaker")],
+        )
+
+        normalized = normalize_robot_speaker_labels(episode)
+
+        self.assertEqual(normalized.summary, "person_jamie: I like robot demos.")
+        self.assertEqual(normalized.transcript, "person_jamie: I like robot demos.")
+
+    def test_robot_user_label_without_speaker_role_uses_single_participant(self) -> None:
+        episode = EpisodeInput(
+            id="episode_1",
+            episode_type="conversation",
+            start_time="2026-06-18T10:00:00+00:00",
+            end_time=None,
+            summary="User: I like robot demos.",
+            transcript="User: I like robot demos.",
+            retention_class="standard",
+            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
+            participants=[PersonInput(id="person_jamie", display_name="Jamie")],
+        )
+
+        normalized = normalize_robot_speaker_labels(episode)
+
+        self.assertEqual(normalized.summary, "Jamie: I like robot demos.")
+        self.assertEqual(normalized.transcript, "Jamie: I like robot demos.")
+
+    def test_robot_user_label_is_not_changed_for_ambiguous_or_unlinked_episodes(self) -> None:
+        base = EpisodeInput(
+            id="episode_1",
+            episode_type="conversation",
+            start_time="2026-06-18T10:00:00+00:00",
+            end_time=None,
+            summary="User: I like robot demos.",
+            transcript="User: I like robot demos.\nAssistant: Got it.",
+            retention_class="standard",
+            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
+            participants=[],
+        )
+        multi_speaker = EpisodeInput(
+            id=base.id,
+            episode_type=base.episode_type,
+            start_time=base.start_time,
+            end_time=base.end_time,
+            summary=base.summary,
+            transcript=base.transcript,
+            retention_class=base.retention_class,
+            place=base.place,
+            participants=[
+                PersonInput(id="person_jamie", display_name="Jamie", role="speaker"),
+                PersonInput(id="person_casey", display_name="Casey", role="speaker"),
+            ],
+        )
+
+        self.assertIs(normalize_robot_speaker_labels(base), base)
+        self.assertIs(normalize_robot_speaker_labels(multi_speaker), multi_speaker)
+
+    def test_robot_user_label_replacement_only_matches_line_leading_labels(self) -> None:
+        episode = EpisodeInput(
+            id="episode_1",
+            episode_type="conversation",
+            start_time="2026-06-18T10:00:00+00:00",
+            end_time=None,
+            summary="The word User: appears in this summary.",
+            transcript="The word User: appears here.\n  User: This line is labeled.",
+            retention_class="standard",
+            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
+            participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+        )
+
+        normalized = normalize_robot_speaker_labels(episode)
+
+        self.assertEqual(normalized.summary, "The word User: appears in this summary.")
+        self.assertEqual(normalized.transcript, "The word User: appears here.\n  Jamie: This line is labeled.")
 
     def test_record_episode_can_skip_memory_extraction(self) -> None:
         runner = FakeRunner()
