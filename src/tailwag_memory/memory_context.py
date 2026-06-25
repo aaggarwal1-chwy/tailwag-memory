@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 import re
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
+from .memory_item_helpers import _is_expired, _parse_iso
 from .memory_items import MemoryItemService, PINNED_MEMORY_KEYS, followup_is_visible
 from .models import MemoryItemResult
 from .retrieval import recent_episode_rows_for_person
@@ -220,33 +221,6 @@ def _observed_timestamp(value: str) -> float:
     """Return an observed timestamp suitable for sorting."""
     parsed = _parse_iso(value)
     return parsed.timestamp() if parsed is not None else 0.0
-
-
-def _parse_iso(value: str | None) -> datetime | None:
-    """Parse an optional ISO datetime value."""
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        if text.endswith("Z"):
-            text = text[:-1] + "+00:00"
-        parsed = datetime.fromisoformat(text)
-    except Exception:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def _is_expired(item: MemoryItemResult, *, now: datetime | None = None) -> bool:
-    """Return whether a memory item is expired."""
-    expires = _parse_iso(item.expires_at)
-    if expires is None:
-        return False
-    ref = now or datetime.now(timezone.utc)
-    if ref.tzinfo is None:
-        ref = ref.replace(tzinfo=timezone.utc)
-    return ref > expires
 
 
 def _sanitize_context_line(value: str) -> str:

@@ -556,8 +556,8 @@ Parameters:
 | `channel` | `str` | Slack channel ID. |
 | `backfill_hours` | `float \| None` | Initial lookback when no cursor exists, or forced replay window. |
 | `force_backfill` | `bool` | Ignore saved cursor and replay the backfill window. Requires `backfill_hours`. |
-| `history_limit` | `int` | Maximum channel history messages fetched per pass. |
-| `reply_limit` | `int` | Maximum replies fetched per thread. |
+| `history_limit` | `int` | Slack API page size for channel history requests. |
+| `reply_limit` | `int` | Slack API page size for thread reply requests. |
 | `extract_memory` | `bool` | Whether recorded episodes run memory extraction. |
 
 Returns: `SlackPollResult`.

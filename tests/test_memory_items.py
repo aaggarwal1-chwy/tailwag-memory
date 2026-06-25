@@ -3,7 +3,7 @@ import json
 import unittest
 
 from tailwag_memory.db import RecordingQueryRunner
-from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
+from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider, OpenAIConfigurationError
 from tailwag_memory.memory_context import PersonMemoryContextService, format_person_memory_markdown
 from tailwag_memory.memory_items import (
     DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
@@ -602,6 +602,7 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
             ["ep1", "ep2", "ep3", "ep4"],
         )
         self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[1].query)
+        self.assertIn("WHERE node:Episode", runner.queries[1].query)
         memory_query = [query for query in runner.queries if "MERGE (m:MemoryItem" in query.query][-1]
         self.assertEqual(memory_query.parameters["source_ref"], "consolidation")
         link_query = runner.queries[-1]
@@ -1551,6 +1552,48 @@ class OpenAIMemoryExtractionProviderTest(unittest.TestCase):
         self.assertIn("must be followup, not fact or preference", developer_prompt)
         self.assertIn("expire within a week", developer_prompt)
 
+    def test_extract_reads_sdk_response_shape(self) -> None:
+        class FakeContent:
+            text = '{"update": false, "ops": []}'
+
+        class FakeOutput:
+            content = [FakeContent()]
+
+        class FakeResponse:
+            output = [FakeOutput()]
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                del kwargs
+                return FakeResponse()
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.responses = FakeResponses()
+
+        provider = OpenAIMemoryExtractionProvider(client=FakeClient())
+
+        self.assertEqual(
+            provider.extract(
+                person_id="person_jamie",
+                transcript="Jamie: hello",
+                existing_memories=[],
+                current_time="2026-06-17T12:00:00+00:00",
+            ),
+            {"update": False, "ops": []},
+        )
+
+    def test_extract_requires_api_key_without_injected_client(self) -> None:
+        provider = OpenAIMemoryExtractionProvider()
+
+        with self.assertRaisesRegex(OpenAIConfigurationError, "OpenAI memory extraction"):
+            provider.extract(
+                person_id="person_jamie",
+                transcript="Jamie: hello",
+                existing_memories=[],
+                current_time="2026-06-17T12:00:00+00:00",
+            )
+
 
 class OpenAIMemoryConsolidationProviderTest(unittest.TestCase):
     def test_consolidate_requests_structured_output_with_support_ids(self) -> None:
@@ -1603,6 +1646,39 @@ class OpenAIMemoryConsolidationProviderTest(unittest.TestCase):
         user_payload = json.loads(client.responses.kwargs["input"][1]["content"])
         self.assertEqual(user_payload["min_evidence_episodes"], 4)
         self.assertEqual(user_payload["episode_clusters"][0][0]["episode_id"], "ep1")
+
+    def test_consolidate_rejects_malformed_json_with_specific_error(self) -> None:
+        class FakeResponses:
+            def create(self, **kwargs):
+                del kwargs
+                return {"output_text": "not-json"}
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.responses = FakeResponses()
+
+        provider = OpenAIMemoryConsolidationProvider(client=FakeClient())
+
+        with self.assertRaisesRegex(ValueError, "OpenAI memory consolidation did not return valid JSON"):
+            provider.consolidate(
+                person_id="person_jamie",
+                existing_memories=[],
+                episode_clusters=[],
+                current_time="2026-06-18T12:00:00+00:00",
+                min_evidence_episodes=4,
+            )
+
+    def test_consolidate_requires_api_key_without_injected_client(self) -> None:
+        provider = OpenAIMemoryConsolidationProvider()
+
+        with self.assertRaisesRegex(OpenAIConfigurationError, "OpenAI memory consolidation"):
+            provider.consolidate(
+                person_id="person_jamie",
+                existing_memories=[],
+                episode_clusters=[],
+                current_time="2026-06-18T12:00:00+00:00",
+                min_evidence_episodes=4,
+            )
 
 
 if __name__ == "__main__":

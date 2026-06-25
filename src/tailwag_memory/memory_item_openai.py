@@ -13,8 +13,10 @@ from .memory_item_constants import (
 from .models import MemoryItemResult
 
 
-class OpenAIMemoryExtractionProvider:
-    """Extract memory operations with the OpenAI Responses API."""
+class _OpenAIMemoryProviderBase:
+    """Share OpenAI Responses API plumbing for memory providers."""
+
+    _operation_name = "operation"
 
     def __init__(
         self,
@@ -26,6 +28,52 @@ class OpenAIMemoryExtractionProvider:
         self.api_key = api_key
         self.model = model
         self._client = client
+
+    def _memory_payload(self, item: MemoryItemResult) -> dict[str, Any]:
+        """Render a memory item for provider context."""
+        payload: dict[str, Any] = {
+            "memory_id": item.memory_id,
+            "kind": item.kind,
+            "key": item.key,
+            "summary": item.summary,
+        }
+        if item.due_at:
+            payload["due_at"] = item.due_at
+        if item.expires_at:
+            payload["expires_at"] = item.expires_at
+        return payload
+
+    def _openai_client(self) -> Any:
+        """Return a configured OpenAI client."""
+        if self._client is not None:
+            return self._client
+        if not self.api_key:
+            raise OpenAIConfigurationError(f"OPENAI_API_KEY is required for OpenAI memory {self._operation_name}.")
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise OpenAIConfigurationError(
+                f"Install the openai package to use OpenAI memory {self._operation_name}."
+            ) from exc
+        self._client = OpenAI(api_key=self.api_key)
+        return self._client
+
+    def _extract_text(self, response: Any) -> str:
+        """Extract response text from dict or SDK response shapes."""
+        if isinstance(response, dict):
+            output_text = response.get("output_text")
+            if output_text:
+                return str(output_text).strip()
+            return str(response["output"][0]["content"][0]["text"]).strip()
+        if getattr(response, "output_text", None):
+            return str(response.output_text).strip()
+        return str(response.output[0].content[0].text).strip()
+
+
+class OpenAIMemoryExtractionProvider(_OpenAIMemoryProviderBase):
+    """Extract memory operations with the OpenAI Responses API."""
+
+    _operation_name = "extraction"
 
     def extract(
         self,
@@ -67,58 +115,11 @@ class OpenAIMemoryExtractionProvider:
             raise ValueError("OpenAI memory extraction did not return valid JSON") from exc
         return payload if isinstance(payload, dict) else {"update": False, "ops": []}
 
-    def _memory_payload(self, item: MemoryItemResult) -> dict[str, Any]:
-        """Render a memory item for extraction context."""
-        payload: dict[str, Any] = {
-            "memory_id": item.memory_id,
-            "kind": item.kind,
-            "key": item.key,
-            "summary": item.summary,
-        }
-        if item.due_at:
-            payload["due_at"] = item.due_at
-        if item.expires_at:
-            payload["expires_at"] = item.expires_at
-        return payload
 
-    def _openai_client(self) -> Any:
-        """Return a configured OpenAI client."""
-        if self._client is not None:
-            return self._client
-        if not self.api_key:
-            raise OpenAIConfigurationError("OPENAI_API_KEY is required for OpenAI memory extraction.")
-        try:
-            from openai import OpenAI
-        except ImportError as exc:
-            raise OpenAIConfigurationError("Install the openai package to use OpenAI memory extraction.") from exc
-        self._client = OpenAI(api_key=self.api_key)
-        return self._client
-
-    def _extract_text(self, response: Any) -> str:
-        """Extract response text from dict or SDK response shapes."""
-        if isinstance(response, dict):
-            output_text = response.get("output_text")
-            if output_text:
-                return str(output_text).strip()
-            return str(response["output"][0]["content"][0]["text"]).strip()
-        if getattr(response, "output_text", None):
-            return str(response.output_text).strip()
-        return str(response.output[0].content[0].text).strip()
-
-
-class OpenAIMemoryConsolidationProvider:
+class OpenAIMemoryConsolidationProvider(_OpenAIMemoryProviderBase):
     """Consolidate repeated episode evidence with the OpenAI Responses API."""
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        model: str = "gpt-5.5",
-        client: Any | None = None,
-    ) -> None:
-        """Store OpenAI client configuration."""
-        self.api_key = api_key
-        self.model = model
-        self._client = client
+    _operation_name = "consolidation"
 
     def consolidate(
         self,
@@ -159,41 +160,3 @@ class OpenAIMemoryConsolidationProvider:
         except Exception as exc:
             raise ValueError("OpenAI memory consolidation did not return valid JSON") from exc
         return payload if isinstance(payload, dict) else {"update": False, "ops": []}
-
-    def _memory_payload(self, item: MemoryItemResult) -> dict[str, Any]:
-        """Render a memory item for consolidation context."""
-        payload: dict[str, Any] = {
-            "memory_id": item.memory_id,
-            "kind": item.kind,
-            "key": item.key,
-            "summary": item.summary,
-        }
-        if item.due_at:
-            payload["due_at"] = item.due_at
-        if item.expires_at:
-            payload["expires_at"] = item.expires_at
-        return payload
-
-    def _openai_client(self) -> Any:
-        """Return a configured OpenAI client."""
-        if self._client is not None:
-            return self._client
-        if not self.api_key:
-            raise OpenAIConfigurationError("OPENAI_API_KEY is required for OpenAI memory consolidation.")
-        try:
-            from openai import OpenAI
-        except ImportError as exc:
-            raise OpenAIConfigurationError("Install the openai package to use OpenAI memory consolidation.") from exc
-        self._client = OpenAI(api_key=self.api_key)
-        return self._client
-
-    def _extract_text(self, response: Any) -> str:
-        """Extract response text from dict or SDK response shapes."""
-        if isinstance(response, dict):
-            output_text = response.get("output_text")
-            if output_text:
-                return str(output_text).strip()
-            return str(response["output"][0]["content"][0]["text"]).strip()
-        if getattr(response, "output_text", None):
-            return str(response.output_text).strip()
-        return str(response.output[0].content[0].text).strip()

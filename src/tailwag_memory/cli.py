@@ -154,7 +154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--episode-text-limit",
         type=int,
         default=DEFAULT_CONSOLIDATION_EPISODE_TEXT_LIMIT,
-        help="maximum summary/transcript characters per evidence episode",
+        help="maximum transcript characters per evidence episode",
     )
     args = parser.parse_args(argv)
     if args.command == "db" and args.db_command == "wipe" and not args.yes:

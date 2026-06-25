@@ -76,42 +76,31 @@ class SlackWebApiClient:
 
     def history(self, channel: str, oldest: str | None, limit: int) -> list[dict[str, Any]]:
         """Return paginated channel history from Slack."""
-        messages: list[dict[str, Any]] = []
-        cursor: str | None = None
-        page_size = min(200, max(1, int(limit or 200)))
-        while True:
-            params: dict[str, Any] = {
-                "channel": channel,
-                "limit": page_size,
-                "inclusive": False,
-            }
-            if oldest is not None:
-                params["oldest"] = oldest
-            if cursor is not None:
-                params["cursor"] = cursor
-
-            response = self._client.conversations_history(**params)
-            messages.extend(response.get("messages", []))
-            cursor = (response.get("response_metadata") or {}).get("next_cursor")
-            if not response.get("has_more") or not cursor:
-                break
-        return messages
+        params: dict[str, Any] = {"channel": channel, "inclusive": False}
+        if oldest is not None:
+            params["oldest"] = oldest
+        return self._paginated_messages(self._client.conversations_history, params, limit)
 
     def replies(self, channel: str, thread_ts: str, limit: int) -> list[dict[str, Any]]:
         """Return paginated replies for a Slack thread."""
+        return self._paginated_messages(self._client.conversations_replies, {"channel": channel, "ts": thread_ts}, limit)
+
+    def _paginated_messages(
+        self,
+        method: Callable[..., dict[str, Any]],
+        base_params: dict[str, Any],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Return all Slack message pages for an endpoint."""
         messages: list[dict[str, Any]] = []
         cursor: str | None = None
         page_size = min(200, max(1, int(limit or 200)))
         while True:
-            params: dict[str, Any] = {
-                "channel": channel,
-                "ts": thread_ts,
-                "limit": page_size,
-            }
+            params = {**base_params, "limit": page_size}
             if cursor is not None:
                 params["cursor"] = cursor
 
-            response = self._client.conversations_replies(**params)
+            response = method(**params)
             messages.extend(response.get("messages", []))
             cursor = (response.get("response_metadata") or {}).get("next_cursor")
             if not response.get("has_more") or not cursor:

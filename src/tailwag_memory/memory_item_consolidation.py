@@ -33,6 +33,7 @@ from .models import (
     PersonMemoryConsolidationResult,
     utc_now_iso,
 )
+from .vector_queries import vector_search_clause
 
 
 class MemoryConsolidationService:
@@ -220,9 +221,8 @@ class MemoryConsolidationService:
     ) -> list[_EpisodeEvidence]:
         """Return vector-neighbor episodes that are linked to the same person."""
         rows = self.runner.run(
-            """
-            CALL db.index.vector.queryNodes('episode_transcript_embedding', $limit, $embedding)
-            YIELD node, score
+            vector_search_clause("episode_transcript_embedding", "node", "limit")
+            + """
             MATCH (:Person {id: $person_id})-[:PARTICIPATED_IN]->(node)
             WHERE coalesce(node.transcript, '') <> ''
             RETURN node.id AS episode_id,
