@@ -176,11 +176,11 @@ class MemoryConsolidationService:
         clusters: list[list[_EpisodeEvidence]] = []
         seen_cluster_keys: set[tuple[str, ...]] = set()
         for seed in seeds:
-            if not isinstance(seed.get("summary_embedding"), list):
+            if not isinstance(seed.get("transcript_embedding"), list):
                 continue
             neighbors = self._neighbor_episodes_for_seed(
                 person_id,
-                embedding=seed["summary_embedding"],
+                embedding=seed["transcript_embedding"],
                 limit=neighbor_limit,
             )
             cluster = _dedupe_episode_evidence([_row_to_episode_evidence(seed), *neighbors])
@@ -198,14 +198,13 @@ class MemoryConsolidationService:
         return self.runner.run(
             """
             MATCH (:Person {id: $person_id})-[:PARTICIPATED_IN]->(e:Episode)
-            WHERE e.summary_embedding IS NOT NULL
-              AND coalesce(e.summary, '') <> ''
+            WHERE e.transcript_embedding IS NOT NULL
+              AND coalesce(e.transcript, '') <> ''
             RETURN e.id AS episode_id,
-                   e.summary AS summary,
                    e.transcript AS transcript,
                    e.start_time AS start_time,
                    e.end_time AS end_time,
-                   e.summary_embedding AS summary_embedding
+                   e.transcript_embedding AS transcript_embedding
             ORDER BY e.start_time DESC
             LIMIT $limit
             """,
@@ -222,12 +221,11 @@ class MemoryConsolidationService:
         """Return vector-neighbor episodes that are linked to the same person."""
         rows = self.runner.run(
             """
-            CALL db.index.vector.queryNodes('episode_summary_embedding', $limit, $embedding)
+            CALL db.index.vector.queryNodes('episode_transcript_embedding', $limit, $embedding)
             YIELD node, score
             MATCH (:Person {id: $person_id})-[:PARTICIPATED_IN]->(node)
-            WHERE coalesce(node.summary, '') <> ''
+            WHERE coalesce(node.transcript, '') <> ''
             RETURN node.id AS episode_id,
-                   node.summary AS summary,
                    node.transcript AS transcript,
                    node.start_time AS start_time,
                    node.end_time AS end_time,

@@ -382,17 +382,11 @@ def build_episode_from_slack_thread(
         text = _format_slack_text(str(message.get("text") or ""), client=client, user_profiles=user_profiles)
         transcript_lines.append(f"[{message_time}] {display_name}: {text}")
 
-    root_user_id = str(ordered[0]["user"])
-    root_profile = user_profiles.get(root_user_id) or client.user_profile(root_user_id)
-    user_profiles[root_user_id] = root_profile
-    root_display_name = root_profile.display_name or f"slack:{root_user_id}"
-    summary = _summarize(ordered[0], speaker_name=root_display_name, client=client, user_profiles=user_profiles)
     return EpisodeInput(
         id=f"slack:{channel}:{thread_ts}",
         episode_type="conversation",
         start_time=_slack_ts_to_datetime(str(ordered[0]["ts"])).isoformat(),
         end_time=_slack_ts_to_datetime(_max_ts(ordered)).isoformat(),
-        summary=summary,
         transcript="\n".join(transcript_lines),
         retention_class=retention_class,
         place=PlaceInput(building_code="SLACK", room_id=channel),
@@ -504,25 +498,6 @@ def _normalize_email(email: Any) -> str | None:
         return None
     normalized = email.strip().lower()
     return normalized or None
-
-
-def _summarize(
-    message: dict[str, Any],
-    *,
-    speaker_name: str,
-    client: SlackConversationClient,
-    user_profiles: dict[str, SlackUserProfile],
-) -> str:
-    """Build a terse Slack thread summary."""
-    text = _format_slack_text(
-        str(message.get("text") or "Slack conversation"),
-        client=client,
-        user_profiles=user_profiles,
-    )
-    text = f"{speaker_name}: {text}"
-    if len(text) <= 160:
-        return text
-    return text[:157].rstrip() + "..."
 
 
 def _max_ts(messages: list[dict[str, Any]]) -> str:

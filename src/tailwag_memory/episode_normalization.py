@@ -7,7 +7,6 @@ from .models import EpisodeInput, PersonInput
 
 
 _ROBOT_USER_LABEL_RE = re.compile(r"(?m)^(?P<indent>\s*)User\s*:")
-_ROBOT_SUMMARY_USER_LABEL_RE = re.compile(r"(?P<prefix>^|(?<=[.!?])\s+)User\s*:")
 
 
 def normalize_robot_speaker_labels(episode: EpisodeInput) -> EpisodeInput:
@@ -19,11 +18,10 @@ def normalize_robot_speaker_labels(episode: EpisodeInput) -> EpisodeInput:
     if not speaker_label:
         return episode
 
-    summary = _replace_summary_user_label(episode.summary, speaker_label)
     transcript = _replace_transcript_user_label(episode.transcript, speaker_label)
-    if summary == episode.summary and transcript == episode.transcript:
+    if transcript == episode.transcript:
         return episode
-    return replace(episode, summary=summary, transcript=transcript)
+    return replace(episode, transcript=transcript)
 
 
 def _single_linked_speaker(participants: list[PersonInput]) -> PersonInput | None:
@@ -46,13 +44,5 @@ def _replace_transcript_user_label(text: str, speaker_label: str) -> str:
     """Replace line-leading generic user speaker labels."""
     return _ROBOT_USER_LABEL_RE.sub(
         lambda match: f"{match.group('indent')}{speaker_label}:",
-        text,
-    )
-
-
-def _replace_summary_user_label(text: str, speaker_label: str) -> str:
-    """Replace generic user speaker labels in one-line summaries."""
-    return _ROBOT_SUMMARY_USER_LABEL_RE.sub(
-        lambda match: f"{match.group('prefix')}{speaker_label}:",
         text,
     )

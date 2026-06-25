@@ -216,7 +216,6 @@ class EpisodeMemoryExtractionService:
                    e.episode_type AS episode_type,
                    e.start_time AS start_time,
                    e.end_time AS end_time,
-                   e.summary AS summary,
                    e.transcript AS transcript,
                    e.retention_class AS retention_class,
                    place.building_code AS building_code,
@@ -233,7 +232,6 @@ class EpisodeMemoryExtractionService:
             episode_type=str(row.get("episode_type") or "conversation"),
             start_time=str(row.get("start_time") or ""),
             end_time=str(row.get("end_time") or "") or None,
-            summary=str(row.get("summary") or ""),
             transcript=str(row.get("transcript") or ""),
             retention_class=str(row.get("retention_class") or "standard"),
             place=PlaceInput(

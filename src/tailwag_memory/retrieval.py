@@ -28,14 +28,19 @@ def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: i
     """Fetch recent episode rows linked to a person."""
     return runner.run(
         """
-            MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(e:Episode)
+            MATCH (person:Person {id: $person_id})-[r:PARTICIPATED_IN]->(e:Episode)
             OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
+            OPTIONAL MATCH (speaker:Person)-[:PARTICIPATED_IN]->(e)
+            WITH e, r, person, place,
+                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels
             RETURN e.id AS episode_id,
                    e.id AS item_id,
                    'episode' AS item_type,
-                   e.summary AS summary,
+                   person.id AS person_id,
+                   person.display_name AS display_name,
+                   speaker_labels AS speaker_labels,
                    e.transcript AS transcript,
-                   ('Summary: ' + coalesce(e.summary, '') + '\nTranscript:\n' + coalesce(e.transcript, '')) AS text,
+                   coalesce(e.transcript, '') AS text,
                    e.start_time AS start_time,
                    e.end_time AS end_time,
                    place.building_code AS building_code,
@@ -88,7 +93,6 @@ class EpisodeRetrievalService:
               room_id: $room_id
             })
             RETURN e.id AS episode_id,
-                   e.summary AS summary,
                    e.transcript AS transcript
             ORDER BY e.start_time DESC
             LIMIT $limit
@@ -97,14 +101,12 @@ class EpisodeRetrievalService:
         )
         return [self._row_to_result(row) for row in rows]
 
-    def vector_search(self, text: str, target: str = "summary", limit: int = 10) -> list[EpisodeMemoryResult]:
+    def vector_search(self, text: str, limit: int = 10) -> list[EpisodeMemoryResult]:
         """Return episode memories ranked by vector similarity."""
-        index_name = self._index_name(target)
         rows = self.runner.run(
-            _vector_search_clause(index_name, "node", "limit")
+            _vector_search_clause("episode_transcript_embedding", "node", "limit")
             + """
             RETURN node.id AS episode_id,
-                   node.summary AS summary,
                    node.transcript AS transcript,
                    score AS score
             ORDER BY score DESC
@@ -118,10 +120,9 @@ class EpisodeRetrievalService:
 
     def hybrid_search(self, query: SearchQuery) -> list[EpisodeMemoryResult]:
         """Return vector-ranked episodes filtered by query constraints."""
-        index_name = self._index_name(query.target)
         candidate_limit = max(query.limit * 5, 25)
         rows = self.runner.run(
-            _vector_search_clause(index_name, "node", "candidate_limit")
+            _vector_search_clause("episode_transcript_embedding", "node", "candidate_limit")
             + """
             OPTIONAL MATCH (person:Person)-[:PARTICIPATED_IN]->(node)
             OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
@@ -136,7 +137,6 @@ class EpisodeRetrievalService:
                 OR any(place IN places WHERE place.room_id = $room_id AND ($building_code IS NULL OR place.building_code = $building_code))
               )
             RETURN node.id AS episode_id,
-                   node.summary AS summary,
                    node.transcript AS transcript,
                    score AS score
             ORDER BY score DESC
@@ -153,19 +153,10 @@ class EpisodeRetrievalService:
         )
         return [self._row_to_result(row) for row in rows]
 
-    def _index_name(self, target: str) -> str:
-        """Map an episode vector target to its index name."""
-        if target == "summary":
-            return "episode_summary_embedding"
-        if target == "transcript":
-            return "episode_transcript_embedding"
-        raise ValueError("target must be 'summary' or 'transcript'")
-
     def _row_to_result(self, row: dict[str, object]) -> EpisodeMemoryResult:
         """Convert a Neo4j episode row into a result model."""
         return EpisodeMemoryResult(
             episode_id=str(row["episode_id"]),
-            summary=str(row.get("summary") or ""),
             transcript=str(row.get("transcript") or ""),
             score=row.get("score") if isinstance(row.get("score"), float) else None,
         )
@@ -374,9 +365,7 @@ class PersonContextRetrievalService:
             raise ValueError("semantic_scope requires an embedding provider")
 
         embedding = self.embeddings.embed(semantic_scope)
-        rows = []
-        for index_name in ("episode_summary_embedding", "episode_transcript_embedding"):
-            rows.extend(self._scoped_episode_rows(person_id, index_name, embedding, limit))
+        rows = self._scoped_episode_rows(person_id, embedding, limit)
 
         best_rows: dict[str, dict[str, object]] = {}
         for row in rows:
@@ -395,20 +384,19 @@ class PersonContextRetrievalService:
     def _scoped_episode_rows(
         self,
         person_id: str,
-        index_name: str,
         embedding: list[float],
         limit: int,
     ) -> list[dict[str, object]]:
         """Fetch scoped episode rows from one vector index."""
         candidate_limit = max(limit * 5, 25)
         return self.runner.run(
-            _vector_search_clause(index_name, "node", "candidate_limit")
+            _vector_search_clause("episode_transcript_embedding", "node", "candidate_limit")
             + """
             MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(node)
             OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
             RETURN node.id AS item_id,
                    'episode' AS item_type,
-                   ('Summary: ' + coalesce(node.summary, '') + '\nTranscript:\n' + coalesce(node.transcript, '')) AS text,
+                   coalesce(node.transcript, '') AS text,
                    node.start_time AS start_time,
                    node.end_time AS end_time,
                    place.building_code AS building_code,

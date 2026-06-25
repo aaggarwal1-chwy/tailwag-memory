@@ -40,7 +40,6 @@ def _episode() -> EpisodeInput:
         episode_type="conversation",
         start_time="2026-06-18T10:00:00+00:00",
         end_time=None,
-        summary="Jamie likes robot demos.",
         transcript="Jamie: I like robot demos.",
         retention_class="standard",
         place=PlaceInput(building_code="MAIN", room_id="101"),
@@ -185,7 +184,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-18T10:00:00+00:00",
             end_time=None,
-            summary="User: I like robot demos. Assistant: I'll remember that. User: Thanks.",
             transcript="User: I like robot demos.\nAssistant: I'll remember that.\nUser: Thanks.",
             retention_class="standard",
             place=PlaceInput(building_code="ARGOS", room_id="realtime"),
@@ -214,7 +212,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
 
         ingested = calls[0][1]
         extracted = calls[1][1]
-        self.assertEqual(ingested.summary, "Jamie: I like robot demos. Assistant: I'll remember that. Jamie: Thanks.")
         self.assertEqual(ingested.transcript, "Jamie: I like robot demos.\nAssistant: I'll remember that.\nJamie: Thanks.")
         self.assertIs(extracted, ingested)
         self.assertEqual(calls[1][2], False)
@@ -225,7 +222,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-18T10:00:00+00:00",
             end_time=None,
-            summary="User: I like robot demos.",
             transcript="User: I like robot demos.",
             retention_class="standard",
             place=PlaceInput(building_code="ARGOS", room_id="realtime"),
@@ -234,7 +230,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
 
         normalized = normalize_robot_speaker_labels(episode)
 
-        self.assertEqual(normalized.summary, "person_jamie: I like robot demos.")
         self.assertEqual(normalized.transcript, "person_jamie: I like robot demos.")
 
     def test_robot_user_label_without_speaker_role_uses_single_participant(self) -> None:
@@ -243,7 +238,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-18T10:00:00+00:00",
             end_time=None,
-            summary="User: I like robot demos.",
             transcript="User: I like robot demos.",
             retention_class="standard",
             place=PlaceInput(building_code="ARGOS", room_id="realtime"),
@@ -252,7 +246,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
 
         normalized = normalize_robot_speaker_labels(episode)
 
-        self.assertEqual(normalized.summary, "Jamie: I like robot demos.")
         self.assertEqual(normalized.transcript, "Jamie: I like robot demos.")
 
     def test_robot_user_label_is_not_changed_for_ambiguous_or_unlinked_episodes(self) -> None:
@@ -261,7 +254,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-18T10:00:00+00:00",
             end_time=None,
-            summary="User: I like robot demos.",
             transcript="User: I like robot demos.\nAssistant: Got it.",
             retention_class="standard",
             place=PlaceInput(building_code="ARGOS", room_id="realtime"),
@@ -272,7 +264,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
             episode_type=base.episode_type,
             start_time=base.start_time,
             end_time=base.end_time,
-            summary=base.summary,
             transcript=base.transcript,
             retention_class=base.retention_class,
             place=base.place,
@@ -291,7 +282,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-18T10:00:00+00:00",
             end_time=None,
-            summary="The word User: appears in this summary.",
             transcript="The word User: appears here.\n  User: This line is labeled.",
             retention_class="standard",
             place=PlaceInput(building_code="ARGOS", room_id="realtime"),
@@ -300,7 +290,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
 
         normalized = normalize_robot_speaker_labels(episode)
 
-        self.assertEqual(normalized.summary, "The word User: appears in this summary.")
         self.assertEqual(normalized.transcript, "The word User: appears here.\n  Jamie: This line is labeled.")
 
     def test_record_episode_can_skip_memory_extraction(self) -> None:

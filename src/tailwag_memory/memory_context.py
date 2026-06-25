@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
@@ -41,7 +42,7 @@ class PersonMemoryContextService:
         return format_person_memory_markdown(items, recent_episode_lines=recent_episodes, now=now, limit=memory_limit)
 
     def _recent_episode_lines(self, person_id: str, limit: int) -> list[str]:
-        """Return sanitized recent episode summary lines."""
+        """Return sanitized recent episode transcript lines."""
         rows = recent_episode_rows_for_person(
             self.runner,
             str(person_id or "").strip(),
@@ -49,12 +50,21 @@ class PersonMemoryContextService:
         )
         lines: list[str] = []
         for row in rows:
-            summary = str(row.get("summary") or "").strip()
-            if not summary:
+            transcript = str(row.get("transcript") or "").strip()
+            if not transcript:
+                continue
+            speech_lines = _target_speech_lines(
+                transcript,
+                person_id=str(row.get("person_id") or person_id or ""),
+                display_name=str(row.get("display_name") or ""),
+                speaker_labels=_row_speaker_labels(row),
+            )
+            if not speech_lines:
                 continue
             start_time = str(row.get("start_time") or "").strip()
             prefix = start_time[:10] if len(start_time) >= 10 else start_time
-            line = f"{prefix}: {summary}" if prefix else summary
+            rendered = " ".join(speech_lines)
+            line = f"{prefix}: {rendered}" if prefix else rendered
             lines.append(_sanitize_context_line(line))
         return lines
 
@@ -101,6 +111,67 @@ def _merge_items(left: list[MemoryItemResult], right: list[MemoryItemResult]) ->
         merged.append(item)
         seen.add(item.memory_id)
     return merged
+
+
+def _target_speech_lines(
+    transcript: str,
+    *,
+    person_id: str,
+    display_name: str,
+    speaker_labels: list[str],
+) -> list[str]:
+    """Return transcript lines whose speaker matches the target person."""
+    labels = {
+        _normalize_speaker_label(label)
+        for label in [display_name, person_id]
+        if _normalize_speaker_label(label)
+    }
+    if not labels:
+        return []
+
+    turn_labels = _speaker_label_pattern([*speaker_labels, display_name, person_id, "Assistant", "User"])
+    if turn_labels is None:
+        return []
+
+    lines: list[str] = []
+    for raw_line in transcript.splitlines():
+        matches = list(turn_labels.finditer(raw_line))
+        for index, match in enumerate(matches):
+            speaker = match.group("speaker").strip()
+            if _normalize_speaker_label(speaker) not in labels:
+                continue
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(raw_line)
+            text = raw_line[match.end() : end].strip()
+            if text:
+                lines.append(f"{speaker}: {text}")
+    return lines
+
+
+def _normalize_speaker_label(value: str) -> str:
+    """Normalize a transcript speaker label for exact target matching."""
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _row_speaker_labels(row: dict[str, object]) -> list[str]:
+    """Return known episode speaker labels from a retrieval row."""
+    raw_labels = row.get("speaker_labels")
+    if not isinstance(raw_labels, list):
+        return []
+    return [str(label) for label in raw_labels if str(label or "").strip()]
+
+
+def _speaker_label_pattern(labels: list[str]) -> re.Pattern[str] | None:
+    """Build a speaker-turn matcher from known labels."""
+    normalized: dict[str, str] = {}
+    for label in labels:
+        rendered = str(label or "").strip()
+        if not rendered:
+            continue
+        normalized.setdefault(_normalize_speaker_label(rendered), rendered)
+    if not normalized:
+        return None
+    choices = "|".join(re.escape(label) for label in sorted(normalized.values(), key=len, reverse=True))
+    return re.compile(rf"(?:^|\s)(?:\[[^\]]+\]\s*)?(?P<speaker>{choices}):\s*")
 
 
 def _section_lines(

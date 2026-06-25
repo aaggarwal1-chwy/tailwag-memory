@@ -89,14 +89,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     context_parser.add_argument("--semantic-scope", help="optional semantic focus for OpenAI-backed vector retrieval")
     context_parser.add_argument("--current-text", help="optional current utterance or task for memory item retrieval")
     context_parser.add_argument("--memory-limit", type=int, default=12, help="maximum durable memory items per section")
-    context_parser.add_argument("--recent-episode-limit", type=int, default=5, help="maximum recent episode lines in person context")
+    context_parser.add_argument("--recent-episode-limit", type=int, default=5, help="maximum recent episodes inspected for target-person transcript lines")
 
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("text", help="query text")
     search_parser.add_argument("--person-id", help="optional person filter")
     search_parser.add_argument("--building-code", help="optional building filter")
     search_parser.add_argument("--room-id", help="optional room filter")
-    search_parser.add_argument("--target", choices=["summary", "transcript"], default="summary", help="episode vector field")
     search_parser.add_argument("--limit", type=int, default=10, help="maximum episodes to print")
 
     slack_parser = subparsers.add_parser("slack")
@@ -275,7 +274,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     building_code=args.building_code,
                     room_id=args.room_id,
                     limit=args.limit,
-                    target=args.target,
                 )
             )
             for result in results:

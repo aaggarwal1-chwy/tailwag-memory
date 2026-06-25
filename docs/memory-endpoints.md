@@ -53,7 +53,6 @@ episode = EpisodeInput(
     episode_type="conversation",
     start_time="2026-06-22T14:00:00+00:00",
     end_time="2026-06-22T14:03:00+00:00",
-    summary="Jamie prefers Spanish and likes hands-on robot demos.",
     transcript="Jamie: I prefer Spanish and like hands-on robot demos.",
     retention_class="standard",
     place=PlaceInput(building_code="MAIN", room_id="101"),
@@ -163,7 +162,7 @@ Notes:
 
 ### `record_episode(episode, *, extract_memory=True)`
 
-Stores an episode, place, participants, participant relationships, summary embedding, and transcript embedding. By default it also runs transcript-derived memory extraction for the episode participants.
+Stores an episode, place, participants, participant relationships, and transcript embedding. By default it also runs transcript-derived memory extraction for the episode participants.
 
 Parameters:
 
@@ -190,7 +189,7 @@ Notes:
 
 ### `person_context(person_id, limit=10, semantic_scope=None, *, current_text=None, now=None, memory_limit=12, recent_episode_limit=5)`
 
-Returns prompt-ready context for a person. The output combines deterministic durable memory markdown, visible follow-ups, and bounded recent episode lines.
+Returns prompt-ready context for a person. The output combines deterministic durable memory markdown, visible follow-ups, and bounded recent transcript lines spoken by that person.
 
 Parameters:
 
@@ -202,14 +201,14 @@ Parameters:
 | `current_text` | `str \| None` | no | Current utterance/task used to vector-rank durable memory items. When omitted, `semantic_scope` is reused for durable memory ranking. |
 | `now` | `datetime \| None` | no | Reference time for follow-up visibility in the deterministic durable memory section. |
 | `memory_limit` | `int` | no | Maximum durable memory lines per section. |
-| `recent_episode_limit` | `int` | no | Maximum recent episode summary lines in the deterministic durable memory section. |
+| `recent_episode_limit` | `int` | no | Maximum recent episodes inspected for transcript lines spoken by the target person. |
 
 Returns: `str`.
 
 Notes:
 
 - If no person exists, person context returns `the database does not have a record of this person`.
-- If `semantic_scope` is supplied, an embedding provider is required. Rendered episode lines still come from the bounded recent episode section.
+- If `semantic_scope` is supplied, an embedding provider is required. Rendered episode lines still come from transcript lines spoken by the target person.
 - The returned string is suitable for prompts, not a structured API contract.
 
 Example output:
@@ -233,7 +232,7 @@ Potential Follow-Ups:
 - Cape Cod trip with their parents planned for the weekend of 2026-06-20.
 
 Recent Episodes:
-- 2026-06-16: Jamie mentioned Luna had a vet visit tomorrow.
+- 2026-06-16: Jamie: Luna has a vet visit tomorrow.
 ```
 
 ### `extract_memory_for_episode(episode_id, person_id=None)`
@@ -317,7 +316,6 @@ Omitted profile fields preserve existing `Person` values on later writes.
 | `episode_type` | `str` | yes | Example: `conversation`, `encounter`, `slack_thread`. |
 | `start_time` | `str` | yes | ISO-8601 timestamp. |
 | `end_time` | `str \| None` | yes | ISO-8601 timestamp or `None`. |
-| `summary` | `str` | yes | Short text used for storage, retrieval, and embeddings. |
 | `transcript` | `str` | yes | Full text evidence. |
 | `retention_class` | `str` | yes | Caller-defined retention category. |
 | `place` | `PlaceInput` | yes | Episode location. |
@@ -386,7 +384,7 @@ Parameters:
 | Name | Type | Meaning |
 | --- | --- | --- |
 | `runner` | `QueryRunner` | Executes Cypher. Usually `Neo4jQueryRunner(settings)`. |
-| `embeddings` | `EmbeddingProvider` | Generates summary and transcript embeddings. |
+| `embeddings` | `EmbeddingProvider` | Generates transcript embeddings. |
 | `episode` | `EpisodeInput` | Episode payload. |
 
 Returns: `str` episode ID.
@@ -443,10 +441,10 @@ Normal `MemoryItemService` read methods do not return superseded memories. Super
 | --- | --- | --- | --- |
 | `by_person(person_id, limit=10)` | person ID | `list[EpisodeMemoryResult]` | Recent episodes linked to a person. |
 | `by_place(building_code, room_id, limit=10)` | place key | `list[EpisodeMemoryResult]` | Recent episodes at a place. |
-| `vector_search(text, target="summary", limit=10)` | query text, target `summary` or `transcript` | `list[EpisodeMemoryResult]` | Global vector-ranked episode search. |
+| `vector_search(text, limit=10)` | query text | `list[EpisodeMemoryResult]` | Global vector-ranked episode search. |
 | `hybrid_search(SearchQuery(...))` | structured query | `list[EpisodeMemoryResult]` | Vector search filtered by person/place. |
 
-`SearchQuery` fields: `text`, optional `person_id`, optional `building_code`, optional `room_id`, `limit=10`, `target="summary"`.
+`SearchQuery` fields: `text`, optional `person_id`, optional `building_code`, optional `room_id`, `limit=10`.
 
 ### `EventRetrievalService(runner)`
 
@@ -596,7 +594,7 @@ Common return types:
 
 | Type | Important fields |
 | --- | --- |
-| `EpisodeMemoryResult` | `episode_id`, `summary`, `transcript`, optional `score`. |
+| `EpisodeMemoryResult` | `episode_id`, `transcript`, optional `score`. |
 | `EventResult` | `event_id`, `description`, `start_time`, `end_time`, `building_code`, `room_id`. |
 | `PersonRecognitionResult` | `person_id`, `display_name`, `consent_status`, `last_seen`, optional `score`. |
 | `PersonContextSource` | `person_id`, `display_name`, `items`. |

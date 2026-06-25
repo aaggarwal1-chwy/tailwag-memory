@@ -185,7 +185,6 @@ class EpisodeIngestionService:
         """Write an episode graph snapshot and return its id."""
         episode = normalize_robot_speaker_labels(episode)
         written_at = utc_now_iso()
-        summary_embedding = self.embeddings.embed(episode.summary)
         transcript_embedding = self.embeddings.embed(episode.transcript)
         participants = [
             {
@@ -207,10 +206,8 @@ class EpisodeIngestionService:
             SET e.episode_type = $episode_type,
                 e.start_time = $start_time,
                 e.end_time = $end_time,
-                e.summary = $summary,
                 e.transcript = $transcript,
                 e.retention_class = $retention_class,
-                e.summary_embedding = $summary_embedding,
                 e.transcript_embedding = $transcript_embedding,
                 e.created_at = coalesce(e.created_at, $created_at),
                 e.updated_at = $updated_at
@@ -238,10 +235,8 @@ class EpisodeIngestionService:
                     "episode_type": episode.episode_type,
                     "start_time": episode.start_time,
                     "end_time": episode.end_time,
-                    "summary": episode.summary,
                     "transcript": episode.transcript,
                     "retention_class": episode.retention_class,
-                    "summary_embedding": summary_embedding,
                     "transcript_embedding": transcript_embedding,
                     "building_code": episode.place.building_code,
                     "room_id": episode.place.room_id,

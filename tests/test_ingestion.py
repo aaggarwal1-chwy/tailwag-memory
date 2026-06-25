@@ -16,7 +16,6 @@ def _episode() -> EpisodeInput:
         episode_type="conversation",
         start_time="2026-06-15T10:00:00+00:00",
         end_time="2026-06-15T10:05:00+00:00",
-        summary="Jamie asked about spare laptop chargers.",
         transcript="Jamie: Are there spare laptop chargers?",
         retention_class="standard",
         place=PlaceInput(building_code="MAIN", room_id="101"),
@@ -249,7 +248,6 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-15T10:00:00+00:00",
             end_time="2026-06-15T10:05:00+00:00",
-            summary="User: I like robot demos. Assistant: Noted.",
             transcript="User: I like robot demos.\nAssistant: Noted.",
             retention_class="standard",
             place=PlaceInput(building_code="ARGOS", room_id="realtime"),
@@ -266,15 +264,15 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         service.ingest(episode)
 
         query = runner.queries[0]
-        self.assertEqual(query.parameters["summary"], "Jamie: I like robot demos. Assistant: Noted.")
         self.assertEqual(query.parameters["transcript"], "Jamie: I like robot demos.\nAssistant: Noted.")
         self.assertEqual(
             embeddings.texts,
             [
-                "Jamie: I like robot demos. Assistant: Noted.",
                 "Jamie: I like robot demos.\nAssistant: Noted.",
             ],
         )
+        self.assertNotIn("summary", query.parameters)
+        self.assertNotIn("summary_embedding", query.parameters)
 
     def test_ingest_query_excludes_org_identity_and_confidence(self) -> None:
         runner = RecordingQueryRunner()
@@ -296,7 +294,6 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
             episode_type=episode.episode_type,
             start_time=episode.start_time,
             end_time=None,
-            summary=episode.summary,
             transcript=episode.transcript,
             retention_class=episode.retention_class,
             place=episode.place,
@@ -315,7 +312,6 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-16T10:00:00+00:00",
             end_time="2026-06-16T10:05:00+00:00",
-            summary="Jamie asked about the projector.",
             transcript="Jamie: Is the projector ready?",
             retention_class="standard",
             place=PlaceInput(building_code="MAIN", room_id="101"),

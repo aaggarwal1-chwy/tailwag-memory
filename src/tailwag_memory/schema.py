@@ -30,16 +30,6 @@ def schema_statements(embedding_dimension: int) -> list[str]:
         FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE
         """,
         f"""
-        CREATE VECTOR INDEX episode_summary_embedding IF NOT EXISTS
-        FOR (e:Episode) ON (e.summary_embedding)
-        OPTIONS {{
-          indexConfig: {{
-            `vector.dimensions`: {embedding_dimension},
-            `vector.similarity_function`: 'cosine'
-          }}
-        }}
-        """,
-        f"""
         CREATE VECTOR INDEX episode_transcript_embedding IF NOT EXISTS
         FOR (e:Episode) ON (e.transcript_embedding)
         OPTIONS {{

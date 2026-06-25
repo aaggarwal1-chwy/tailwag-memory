@@ -44,7 +44,6 @@ class CliTest(unittest.TestCase):
                     "episode_type": "conversation",
                     "start_time": "2026-06-18T10:00:00+00:00",
                     "end_time": None,
-                    "summary": "Jamie likes robot demos.",
                     "transcript": "Jamie: I like robot demos.",
                     "retention_class": "standard",
                     "place": {"building_code": "MAIN", "room_id": "101"},

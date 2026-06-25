@@ -23,7 +23,7 @@ class SchemaTest(unittest.TestCase):
     def test_schema_creates_expected_constraints_and_vector_indexes(self) -> None:
         statements = [_compact(statement) for statement in schema_statements(64)]
 
-        self.assertEqual(len(statements), 10)
+        self.assertEqual(len(statements), 9)
         self.assertEqual(
             statements[:5],
             [
@@ -35,7 +35,6 @@ class SchemaTest(unittest.TestCase):
             ],
         )
         expected_indexes = [
-            ("episode_summary_embedding", "Episode", "summary_embedding"),
             ("episode_transcript_embedding", "Episode", "transcript_embedding"),
             ("person_face_embedding", "Person", "face_embedding"),
             ("person_audio_embedding", "Person", "audio_embedding"),

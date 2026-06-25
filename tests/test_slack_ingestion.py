@@ -110,7 +110,6 @@ class SlackThreadConversionTest(unittest.TestCase):
 
         self.assertEqual(episode.id, f"slack:C123:{root_ts}")
         self.assertEqual(episode.episode_type, "conversation")
-        self.assertEqual(episode.summary, "Asha: Can someone review the deck?")
         self.assertEqual(episode.place.building_code, "SLACK")
         self.assertEqual(episode.place.room_id, "C123")
         self.assertEqual([person.id for person in episode.participants], ["slack:U1", "slack:U2"])
@@ -200,7 +199,6 @@ class SlackThreadConversionTest(unittest.TestCase):
             client=client,
         )
 
-        self.assertEqual(episode.summary, "Asha: Can @Ben and @Chandra review this?")
         self.assertIn("Asha: Can @Ben and @Chandra review this?", episode.transcript)
         self.assertIn("Ben: Looping @Chandra in.", episode.transcript)
         self.assertEqual([person.id for person in episode.participants], ["slack:U1", "slack:U2"])
@@ -220,7 +218,6 @@ class SlackThreadConversionTest(unittest.TestCase):
             client=client,
         )
 
-        self.assertEqual(episode.summary, "Asha: See #proj-alpha, @here, the brief, and Asha.")
         self.assertIn("Asha: See #proj-alpha, @here, the brief, and Asha.", episode.transcript)
 
 

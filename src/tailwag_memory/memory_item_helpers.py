@@ -26,7 +26,6 @@ class _EpisodeEvidence:
     """Episode evidence available to a consolidation provider."""
 
     episode_id: str
-    summary: str
     transcript: str
     start_time: str
     end_time: str = ""
@@ -274,7 +273,6 @@ def _row_to_episode_evidence(row: dict[str, Any]) -> _EpisodeEvidence:
     score = row.get("score")
     return _EpisodeEvidence(
         episode_id=str(row.get("episode_id") or ""),
-        summary=str(row.get("summary") or ""),
         transcript=str(row.get("transcript") or ""),
         start_time=str(row.get("start_time") or ""),
         end_time=str(row.get("end_time") or ""),
@@ -299,7 +297,6 @@ def _episode_evidence_payload(episode: _EpisodeEvidence, *, text_limit: int) -> 
     limit = _positive_int(text_limit, DEFAULT_CONSOLIDATION_EPISODE_TEXT_LIMIT)
     return {
         "episode_id": episode.episode_id,
-        "summary": episode.summary[:limit],
         "transcript": episode.transcript[:limit],
         "start_time": episode.start_time,
         "end_time": episode.end_time,

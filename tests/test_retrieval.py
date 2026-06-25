@@ -21,9 +21,10 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
                         "episode_id": "episode_1",
                         "item_id": "episode_1",
                         "item_type": "episode",
-                        "summary": "Jamie asked about chargers.",
+                        "person_id": "person_jamie",
+                        "display_name": "Jamie",
                         "transcript": "Jamie: Any chargers?",
-                        "text": "Summary: Jamie asked about chargers.\nTranscript:\nJamie: Any chargers?",
+                        "text": "Jamie: Any chargers?",
                         "start_time": "2026-06-16T14:00:00+00:00",
                     }
                 ]
@@ -37,7 +38,10 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 3})
         self.assertIn("e.id AS episode_id", runner.queries[0].query)
         self.assertIn("'episode' AS item_type", runner.queries[0].query)
-        self.assertIn("Transcript", runner.queries[0].query)
+        self.assertIn("person.id AS person_id", runner.queries[0].query)
+        self.assertIn("person.display_name AS display_name", runner.queries[0].query)
+        self.assertIn("speaker_labels AS speaker_labels", runner.queries[0].query)
+        self.assertIn("e.transcript AS transcript", runner.queries[0].query)
         self.assertIn("PARTICIPATED_IN", runner.queries[0].query)
 
     def test_by_person_uses_recent_episode_helper_rows(self) -> None:
@@ -46,7 +50,6 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
                 [
                     {
                         "episode_id": "episode_1",
-                        "summary": "Jamie asked about chargers.",
                         "transcript": "Jamie: Any chargers?",
                     }
                 ]
@@ -60,13 +63,12 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 2})
         self.assertIn("e.id AS episode_id", runner.queries[0].query)
 
-    def test_vector_search_uses_summary_index_by_default(self) -> None:
+    def test_vector_search_uses_transcript_index(self) -> None:
         runner = RecordingQueryRunner(
             results=[
                 [
                     {
                         "episode_id": "episode_1",
-                        "summary": "Jamie asked about chargers.",
                         "transcript": "Jamie: Any chargers?",
                         "score": 0.91,
                     }
@@ -79,21 +81,13 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
 
         self.assertEqual(results[0].episode_id, "episode_1")
         self.assertEqual(results[0].score, 0.91)
-        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[0].query)
-        self.assertIn("WHERE node:Episode", runner.queries[0].query)
-
-    def test_vector_search_can_use_transcript_index(self) -> None:
-        runner = RecordingQueryRunner()
-        service = EpisodeRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
-
-        service.vector_search("chargers", target="transcript")
-
         self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[0].query)
+        self.assertIn("WHERE node:Episode", runner.queries[0].query)
 
     def test_search_clause_rejects_unknown_index_identifiers(self) -> None:
         # Vector index names are interpolated as string literals from a known allowlist.
         with self.assertRaisesRegex(ValueError, "unsupported vector index"):
-            _vector_search_clause("episode_summary_embedding) RETURN 1 //", "node", "limit")
+            _vector_search_clause("episode_transcript_embedding) RETURN 1 //", "node", "limit")
 
     def test_hybrid_search_includes_graph_filters(self) -> None:
         runner = RecordingQueryRunner()
@@ -115,7 +109,7 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(params["room_id"], "101")
         self.assertEqual(params["limit"], 5)
         self.assertEqual(params["candidate_limit"], 25)
-        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[0].query)
+        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[0].query)
 
     def test_hybrid_search_supports_one_sided_place_filters(self) -> None:
         runner = RecordingQueryRunner()
@@ -132,13 +126,6 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(room_query.parameters["room_id"], "101")
         self.assertIn("$room_id IS NULL OR place.room_id = $room_id", building_query.query)
         self.assertIn("$building_code IS NULL OR place.building_code = $building_code", room_query.query)
-
-    def test_retrieval_rejects_unknown_vector_target(self) -> None:
-        service = EpisodeRetrievalService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
-
-        with self.assertRaisesRegex(ValueError, "summary"):
-            service.vector_search("chargers", target="semantic_fact")
-
 
 class PersonRecognitionServiceTest(unittest.TestCase):
     def test_face_search_uses_person_face_index(self) -> None:
@@ -256,7 +243,6 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
             results=[
                 [{"person_id": "person_jamie", "display_name": "Jamie"}],
                 [],
-                [],
             ]
         )
         service = PersonContextRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
@@ -264,8 +250,7 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         markdown = service.markdown_for_person("person_jamie", semantic_scope=" chargers ")
 
         self.assertEqual(markdown, "no episodes matched the semantic scope: chargers")
-        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[1].query)
-        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[2].query)
+        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[1].query)
         self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
         self.assertTrue(all("ORDER BY e.start_time DESC" not in query.query for query in runner.queries[1:]))
 
@@ -277,7 +262,7 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
                     {
                         "item_id": "episode_1",
                         "item_type": "episode",
-                        "text": "Summary: Jamie asked about chargers.\nTranscript:\nJamie: Any chargers?",
+                        "text": "Jamie: Any chargers?",
                         "start_time": "2026-06-16T14:00:00+00:00",
                         "end_time": None,
                         "building_code": "MAIN",
@@ -287,7 +272,6 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
                         "score": 0.8819,
                     }
                 ],
-                [],
             ]
         )
         service = PersonContextRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
@@ -342,7 +326,7 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         assert source is not None
         self.assertEqual(source.person_id, "person_jamie")
         self.assertEqual([item.item_id for item in source.items], ["event_1", "episode_1"])
-        self.assertIn("Transcript", runner.queries[1].query)
+        self.assertIn("e.transcript AS transcript", runner.queries[1].query)
         self.assertIn("PARTICIPATED_IN", runner.queries[1].query)
         self.assertIn("type(r) = 'ATTENDED'", runner.queries[2].query)
         self.assertIn("properties(r) AS rel_props", runner.queries[2].query)
@@ -356,8 +340,6 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
                         "item_id": "episode_1",
                         "item_type": "episode",
                         "text": (
-                            "Summary: Asha: Can someone review this?\n"
-                            "Transcript:\n"
                             "[2026-06-16T14:00:00+00:00] Asha: Can someone review this today?\n"
                             "[2026-06-16T14:05:00+00:00] Jamie: I reviewed it."
                         ),
@@ -394,7 +376,7 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
                     {
                         "item_id": "episode_1",
                         "item_type": "episode",
-                        "text": "Summary: Jamie asked about chargers.\nTranscript:\nJamie: Any chargers?",
+                        "text": "Jamie: Any chargers?",
                         "start_time": "2026-06-16T14:00:00+00:00",
                         "end_time": None,
                         "building_code": "MAIN",
@@ -406,7 +388,7 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
                     {
                         "item_id": "episode_2",
                         "item_type": "episode",
-                        "text": "Summary: Jamie found USB-C adapters.\nTranscript:\nJamie: I found the adapters.",
+                        "text": "Jamie: I found the adapters.",
                         "start_time": "2026-06-16T15:00:00+00:00",
                         "end_time": None,
                         "building_code": "MAIN",
@@ -416,20 +398,6 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
                         "score": 0.88,
                     },
                 ],
-                [
-                    {
-                        "item_id": "episode_1",
-                        "item_type": "episode",
-                        "text": "Summary: Jamie asked about chargers.\nTranscript:\nJamie: Any chargers?",
-                        "start_time": "2026-06-16T14:00:00+00:00",
-                        "end_time": None,
-                        "building_code": "MAIN",
-                        "room_id": "101",
-                        "role": "speaker",
-                        "source": "caller",
-                        "score": 0.96,
-                    }
-                ],
             ]
         )
         service = PersonContextRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
@@ -438,14 +406,12 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
 
         self.assertIsNotNone(source)
         assert source is not None
-        self.assertEqual([item.item_id for item in source.items], ["episode_1", "episode_2"])
-        self.assertEqual([item.score for item in source.items], [0.96, 0.88])
-        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[1].query)
-        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[2].query)
+        self.assertEqual([item.item_id for item in source.items], ["episode_2", "episode_1"])
+        self.assertEqual([item.score for item in source.items], [0.88, 0.72])
+        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[1].query)
         self.assertEqual(runner.queries[1].parameters["person_id"], "person_jamie")
         self.assertEqual(runner.queries[1].parameters["limit"], 10)
         self.assertEqual(runner.queries[1].parameters["candidate_limit"], 50)
-        self.assertEqual(runner.queries[1].parameters["embedding"], runner.queries[2].parameters["embedding"])
         self.assertTrue(all("db.index.vector.queryNodes" in query.query for query in runner.queries[1:]))
         self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
 

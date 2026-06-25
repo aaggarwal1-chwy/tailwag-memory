@@ -51,7 +51,6 @@ class EpisodeInput:
     episode_type: str
     start_time: str
     end_time: str | None
-    summary: str
     transcript: str
     retention_class: str
     place: PlaceInput
@@ -68,7 +67,6 @@ class EpisodeInput:
             episode_type=payload["episode_type"],
             start_time=payload["start_time"],
             end_time=payload.get("end_time"),
-            summary=payload["summary"],
             transcript=payload["transcript"],
             retention_class=payload["retention_class"],
             place=PlaceInput(
@@ -147,7 +145,6 @@ class SearchQuery:
     building_code: str | None = None
     room_id: str | None = None
     limit: int = 10
-    target: str = "summary"
 
 
 @dataclass(frozen=True)
@@ -155,7 +152,6 @@ class EpisodeMemoryResult:
     """Episode search result with optional vector score."""
 
     episode_id: str
-    summary: str
     transcript: str
     score: float | None = None
 

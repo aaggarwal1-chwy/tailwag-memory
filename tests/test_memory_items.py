@@ -21,10 +21,9 @@ from tailwag_memory.models import EpisodeInput, MemoryItemInput, MemoryItemResul
 def _seed_row(episode_id: str) -> dict[str, object]:
     return {
         "episode_id": episode_id,
-        "summary": f"Jamie mentioned robot demos in {episode_id}.",
         "transcript": f"Jamie: robot demos help me understand memory systems. ({episode_id})",
         "start_time": f"2026-06-1{episode_id[-1]}T10:00:00+00:00",
-        "summary_embedding": [0.1] * 8,
+        "transcript_embedding": [0.1] * 8,
     }
 
 
@@ -602,7 +601,7 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
             [item["episode_id"] for item in provider.calls[0]["episode_clusters"][0]],
             ["ep1", "ep2", "ep3", "ep4"],
         )
-        self.assertIn("db.index.vector.queryNodes('episode_summary_embedding'", runner.queries[1].query)
+        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[1].query)
         memory_query = [query for query in runner.queries if "MERGE (m:MemoryItem" in query.query][-1]
         self.assertEqual(memory_query.parameters["source_ref"], "consolidation")
         link_query = runner.queries[-1]
@@ -1018,7 +1017,9 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
                 [
                     {
                         "episode_id": "episode_1",
-                        "summary": "Jamie mentioned Luna had a vet visit tomorrow.",
+                        "person_id": "person_jamie",
+                        "display_name": "Jamie",
+                        "transcript": "Jamie: Luna has a vet visit tomorrow.\nCasey: I can drive.",
                         "start_time": "2026-06-16T14:00:00+00:00",
                     }
                 ],
@@ -1040,7 +1041,8 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
         self.assertIn("Facts:", markdown)
         self.assertIn("- working on robot social memory extraction", markdown)
         self.assertIn("Recent Episodes:", markdown)
-        self.assertIn("- 2026-06-16: Jamie mentioned Luna had a vet visit tomorrow.", markdown)
+        self.assertIn("- 2026-06-16: Jamie: Luna has a vet visit tomorrow.", markdown)
+        self.assertNotIn("Casey: I can drive.", markdown)
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Preferences:"))
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Facts:"))
         self.assertLess(markdown.index("Facts:"), markdown.index("Recent Episodes:"))
@@ -1057,9 +1059,10 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
                         "episode_id": "episode_1",
                         "item_id": "episode_1",
                         "item_type": "episode",
-                        "summary": "Jamie mentioned Luna had a vet visit tomorrow.",
-                        "transcript": "Jamie: Luna has a vet visit tomorrow.",
-                        "text": "Summary: Jamie mentioned Luna had a vet visit tomorrow.\nTranscript:\nJamie: Luna has a vet visit tomorrow.",
+                        "person_id": "person_jamie",
+                        "display_name": "Jamie",
+                        "transcript": "Assistant: Do you need anything?\nJamie: Luna has a vet visit tomorrow.",
+                        "text": "Assistant: Do you need anything?\nJamie: Luna has a vet visit tomorrow.",
                         "start_time": "2026-06-16T14:00:00+00:00",
                     }
                 ],
@@ -1070,10 +1073,56 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
         markdown = service.markdown_for_person(" person_jamie ", recent_episode_limit=2)
 
         self.assertIn("Recent Episodes:", markdown)
-        self.assertIn("- 2026-06-16: Jamie mentioned Luna had a vet visit tomorrow.", markdown)
+        self.assertIn("- 2026-06-16: Jamie: Luna has a vet visit tomorrow.", markdown)
+        self.assertNotIn("Assistant: Do you need anything?", markdown)
         self.assertEqual(runner.queries[1].parameters, {"person_id": "person_jamie", "limit": 2})
         self.assertIn("e.id AS episode_id", runner.queries[1].query)
         self.assertIn("'episode' AS item_type", runner.queries[1].query)
+
+    def test_markdown_for_person_matches_person_id_speaker_when_display_name_is_missing(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [],
+                [
+                    {
+                        "episode_id": "episode_1",
+                        "person_id": "person_jamie",
+                        "display_name": None,
+                        "transcript": "person_jamie: I like robot demos.\nAssistant: Noted.",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                    }
+                ],
+            ]
+        )
+        service = PersonMemoryContextService(runner)
+
+        markdown = service.markdown_for_person("person_jamie", recent_episode_limit=1)
+
+        self.assertIn("- 2026-06-16: person_jamie: I like robot demos.", markdown)
+        self.assertNotIn("Assistant: Noted.", markdown)
+
+    def test_markdown_for_person_splits_single_line_speaker_turns(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [],
+                [
+                    {
+                        "episode_id": "episode_1",
+                        "person_id": "person_jamie",
+                        "display_name": "Jamie",
+                        "speaker_labels": ["Jamie", "Assistant"],
+                        "transcript": "Jamie: Do we have chargers? Assistant: They are at the desk.",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                    }
+                ],
+            ]
+        )
+        service = PersonMemoryContextService(runner)
+
+        markdown = service.markdown_for_person("person_jamie", recent_episode_limit=1)
+
+        self.assertIn("- 2026-06-16: Jamie: Do we have chargers?", markdown)
+        self.assertNotIn("Assistant: They are at the desk.", markdown)
 
 
 class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
@@ -1104,7 +1153,6 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-18T10:00:00+00:00",
             end_time=None,
-            summary="Jamie and Casey discussed robot demos.",
             transcript="Jamie: I like robot demos.\nCasey: I prefer quiet greetings.",
             retention_class="standard",
             place=PlaceInput(building_code="MAIN", room_id="101"),
@@ -1138,7 +1186,6 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-18T10:00:00+00:00",
             end_time=None,
-            summary="User: I like robot demos. Assistant: Noted.",
             transcript="User: I like robot demos.\nAssistant: Noted.",
             retention_class="standard",
             place=PlaceInput(building_code="ARGOS", room_id="realtime"),
@@ -1166,7 +1213,6 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
                         "id": "episode_1",
                         "episode_type": "conversation",
                         "start_time": "2026-06-18T10:00:00+00:00",
-                        "summary": "Jamie spoke.",
                         "transcript": "Jamie: hello",
                         "retention_class": "standard",
                         "building_code": "MAIN",
@@ -1205,7 +1251,6 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
                         "id": "episode_1",
                         "episode_type": "conversation",
                         "start_time": "2026-06-18T10:00:00+00:00",
-                        "summary": "User: I like robot demos. Assistant: Noted.",
                         "transcript": "User: I like robot demos.\nAssistant: Noted.",
                         "retention_class": "standard",
                         "building_code": "ARGOS",
@@ -1245,7 +1290,6 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
             episode_type="conversation",
             start_time="2026-06-18T10:00:00+00:00",
             end_time=None,
-            summary="Jamie and Casey spoke.",
             transcript="Jamie: hello\nCasey: hello",
             retention_class="standard",
             place=PlaceInput(building_code="MAIN", room_id="101"),
@@ -1296,7 +1340,6 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
                 episode_type="conversation",
                 start_time="2026-06-16T10:00:00+00:00",
                 end_time=None,
-                summary="Jamie likes hands-on robot demos.",
                 transcript="Jamie: I like hands-on robot demos.",
                 retention_class="standard",
                 place=PlaceInput(building_code="MAIN", room_id="101"),
@@ -1415,7 +1458,6 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
                 episode_type="conversation",
                 start_time="2026-06-17T10:00:00+00:00",
                 end_time=None,
-                summary="Jamie still likes robot demos.",
                 transcript="Jamie: I still like robot demos.",
                 retention_class="standard",
                 place=PlaceInput(building_code="MAIN", room_id="101"),
@@ -1458,7 +1500,6 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
                 episode_type="conversation",
                 start_time="2026-06-17T10:00:00+00:00",
                 end_time=None,
-                summary="Jamie works on robot memory.",
                 transcript="Jamie: I work on robot memory.",
                 retention_class="standard",
                 place=PlaceInput(building_code="MAIN", room_id="101"),
@@ -1535,7 +1576,6 @@ class OpenAIMemoryConsolidationProviderTest(unittest.TestCase):
                 [
                     {
                         "episode_id": "ep1",
-                        "summary": "Jamie likes robot demos.",
                         "transcript": "Jamie: I like robot demos.",
                         "start_time": "2026-06-18T10:00:00+00:00",
                         "end_time": "",

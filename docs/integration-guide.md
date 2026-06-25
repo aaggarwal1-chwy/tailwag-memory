@@ -70,7 +70,7 @@ The consuming system should provide:
 - person identity and re-enrollment decisions
 - consent status and retention policy
 - face/audio embeddings from upstream recognition models, when available
-- raw transcript, summary, place, participant, and event payloads
+- raw transcript, place, participant, and event payloads
 - Slack channel IDs and bot credentials when using Slack ingestion
 
 Tailwag provides:

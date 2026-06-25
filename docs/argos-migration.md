@@ -146,7 +146,6 @@ episode = EpisodeInput(
     episode_type="conversation",
     start_time="2026-06-16T14:00:00+00:00",
     end_time=None,
-    summary="Jamie prefers Spanish and likes hands-on robot demos.",
     transcript="Jamie: I prefer Spanish and like hands-on robot demos.",
     retention_class="standard",
     place=PlaceInput(building_code="MAIN", room_id="101"),
@@ -184,7 +183,7 @@ High-level episode recording checks every participant. Existing-episode extracti
 
 ## Person Context Shape
 
-Argos prompt code should treat Tailwag `person_context()` output as prompt-ready text, not as a structured schema. The context includes durable memory sections, visible follow-ups, and bounded recent episode lines when available.
+Argos prompt code should treat Tailwag `person_context()` output as prompt-ready text, not as a structured schema. The context includes durable memory sections, visible follow-ups, and bounded recent transcript lines spoken by the target person when available.
 
 ```python
 from tailwag_memory import TailwagMemoryClient
@@ -214,7 +213,7 @@ tailwag memory consolidate --person-id person_jamie
 tailwag memory consolidate --all --person-limit 100
 ```
 
-The consolidation pass uses Neo4j episode summary vector search to reduce candidate evidence before calling OpenAI. It stays person-scoped, validates provider-supplied supporting episode IDs, and writes only `MemoryItem`, `SUPPORTED_BY`, and `SUPERSEDED_BY` records. It is not the deferred asynchronous semantic consolidation queue/orchestrator and does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
+The consolidation pass uses Neo4j episode transcript vector search to reduce candidate evidence before calling OpenAI. It stays person-scoped, validates provider-supplied supporting episode IDs, and writes only `MemoryItem`, `SUPPORTED_BY`, and `SUPERSEDED_BY` records. It is not the deferred asynchronous semantic consolidation queue/orchestrator and does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
 
 ## Migration Checklist
 

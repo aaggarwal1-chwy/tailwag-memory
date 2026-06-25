@@ -3,7 +3,6 @@
   "episode_type": "conversation",
   "start_time": "2026-06-15T15:00:00+00:00",
   "end_time": "2026-06-15T15:02:00+00:00",
-  "summary": "Jamie asked whether room 101 has spare laptop chargers.",
   "transcript": "Jamie: Are there spare laptop chargers in room 101? Assistant: The spare chargers are usually at the front desk.",
   "retention_class": "standard",
   "place": {

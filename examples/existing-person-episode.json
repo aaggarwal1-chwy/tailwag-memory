@@ -3,7 +3,6 @@
   "episode_type": "conversation",
   "start_time": "2026-06-16T16:00:00+00:00",
   "end_time": "2026-06-16T16:02:00+00:00",
-  "summary": "Jamie asked whether the projector was ready.",
   "transcript": "Jamie: Is the projector ready for the review? Assistant: Yes, it is connected and ready.",
   "retention_class": "standard",
   "place": {

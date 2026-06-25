@@ -2,7 +2,6 @@ from __future__ import annotations
 
 
 _VECTOR_INDEX_LABELS = {
-    "episode_summary_embedding": "Episode",
     "episode_transcript_embedding": "Episode",
     "person_face_embedding": "Person",
     "person_audio_embedding": "Person",
