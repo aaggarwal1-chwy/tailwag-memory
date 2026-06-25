@@ -83,6 +83,8 @@ Argos should pass canonical person IDs that match Tailwag's current canonical Sl
 
 Enroll or refresh a known person profile:
 
+When consented Argos biometric vectors are available, pass them as caller-owned values:
+
 ```python
 from tailwag_memory import PersonInput, TailwagMemoryClient
 
@@ -91,8 +93,8 @@ person = PersonInput(
     display_name="Jamie",
     email="jamie@example.com",
     consent_status="consented",
-    face_embedding=[0.01] * 64,
-    audio_embedding=[0.02] * 64,
+    face_embedding=argos_face_vector,
+    audio_embedding=argos_audio_vector,
 )
 
 with TailwagMemoryClient.from_env() as memory:

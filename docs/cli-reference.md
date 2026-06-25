@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The `tailwag` command supports local schema setup, demo data, ingestion, retrieval, source-adapter polling, and memory maintenance. This reference lists command shapes for local development and smoke testing. For Python package APIs, see [Memory Endpoints Reference](memory-endpoints.md).
+The `tailwag` command supports local schema setup, ingestion, retrieval, source-adapter polling, and memory maintenance. This reference lists command shapes for local development and smoke testing. For Python package APIs, see [Memory Endpoints Reference](memory-endpoints.md).
 
 Most commands require Neo4j configuration. Commands that create episode embeddings, run memory extraction, run consolidation, or perform OpenAI-backed vector search also require OpenAI configuration.
 
@@ -14,13 +14,7 @@ Initialize the Neo4j schema:
 tailwag schema init
 ```
 
-Seed demo data:
-
-```bash
-tailwag seed demo
-```
-
-Wipe all Neo4j data before re-seeding:
+Wipe all Neo4j data before re-running local examples:
 
 ```bash
 tailwag db wipe --yes
@@ -76,8 +70,8 @@ tailwag person context --person-id person_jamie --memory-limit 8 --recent-episod
 Search people by caller-supplied biometric vectors:
 
 ```bash
-tailwag person search-face --embedding-file examples/face-embedding.json
-tailwag person search-audio --embedding-file examples/audio-embedding.json
+tailwag person search-face --embedding-file path/to/face-vector.json
+tailwag person search-audio --embedding-file path/to/audio-vector.json
 ```
 
 ## Memory Maintenance

@@ -84,6 +84,15 @@ class CliTest(unittest.TestCase):
         self.assertTrue(runner.closed)
         self.assertIn("Neo4j data wiped.", stdout.getvalue())
 
+    def test_seed_demo_command_is_not_available(self) -> None:
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                main(["seed", "demo"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("invalid choice", stderr.getvalue())
+
     def test_slack_force_backfill_requires_backfill_hours(self) -> None:
         stderr = StringIO()
         with redirect_stderr(stderr):
@@ -415,31 +424,6 @@ class CliTest(unittest.TestCase):
         self.assertIn("[PERSON MEMORY]", stdout.getvalue())
         self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
         self.assertTrue(runner.closed)
-
-    def test_seed_demo_uses_mock_embeddings(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=8,
-        )
-        runner = FakeRunner(settings)
-        calls = []
-
-        def fake_seed(runner_arg, embeddings) -> None:
-            calls.append((runner_arg, embeddings.embed("demo")))
-
-        with patch("tailwag_memory.cli.load_settings", return_value=settings):
-            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                with patch("tailwag_memory.demo.seed_demo", fake_seed):
-                    stdout = StringIO()
-                    with redirect_stdout(stdout):
-                        exit_code = main(["seed", "demo"])
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(calls[0][0], runner)
-        self.assertEqual(len(calls[0][1]), 8)
-        self.assertIn("Demo data seeded.", stdout.getvalue())
 
     def test_episode_create_help_mentions_memory_extraction(self) -> None:
         stdout = StringIO()

@@ -10,7 +10,7 @@ from typing import Sequence
 from .client import TailwagMemoryClient
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
-from .embeddings import MockOpenAIEmbeddingProvider, OpenAIEmbeddingProvider
+from .embeddings import OpenAIEmbeddingProvider
 from .ingestion import EventIngestionService
 from .memory_items import (
     DEFAULT_CONSOLIDATION_CLUSTER_LIMIT,
@@ -51,10 +51,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="confirm destructive deletion of all Neo4j nodes and relationships",
     )
-
-    seed_parser = subparsers.add_parser("seed")
-    seed_subparsers = seed_parser.add_subparsers(dest="seed_command", required=True)
-    seed_subparsers.add_parser("demo", help="seed deterministic local demo data")
 
     episode_parser = subparsers.add_parser("episode")
     episode_subparsers = episode_parser.add_subparsers(dest="episode_command", required=True)
@@ -183,13 +179,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "db":
             runner.run("MATCH (n) DETACH DELETE n")
             print("Neo4j data wiped.")
-            return 0
-
-        if args.command == "seed":
-            from .demo import seed_demo
-
-            seed_demo(runner, MockOpenAIEmbeddingProvider(dimension=settings.embedding_dimension))
-            print("Demo data seeded.")
             return 0
 
         if args.command == "episode":
