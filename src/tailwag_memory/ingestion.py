@@ -6,6 +6,75 @@ from .episode_normalization import normalize_robot_speaker_labels
 from .models import EpisodeInput, EventInput, PersonInput, utc_now_iso
 
 
+def _normalize_email(email: str | None) -> str | None:
+    """Return the stable email identity key used by Neo4j uniqueness."""
+    if email is None:
+        return None
+    normalized = str(email).strip().lower()
+    return normalized or None
+
+
+def _resolved_person_id_by_email(
+    runner: QueryRunner,
+    email: object,
+    incoming_id: str,
+    *,
+    updated_at: str | None = None,
+) -> str | None:
+    """Return the existing or safely rekeyed person ID for a normalized email value."""
+    if not email or not incoming_id:
+        return None
+    rows = runner.run(
+        """
+        MATCH (p:Person {email: $email})
+        WITH collect(p) AS matches
+        WHERE size(matches) = 1
+        WITH matches[0] AS p
+        OPTIONAL MATCH (target:Person {id: $incoming_id})
+        WITH p, target
+        WHERE p.id = $incoming_id
+            OR NOT (p.id STARTS WITH 'slack:' AND $incoming_id STARTS WITH 'person_')
+            OR target IS NULL
+            OR target = p
+        WITH p, p.id STARTS WITH 'slack:' AND $incoming_id STARTS WITH 'person_' AND (target IS NULL OR target = p) AS should_rekey
+        SET p.id = CASE WHEN should_rekey THEN $incoming_id ELSE p.id END,
+            p.updated_at = CASE WHEN should_rekey THEN coalesce($updated_at, p.updated_at) ELSE p.updated_at END
+        RETURN p.id AS person_id
+        """,
+        {
+            "email": email,
+            "incoming_id": incoming_id,
+            "updated_at": updated_at,
+        },
+    )
+    if not rows:
+        return None
+
+    resolved_id = str(rows[0].get("person_id") or "").strip()
+    if not resolved_id:
+        return None
+    return resolved_id
+
+
+def _resolve_person_data_by_email(
+    runner: QueryRunner,
+    person_data: dict[str, object],
+    *,
+    updated_at: str | None = None,
+) -> dict[str, object]:
+    """Resolve incoming person data to an existing same-email person when present."""
+    incoming_id = str(person_data.get("id") or "").strip()
+    resolved_id = _resolved_person_id_by_email(
+        runner,
+        person_data.get("email"),
+        incoming_id,
+        updated_at=updated_at,
+    )
+    if resolved_id is None:
+        return person_data
+    return {**person_data, "id": resolved_id}
+
+
 def _person_upsert_cypher(
     person_variable: str,
     id_property: str,
@@ -66,13 +135,14 @@ class PersonIngestionService:
         person_data = {
             "id": person.id,
             "display_name": person.display_name,
-            "email": person.email,
+            "email": _normalize_email(person.email),
             "consent_status": person.consent_status,
             "face_embedding": person.face_embedding,
             "audio_embedding": person.audio_embedding,
         }
+        person_data = _resolve_person_data_by_email(self.runner, person_data, updated_at=written_at)
 
-        self.runner.run(
+        rows = self.runner.run(
             """
             WITH $person AS person
             """
@@ -94,7 +164,9 @@ class PersonIngestionService:
             },
         )
 
-        return person.id
+        if not rows:
+            return str(person_data["id"])
+        return str(rows[0].get("person_id") or person_data["id"])
 
     def archive(self, person_id: str) -> bool:
         """Archive a person by id while preserving profile fields and relationships."""
@@ -126,29 +198,13 @@ class PersonIngestionService:
         if not rendered_person_id:
             raise ValueError("new_person_id is required")
 
-        written_at = utc_now_iso()
-        rows = self.runner.run(
-            """
-            MATCH (p:Person)
-            WHERE p.email IS NOT NULL AND toLower(trim(p.email)) = toLower($email)
-            WITH collect(p) AS matches
-            WHERE size(matches) = 1
-            WITH matches[0] AS p
-            WHERE p.id = $new_person_id OR p.id STARTS WITH 'slack:'
-            OPTIONAL MATCH (existing:Person {id: $new_person_id})
-            WITH p, existing
-            WHERE existing IS NULL OR existing = p
-            SET p.id = $new_person_id,
-                p.updated_at = $updated_at
-            RETURN p.id AS person_id
-            """,
-            {
-                "email": rendered_email,
-                "new_person_id": rendered_person_id,
-                "updated_at": written_at,
-            },
+        resolved_id = _resolved_person_id_by_email(
+            self.runner,
+            _normalize_email(rendered_email),
+            rendered_person_id,
+            updated_at=utc_now_iso(),
         )
-        return bool(rows)
+        return resolved_id == rendered_person_id
 
     def canonical_id_by_email(self, email: str) -> str | None:
         """Return one canonical Argos person id for an email when unambiguous."""
@@ -159,14 +215,13 @@ class PersonIngestionService:
         rows = self.runner.run(
             """
             MATCH (p:Person)
-            WHERE p.email IS NOT NULL
-                AND toLower(trim(p.email)) = toLower($email)
+            WHERE p.email = $email
                 AND p.id STARTS WITH 'person_'
             WITH collect(DISTINCT p.id) AS person_ids
             WHERE size(person_ids) = 1
             RETURN person_ids[0] AS person_id
             """,
-            {"email": rendered_email},
+            {"email": _normalize_email(rendered_email)},
         )
         if not rows:
             return None
@@ -187,18 +242,26 @@ class EpisodeIngestionService:
         written_at = utc_now_iso()
         transcript_embedding = self.embeddings.embed(episode.transcript)
         participants = [
-            {
-                "id": person.id,
-                "display_name": person.display_name,
-                "email": person.email,
-                "consent_status": person.consent_status,
-                "face_embedding": person.face_embedding,
-                "audio_embedding": person.audio_embedding,
-                "role": person.role,
-                "source": person.source,
-            }
+            _resolve_person_data_by_email(
+                self.runner,
+                {
+                    "id": person.id,
+                    "display_name": person.display_name,
+                    "email": _normalize_email(person.email),
+                    "consent_status": person.consent_status,
+                    "face_embedding": person.face_embedding,
+                    "audio_embedding": person.audio_embedding,
+                    "role": person.role,
+                    "source": person.source,
+                },
+                updated_at=written_at,
+            )
             for person in episode.participants
         ]
+
+        participant_ids = [str(person["id"]) for person in participants]
+        for person, participant_id in zip(participants, participant_ids, strict=True):
+            person["id"] = participant_id
 
         self.runner.run(
             """
@@ -230,23 +293,23 @@ class EpisodeIngestionService:
                 SET r.role = person.role,
                     r.source = person.source
                 """,
-                {
-                    "id": episode.id,
-                    "episode_type": episode.episode_type,
-                    "start_time": episode.start_time,
-                    "end_time": episode.end_time,
-                    "transcript": episode.transcript,
-                    "retention_class": episode.retention_class,
-                    "transcript_embedding": transcript_embedding,
-                    "building_code": episode.place.building_code,
-                    "room_id": episode.place.room_id,
-                    "participants": participants,
-                    "participant_ids": [person["id"] for person in participants],
-                    "created_at": written_at,
-                    "updated_at": written_at,
-                    "last_seen": episode.end_time or episode.start_time,
-                },
-            )
+            {
+                "id": episode.id,
+                "episode_type": episode.episode_type,
+                "start_time": episode.start_time,
+                "end_time": episode.end_time,
+                "transcript": episode.transcript,
+                "retention_class": episode.retention_class,
+                "transcript_embedding": transcript_embedding,
+                "building_code": episode.place.building_code,
+                "room_id": episode.place.room_id,
+                "participants": participants,
+                "participant_ids": participant_ids,
+                "created_at": written_at,
+                "updated_at": written_at,
+                "last_seen": episode.end_time or episode.start_time,
+            },
+        )
 
         return episode.id
 
@@ -262,19 +325,28 @@ class EventIngestionService:
         """Write an event graph snapshot and return its id."""
         written_at = utc_now_iso()
         attendees = [
-            {
-                "person_id": attendee.person.id,
-                "display_name": attendee.person.display_name,
-                "email": attendee.person.email,
-                "consent_status": attendee.person.consent_status,
-                "face_embedding": attendee.person.face_embedding,
-                "audio_embedding": attendee.person.audio_embedding,
-                "source": attendee.source,
-                "response": attendee.response,
-                "response_time": attendee.response_time,
-            }
+            _resolve_person_data_by_email(
+                self.runner,
+                {
+                    "person_id": attendee.person.id,
+                    "id": attendee.person.id,
+                    "display_name": attendee.person.display_name,
+                    "email": _normalize_email(attendee.person.email),
+                    "consent_status": attendee.person.consent_status,
+                    "face_embedding": attendee.person.face_embedding,
+                    "audio_embedding": attendee.person.audio_embedding,
+                    "source": attendee.source,
+                    "response": attendee.response,
+                    "response_time": attendee.response_time,
+                },
+                updated_at=written_at,
+            )
             for attendee in event.accepted_attendees
         ]
+
+        attendee_ids = [str(attendee["id"]) for attendee in attendees]
+        for attendee, attendee_id in zip(attendees, attendee_ids, strict=True):
+            attendee["person_id"] = attendee_id
 
         self.runner.run(
             """
@@ -304,19 +376,19 @@ class EventIngestionService:
                     r.response = attendee.response,
                     r.response_time = attendee.response_time
                 """,
-                {
-                    "id": event.id,
-                    "description": event.description,
-                    "start_time": event.start_time,
-                    "end_time": event.end_time,
-                    "building_code": event.place.building_code,
-                    "room_id": event.place.room_id,
-                    "attendees": attendees,
-                    "attendee_ids": [attendee["person_id"] for attendee in attendees],
-                    "created_at": written_at,
-                    "updated_at": written_at,
-                    "last_seen": event.end_time or event.start_time,
-                },
-            )
+            {
+                "id": event.id,
+                "description": event.description,
+                "start_time": event.start_time,
+                "end_time": event.end_time,
+                "building_code": event.place.building_code,
+                "room_id": event.place.room_id,
+                "attendees": attendees,
+                "attendee_ids": attendee_ids,
+                "created_at": written_at,
+                "updated_at": written_at,
+                "last_seen": event.end_time or event.start_time,
+            },
+        )
 
         return event.id

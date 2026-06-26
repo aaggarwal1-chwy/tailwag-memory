@@ -125,7 +125,7 @@ with TailwagMemoryClient.from_env() as memory:
 
 `rekey_person_by_email()` changes one Slack-owned temporary `Person.id` property in place. Existing Slack episodes, events, and memory items stay attached to the same graph node. Existing `MemoryItem.id` values are not renamed, so Argos should treat memory IDs as opaque stable IDs and use person-scoped Tailwag APIs plus graph relationships after rekey.
 
-The method returns `False` when email does not identify exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when the canonical ID is already used by a different `Person` node. Argos should treat these cases as identity-review work, not auto-merge work.
+The method returns `False` when email does not identify exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when the canonical ID is already used by a different `Person` node. Tailwag stores `Person.email` as `lower(trim(email))` with a Neo4j uniqueness constraint, and normal ingestion uses that email to attach same-person writes instead of creating duplicates.
 
 Archive a person when Argos needs to retire an identity or revoke biometric recognition:
 

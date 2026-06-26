@@ -68,8 +68,10 @@ class PersonIngestionServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(person_id, "person_external_jamie")
-        self.assertEqual(len(runner.queries), 1)
-        query = runner.queries[0]
+        self.assertEqual(len(runner.queries), 2)
+        self.assertIn("MATCH (p:Person {email: $email})", runner.queries[0].query)
+        self.assertEqual(runner.queries[0].parameters["incoming_id"], "person_external_jamie")
+        query = runner.queries[1]
         self.assertEqual(query.parameters["person"]["id"], "person_external_jamie")
         self.assertEqual(query.parameters["person"]["display_name"], "Jamie")
         self.assertEqual(query.parameters["person"]["email"], "jamie@example.com")
@@ -100,6 +102,31 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertNotIn("org_id", text)
         self.assertNotIn("identity_status", text)
         self.assertNotIn("confidence", text)
+
+    def test_upsert_stores_normalized_email_value_for_unique_identity_constraint(self) -> None:
+        runner = RecordingQueryRunner()
+        service = PersonIngestionService(runner)
+
+        service.upsert(PersonInput(id="person_external_jamie", email=" Jamie.Example@Example.COM "))
+
+        query = runner.queries[1]
+        self.assertEqual(query.parameters["person"]["email"], "jamie.example@example.com")
+        self.assertIn("p.email = coalesce(person.email, p.email)", query.query)
+
+    def test_upsert_rekeys_slack_email_match_to_incoming_argos_id(self) -> None:
+        runner = RecordingQueryRunner(results=[[{"person_id": "person_jamie"}], [{"person_id": "person_jamie"}]])
+        service = PersonIngestionService(runner)
+
+        person_id = service.upsert(PersonInput(id="person_jamie", email="jamie@example.com"))
+
+        self.assertEqual(person_id, "person_jamie")
+        resolve_query = runner.queries[0]
+        self.assertEqual(resolve_query.parameters["email"], "jamie@example.com")
+        self.assertEqual(resolve_query.parameters["incoming_id"], "person_jamie")
+        self.assertIn("p.id STARTS WITH 'slack:'", resolve_query.query)
+        self.assertIn("$incoming_id STARTS WITH 'person_'", resolve_query.query)
+        self.assertIn("THEN $incoming_id", resolve_query.query)
+        self.assertEqual(runner.queries[1].parameters["person"]["id"], "person_jamie")
 
     def test_archive_updates_lifecycle_and_clears_biometrics(self) -> None:
         runner = RecordingQueryRunner(results=[[{"person_id": "person_external_jamie"}]])
@@ -145,17 +172,17 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertTrue(rekeyed)
         self.assertEqual(len(runner.queries), 1)
         query = runner.queries[0]
-        self.assertEqual(query.parameters["email"], "jamie@example.com")
-        self.assertEqual(query.parameters["new_person_id"], "person_argos_jamie")
+        self.assertEqual(query.parameters["incoming_id"], "person_argos_jamie")
         self.assertIn("updated_at", query.parameters)
-        self.assertIn("toLower(trim(p.email)) = toLower($email)", query.query)
+        self.assertEqual(query.parameters["email"], "jamie@example.com")
+        self.assertIn("MATCH (p:Person {email: $email})", query.query)
         self.assertIn("WITH collect(p) AS matches", query.query)
         self.assertIn("WHERE size(matches) = 1", query.query)
-        self.assertIn("WHERE p.id = $new_person_id OR p.id STARTS WITH 'slack:'", query.query)
-        self.assertIn("OPTIONAL MATCH (existing:Person {id: $new_person_id})", query.query)
-        self.assertIn("WHERE existing IS NULL OR existing = p", query.query)
-        self.assertIn("SET p.id = $new_person_id", query.query)
-        self.assertIn("p.updated_at = $updated_at", query.query)
+        self.assertIn("OPTIONAL MATCH (target:Person {id: $incoming_id})", query.query)
+        self.assertIn("p.id STARTS WITH 'slack:'", query.query)
+        self.assertIn("$incoming_id STARTS WITH 'person_'", query.query)
+        self.assertIn("SET p.id = CASE WHEN should_rekey THEN $incoming_id ELSE p.id END", query.query)
+        self.assertIn("p.updated_at = CASE WHEN should_rekey THEN coalesce($updated_at, p.updated_at) ELSE p.updated_at END", query.query)
         self.assertIn("RETURN p.id AS person_id", query.query)
         text = query.query + repr(query.parameters)
         self.assertNotIn("face_embedding", text)
@@ -191,7 +218,7 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertEqual(person_id, "person_argos_jamie")
         query = runner.queries[0]
         self.assertEqual(query.parameters["email"], "jamie@example.com")
-        self.assertIn("toLower(trim(p.email)) = toLower($email)", query.query)
+        self.assertIn("p.email = $email", query.query)
         self.assertIn("p.id STARTS WITH 'person_'", query.query)
         self.assertIn("WHERE size(person_ids) = 1", query.query)
 
@@ -210,26 +237,57 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         episode_id = service.ingest(_episode())
 
         self.assertEqual(episode_id, "episode_external_001")
-        self.assertEqual(len(runner.queries), 1)
-        self.assertEqual(runner.queries[0].parameters["id"], "episode_external_001")
-        self.assertEqual(runner.queries[0].parameters["building_code"], "MAIN")
-        self.assertEqual(runner.queries[0].parameters["room_id"], "101")
-        self.assertEqual(runner.queries[0].parameters["participant_ids"], ["person_external_jamie"])
-        self.assertEqual(runner.queries[0].parameters["updated_at"], runner.queries[0].parameters["created_at"])
-        participant = runner.queries[0].parameters["participants"][0]
+        self.assertEqual(len(runner.queries), 2)
+        query = runner.queries[1]
+        self.assertEqual(query.parameters["id"], "episode_external_001")
+        self.assertEqual(query.parameters["building_code"], "MAIN")
+        self.assertEqual(query.parameters["room_id"], "101")
+        self.assertEqual(query.parameters["participant_ids"], ["person_external_jamie"])
+        self.assertEqual(query.parameters["updated_at"], query.parameters["created_at"])
+        participant = query.parameters["participants"][0]
         self.assertEqual(participant["id"], "person_external_jamie")
         self.assertEqual(participant["email"], "jamie@example.com")
         self.assertEqual(participant["face_embedding"], [0.1] * 8)
         self.assertEqual(participant["audio_embedding"], [0.2] * 8)
-        self.assertEqual(runner.queries[0].parameters["last_seen"], "2026-06-15T10:05:00+00:00")
-        self.assertIn("DELETE old_place", runner.queries[0].query)
-        self.assertIn("DELETE old_rel", runner.queries[0].query)
-        self.assertIn("UNWIND $participants AS person", runner.queries[0].query)
-        self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", runner.queries[0].query)
-        self.assertIn("e.updated_at = $updated_at", runner.queries[0].query)
-        self.assertIn("p.display_name = coalesce(person.display_name, p.display_name)", runner.queries[0].query)
-        self.assertIn("datetime(p.last_seen) < datetime($last_seen)", runner.queries[0].query)
-        self.assertIn("person.consent_status <> 'consented'", runner.queries[0].query)
+        self.assertEqual(query.parameters["last_seen"], "2026-06-15T10:05:00+00:00")
+        self.assertIn("DELETE old_place", query.query)
+        self.assertIn("DELETE old_rel", query.query)
+        self.assertIn("UNWIND $participants AS person", query.query)
+        self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", query.query)
+        self.assertIn("e.updated_at = $updated_at", query.query)
+        self.assertIn("p.display_name = coalesce(person.display_name, p.display_name)", query.query)
+        self.assertIn("datetime(p.last_seen) < datetime($last_seen)", query.query)
+        self.assertIn("person.consent_status <> 'consented'", query.query)
+
+    def test_ingest_episode_attaches_slack_participant_to_existing_email_person(self) -> None:
+        runner = RecordingQueryRunner(results=[[{"person_id": "person_jamie"}]])
+        service = EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        service.ingest(
+            EpisodeInput(
+                id="episode_slack_001",
+                episode_type="conversation",
+                start_time="2026-06-15T10:00:00+00:00",
+                end_time="2026-06-15T10:05:00+00:00",
+                transcript="Jamie: Slack message.",
+                retention_class="standard",
+                place=PlaceInput(building_code="SLACK", room_id="C123"),
+                participants=[
+                    PersonInput(
+                        id="slack:U1",
+                        display_name="Jamie Slack",
+                        email="jamie@example.com",
+                        role="speaker",
+                        source="slack",
+                    )
+                ],
+            )
+        )
+
+        query = runner.queries[1]
+        self.assertEqual(query.parameters["participant_ids"], ["person_jamie"])
+        self.assertEqual(query.parameters["participants"][0]["id"], "person_jamie")
+        self.assertEqual(query.parameters["participants"][0]["source"], "slack")
 
     def test_ingest_normalizes_robot_user_label_before_storage_and_embeddings(self) -> None:
         class RecordingEmbeddingProvider:
@@ -302,7 +360,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
 
         service.ingest(episode)
 
-        self.assertEqual(runner.queries[0].parameters["last_seen"], "2026-06-15T10:00:00+00:00")
+        self.assertEqual(runner.queries[-1].parameters["last_seen"], "2026-06-15T10:00:00+00:00")
 
     def test_ingest_allows_existing_person_reference_by_id_only(self) -> None:
         runner = RecordingQueryRunner()
@@ -383,19 +441,48 @@ class EventIngestionServiceTest(unittest.TestCase):
         event_id = service.ingest(event)
 
         self.assertEqual(event_id, "event_external_002")
-        self.assertEqual(len(runner.queries), 1)
-        attendee = runner.queries[0].parameters["attendees"][0]
+        self.assertEqual(len(runner.queries), 2)
+        query = runner.queries[1]
+        attendee = query.parameters["attendees"][0]
         self.assertEqual(attendee["person_id"], "person_external_jamie")
         self.assertEqual(attendee["display_name"], "Jamie")
         self.assertEqual(attendee["email"], "jamie@example.com")
         self.assertEqual(attendee["consent_status"], "consented")
-        self.assertEqual(runner.queries[0].parameters["last_seen"], "2026-06-16T16:00:00+00:00")
+        self.assertEqual(query.parameters["last_seen"], "2026-06-16T16:00:00+00:00")
         self.assertEqual(attendee["source"], "outlook")
         self.assertEqual(attendee["response"], "accepted")
         self.assertEqual(attendee["response_time"], "2026-06-15T18:00:00+00:00")
-        self.assertIn("MERGE (p)-[r:ATTENDED]->(e)", runner.queries[0].query)
-        self.assertIn("p.email = coalesce(attendee.email, p.email)", runner.queries[0].query)
-        self.assertIn("attendee.consent_status <> 'consented'", runner.queries[0].query)
+        self.assertIn("MERGE (p)-[r:ATTENDED]->(e)", query.query)
+        self.assertIn("p.email = coalesce(attendee.email, p.email)", query.query)
+        self.assertIn("attendee.consent_status <> 'consented'", query.query)
+
+    def test_ingest_event_attaches_attendee_to_existing_email_person(self) -> None:
+        runner = RecordingQueryRunner(results=[[{"person_id": "person_jamie"}]])
+        service = EventIngestionService(runner)
+
+        service.ingest(
+            EventInput(
+                id="event_external_004",
+                description="Design review.",
+                start_time="2026-06-16T15:00:00+00:00",
+                end_time="2026-06-16T16:00:00+00:00",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                accepted_attendees=[
+                    EventAttendeeInput(
+                        person=PersonInput(
+                            id="slack:U1",
+                            display_name="Jamie Slack",
+                            email="jamie@example.com",
+                        ),
+                        source="slack",
+                    )
+                ],
+            )
+        )
+
+        query = runner.queries[1]
+        self.assertEqual(query.parameters["attendee_ids"], ["person_jamie"])
+        self.assertEqual(query.parameters["attendees"][0]["person_id"], "person_jamie")
 
     def test_ingest_event_uses_start_time_for_attendee_last_seen_when_end_time_is_missing(self) -> None:
         runner = RecordingQueryRunner()

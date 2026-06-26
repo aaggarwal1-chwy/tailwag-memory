@@ -23,11 +23,12 @@ class SchemaTest(unittest.TestCase):
     def test_schema_creates_expected_constraints_and_vector_indexes(self) -> None:
         statements = [_compact(statement) for statement in schema_statements(64)]
 
-        self.assertEqual(len(statements), 9)
+        self.assertEqual(len(statements), 10)
         self.assertEqual(
-            statements[:5],
+            statements[:6],
             [
                 "CREATE CONSTRAINT person_id IF NOT EXISTS FOR (p:Person) REQUIRE p.id IS UNIQUE",
+                "CREATE CONSTRAINT person_email IF NOT EXISTS FOR (p:Person) REQUIRE p.email IS UNIQUE",
                 "CREATE CONSTRAINT episode_id IF NOT EXISTS FOR (e:Episode) REQUIRE e.id IS UNIQUE",
                 "CREATE CONSTRAINT event_id IF NOT EXISTS FOR (e:Event) REQUIRE e.id IS UNIQUE",
                 "CREATE CONSTRAINT memory_item_id IF NOT EXISTS FOR (m:MemoryItem) REQUIRE m.id IS UNIQUE",
@@ -40,7 +41,7 @@ class SchemaTest(unittest.TestCase):
             ("person_audio_embedding", "Person", "audio_embedding"),
             ("memory_item_summary_embedding", "MemoryItem", "summary_embedding"),
         ]
-        for statement, (name, label, property_name) in zip(statements[5:], expected_indexes):
+        for statement, (name, label, property_name) in zip(statements[6:], expected_indexes):
             self.assertIn(f"CREATE VECTOR INDEX {name} IF NOT EXISTS", statement)
             self.assertIn(f"FOR (", statement)
             self.assertIn(f":{label}) ON", statement)

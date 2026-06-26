@@ -14,6 +14,10 @@ def schema_statements(embedding_dimension: int) -> list[str]:
         FOR (p:Person) REQUIRE p.id IS UNIQUE
         """,
         """
+        CREATE CONSTRAINT person_email IF NOT EXISTS
+        FOR (p:Person) REQUIRE p.email IS UNIQUE
+        """,
+        """
         CREATE CONSTRAINT episode_id IF NOT EXISTS
         FOR (e:Episode) REQUIRE e.id IS UNIQUE
         """,

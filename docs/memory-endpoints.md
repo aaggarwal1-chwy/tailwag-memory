@@ -292,14 +292,14 @@ Caller-supplied person data.
 | --- | --- | --- | --- | --- |
 | `id` | `str` | yes | none | Caller-owned person ID. |
 | `display_name` | `str \| None` | no | `None` | Human-readable name. |
-| `email` | `str \| None` | no | `None` | Optional identity evidence. |
+| `email` | `str \| None` | no | `None` | Optional identity evidence. Nonblank emails are stored as `lower(trim(email))`; Tailwag uses this normalized value to attach same-email writes and Neo4j enforces it as unique. |
 | `consent_status` | `str \| None` | no | `None` | Consent state. Non-consented values clear stored biometric vectors. |
 | `face_embedding` | `list[float] \| None` | no | `None` | Caller-supplied face vector. Must match configured dimension. |
 | `audio_embedding` | `list[float] \| None` | no | `None` | Caller-supplied audio vector. Must match configured dimension. |
 | `role` | `str` | no | `"participant"` | Role on an episode or attendee context. |
 | `source` | `str` | no | `"caller"` | Provenance for participation or memory extraction. |
 
-Omitted profile fields preserve existing `Person` values on later writes.
+Omitted profile fields preserve existing `Person` values on later writes. When a write supplies an email already owned by another person, Tailwag updates and links that existing person instead of creating a duplicate. Incoming canonical `person_*` IDs rekey matching `slack:*` temporary people when safe.
 
 ### `PlaceInput`
 
@@ -585,7 +585,7 @@ Slack mapping:
 - Slack thread/root becomes `EpisodeInput.id="slack:<channel_id>:<thread_ts>"`.
 - Slack users become an existing canonical Argos `person_*` when `person_id_resolver` returns one for the normalized Slack profile email.
 - Unresolved Slack users become `PersonInput.id="slack:<user_id>"`.
-- Optional Slack email is stored on unresolved Slack-owned `Person.email` only when `include_email=True`.
+- Optional Slack email is normalized and stored on unresolved Slack-owned `Person.email` only when `include_email=True`.
 - Canonical-resolved Slack participants do not send Slack display name or email into person upsert; the Slack display name is kept in transcript text.
 
 ## Result Models

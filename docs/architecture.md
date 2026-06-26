@@ -79,7 +79,7 @@ Deferred intentionally:
 })
 ```
 
-`Person.id` comes from the calling system. Email is optional identity evidence for guarded convergence and is not the unique person key. `last_seen` is updated when the person participates in a newer episode, attends a newer event, or receives an explicit person-only identity upsert.
+`Person.id` comes from the calling system. When email is present, Tailwag stores it as `lower(trim(email))`, resolves writes to an existing same-email person before creating a new node, and Neo4j enforces `email` as unique. If an incoming canonical `person_*` ID matches a Slack temporary person by email, Tailwag rekeys that Slack node in place when the canonical ID is available. `last_seen` is updated when the person participates in a newer episode, attends a newer event, or receives an explicit person-only identity upsert.
 
 Archived people keep historical graph data, but stored biometric vectors are removed and recognition excludes them. Re-enrollment should use the explicit person-only upsert path after the caller decides the identity is active again.
 
@@ -196,6 +196,9 @@ Tailwag initializes these uniqueness constraints:
 ```cypher
 CREATE CONSTRAINT person_id IF NOT EXISTS
 FOR (p:Person) REQUIRE p.id IS UNIQUE;
+
+CREATE CONSTRAINT person_email IF NOT EXISTS
+FOR (p:Person) REQUIRE p.email IS UNIQUE;
 
 CREATE CONSTRAINT episode_id IF NOT EXISTS
 FOR (e:Episode) REQUIRE e.id IS UNIQUE;
