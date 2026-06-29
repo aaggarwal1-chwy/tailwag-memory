@@ -116,19 +116,24 @@ class TailwagMemoryClient:
         if not rendered_text or not rendered_person_id:
             return {"episodes": [], "memory_items": []}
 
-        bounded_limit = _bounded_search_limit(limit)
+        try:
+            bounded_limit = max(1, int(limit))
+        except (TypeError, ValueError):
+            bounded_limit = 5
         embeddings = self._embeddings()
-        episode_results = EpisodeRetrievalService(self.runner, embeddings).hybrid_search(
+        query_embedding = embeddings.embed(rendered_text)
+        episode_results = EpisodeRetrievalService(self.runner, embeddings).hybrid_search_with_embedding(
             SearchQuery(
                 text=rendered_text,
                 person_id=rendered_person_id,
-                building_code=_normalize_optional_text(building_code),
+                building_code=str(building_code or "").strip() or None,
                 limit=bounded_limit,
-            )
+            ),
+            query_embedding,
         )
-        memory_item_results = MemoryItemService(self.runner, embeddings).vector_search(
+        memory_item_results = MemoryItemService(self.runner, embeddings).vector_search_by_embedding(
             person_id=rendered_person_id,
-            text=rendered_text,
+            embedding=query_embedding,
             limit=bounded_limit,
             now=now,
         )
@@ -232,17 +237,3 @@ class TailwagMemoryClient:
                 model=self.settings.synthesis_model,
             ),
         )
-
-
-def _normalize_optional_text(value: str | None) -> str | None:
-    """Normalize optional string filters for semantic search."""
-    rendered = str(value or "").strip()
-    return rendered or None
-
-
-def _bounded_search_limit(limit: int) -> int:
-    """Return a positive semantic search limit."""
-    try:
-        return max(1, int(limit))
-    except (TypeError, ValueError):
-        return 5

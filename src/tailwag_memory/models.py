@@ -246,19 +246,17 @@ class PersonContextSource:
 
 @dataclass(frozen=True)
 class MemoryItemInput:
-    """Caller-supplied memory item mutation payload."""
+    """Caller-supplied memory item creation payload."""
 
     kind: str
     key: str
     summary: str
     source: str = "caller"
     source_ref: str = ""
-    status: str = "active"
     observed_at: str = ""
     due_at: str = ""
     expires_at: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
-    memory_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -300,8 +298,8 @@ class PersonMemoryExtractionResult:
     person_id: str
     update_requested: bool = False
     created_memory_ids: list[str] = field(default_factory=list)
-    updated_memory_ids: list[str] = field(default_factory=list)
-    archived_memory_ids: list[str] = field(default_factory=list)
+    addressed_memory_ids: list[str] = field(default_factory=list)
+    supported_memory_ids: list[str] = field(default_factory=list)
     skipped_ops: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
 
@@ -322,8 +320,6 @@ class PersonMemoryConsolidationResult:
     person_id: str
     update_requested: bool = False
     created_memory_ids: list[str] = field(default_factory=list)
-    updated_memory_ids: list[str] = field(default_factory=list)
-    archived_memory_ids: list[str] = field(default_factory=list)
     skipped_ops: list[dict[str, Any]] = field(default_factory=list)
     candidate_episode_ids: list[str] = field(default_factory=list)
     provider_called: bool = False

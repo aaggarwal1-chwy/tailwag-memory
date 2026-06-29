@@ -22,8 +22,8 @@ Inputs:
 
 Outputs:
 - MemoryItem model and service behavior
-- create, update, archive, and retrieval behavior for memory items
-- evidence links such as (:Person)-[:HAS_MEMORY]->(:MemoryItem) and (:MemoryItem)-[:SUPPORTED_BY]->(:Episode)
+- create, support, address, supersede, merge, and retrieval behavior for memory items
+- evidence links such as (:Person)-[:HAS_MEMORY]->(:MemoryItem), (:MemoryItem)-[:SUPPORTED_BY]->(:Episode), (:MemoryItem)-[:ADDRESSED_BY]->(:Episode), and (:MemoryItem)-[:SUPERSEDED_BY]->(:MemoryItem)
 - tests for validation, dedupe, lifecycle, extraction, and context formatting
 
 Non-goals:

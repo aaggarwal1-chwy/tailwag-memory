@@ -129,6 +129,14 @@ class EpisodeRetrievalService:
 
     def hybrid_search(self, query: SearchQuery) -> list[EpisodeMemoryResult]:
         """Return vector-ranked episodes filtered by query constraints."""
+        return self.hybrid_search_with_embedding(query, self.embeddings.embed(query.text))
+
+    def hybrid_search_with_embedding(
+        self,
+        query: SearchQuery,
+        embedding: list[float],
+    ) -> list[EpisodeMemoryResult]:
+        """Return vector-ranked episodes using a precomputed query embedding."""
         candidate_limit = max(query.limit * 5, 25)
         rows = self.runner.run(
             _vector_search_clause("episode_transcript_embedding", "node", "candidate_limit")
@@ -159,7 +167,7 @@ class EpisodeRetrievalService:
             {
                 "candidate_limit": candidate_limit,
                 "limit": query.limit,
-                "embedding": self.embeddings.embed(query.text),
+                "embedding": embedding,
                 "person_id": query.person_id,
                 "building_code": query.building_code,
                 "room_id": query.room_id,

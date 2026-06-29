@@ -13,7 +13,6 @@ from .memory_item_constants import (
 )
 from .memory_item_helpers import (
     _EpisodeEvidence,
-    _PRESERVE,
     _consolidation_metadata,
     _dedupe_episode_evidence,
     _episode_evidence_payload,
@@ -110,8 +109,6 @@ class MemoryConsolidationService:
             person_id=rendered_person_id,
             update_requested=bool(isinstance(payload, dict) and payload.get("update")),
             created_memory_ids=applied["created"],
-            updated_memory_ids=applied["updated"],
-            archived_memory_ids=applied["archived"],
             superseded_memory_ids=applied["superseded"],
             skipped_ops=applied["skipped"],
             candidate_episode_ids=candidate_episode_ids,
@@ -263,8 +260,6 @@ def _apply_consolidation_operations(
     """Apply provider consolidation operations after validating evidence IDs."""
     applied: dict[str, list[Any]] = {
         "created": [],
-        "updated": [],
-        "archived": [],
         "superseded": [],
         "skipped": [],
     }
@@ -286,7 +281,7 @@ def _apply_consolidation_operations(
         if op == "create":
             try:
                 metadata = _consolidation_metadata(raw, default={})
-                memory_id = memory_service.upsert_item(
+                memory_id = memory_service.create_item(
                     person_id=person_id,
                     item=MemoryItemInput(
                         kind=str(raw.get("kind") or ""),
@@ -336,46 +331,10 @@ def _apply_consolidation_operations(
                     source_memory_ids=valid_source_memory_ids,
                     supported_by_episode_ids=support,
                 )
-                if merge_result.merged_memory_id not in candidate_by_id:
-                    applied["created"].append(merge_result.merged_memory_id)
-                else:
-                    applied["updated"].append(merge_result.merged_memory_id)
+                applied["created"].append(merge_result.merged_memory_id)
                 applied["superseded"].extend(merge_result.superseded_memory_ids)
                 for skipped_id in merge_result.skipped_source_memory_ids:
                     applied["skipped"].append({"reason": "invalid_source_memory_id", "memory_id": skipped_id, "op": raw})
-            except ValueError as exc:
-                applied["skipped"].append({"reason": str(exc), "op": raw})
-            continue
-        memory_id = str(raw.get("memory_id") or "").strip()
-        if not memory_id or memory_id not in candidate_by_id:
-            applied["skipped"].append({"reason": "unknown_memory_id", "op": raw})
-            continue
-        if op == "archive":
-            if memory_service.archive_item(memory_id):
-                memory_service.link_supported_episodes(memory_id, support)
-                applied["archived"].append(memory_id)
-            else:
-                applied["skipped"].append({"reason": "archive_noop", "op": raw})
-            continue
-        if op == "update":
-            raw_due_at = str(raw.get("due_at") or "").strip()
-            raw_expires_at = str(raw.get("expires_at") or "").strip()
-            try:
-                metadata = _consolidation_metadata(raw, default=_PRESERVE)
-                updated = memory_service.update_item(
-                    memory_id,
-                    summary=str(raw.get("summary") or ""),
-                    source_ref=source_ref,
-                    observed_at=observed_at,
-                    due_at=raw_due_at if raw_due_at else _PRESERVE,
-                    expires_at=raw_expires_at if raw_expires_at else _PRESERVE,
-                    metadata=metadata,
-                )
-                if updated:
-                    memory_service.link_supported_episodes(memory_id, support)
-                    applied["updated"].append(memory_id)
-                else:
-                    applied["skipped"].append({"reason": "update_noop", "op": raw})
             except ValueError as exc:
                 applied["skipped"].append({"reason": str(exc), "op": raw})
             continue

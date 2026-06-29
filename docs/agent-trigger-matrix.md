@@ -35,7 +35,7 @@ Concrete repo-local custom agents and their usage log live in `.codex/agents/`, 
 | Trigger | Agent | Subagents To Consider | Scope Boundary | Handoff |
 | --- | --- | --- | --- | --- |
 | Repo lacks package structure, local run instructions, or environment examples | Project Scaffold Agent | Documentation Agent | Create scaffolding only; do not implement domain logic | Handoff to Schema Agent and CLI Mockup Agent |
-| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, `HAS_MEMORY`, `SUPPORTED_BY`, `SUPERSEDED_BY`, episode transcript vector index, person biometric vector indexes, and the `MemoryItem.summary_embedding` vector index | Handoff to Ingestion Agent once schema is available |
+| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, `HAS_MEMORY`, `SUPPORTED_BY`, `ADDRESSED_BY`, `SUPERSEDED_BY`, episode transcript vector index, person biometric vector indexes, and the `MemoryItem.summary_embedding` vector index | Handoff to Ingestion Agent once schema is available |
 | Need embedding generation or embedding configuration | OpenAI Embeddings Agent | Test Agent, Code Refactor Agent | Runtime embeddings use OpenAI; tests use deterministic mocks and no network calls | Handoff to Ingestion Agent and Retrieval Agent |
 | Need to create or update episode memory records or place events | Ingestion Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Test Agent | Write path only; no retrieval ranking logic | Handoff to Retrieval Agent for query behavior |
 | Need durable transcript-derived memory items, memory item extraction, memory item context formatting, or memory item vector retrieval | Memory Item Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Retrieval Agent, Integration Contract Agent, Test Agent, Scope Guard Agent | Memory item semantics only; do not expand into a broad ontology, triple store, or open-ended semantic fact graph | Handoff to Retrieval Agent for context selection and Integration Contract Agent for public APIs |
@@ -170,8 +170,8 @@ Inputs:
 Outputs:
 
 - memory item models and services
-- create, update, archive, and retrieval behavior for memory items
-- evidence links such as `(:Person)-[:HAS_MEMORY]->(:MemoryItem)`, `(:MemoryItem)-[:SUPPORTED_BY]->(:Episode)`, and supersession links such as `(:MemoryItem)-[:SUPERSEDED_BY]->(:MemoryItem)`
+- create, support, address, supersede, merge, and retrieval behavior for memory items
+- evidence links such as `(:Person)-[:HAS_MEMORY]->(:MemoryItem)`, `(:MemoryItem)-[:SUPPORTED_BY]->(:Episode)`, follow-up resolution links such as `(:MemoryItem)-[:ADDRESSED_BY]->(:Episode)`, and supersession links such as `(:MemoryItem)-[:SUPERSEDED_BY]->(:MemoryItem)`
 - tests for memory item validation, dedupe, lifecycle, extraction, and context formatting
 
 Non-goals:

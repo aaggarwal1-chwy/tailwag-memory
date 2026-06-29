@@ -156,7 +156,7 @@ Notes:
 
 - This endpoint is intended for Slack-first identity convergence to an Argos canonical ID after Argos confirms the match.
 - Rekeying changes the `id` property in place, so existing episode, event, and memory item relationships stay attached to the same graph node.
-- Rekeying does not rename existing `MemoryItem.id` values; use person-scoped APIs and relationships after rekey rather than assuming older deterministic memory IDs include the new person ID.
+- Rekeying does not rename existing opaque `MemoryItem.id` values; use person-scoped APIs and relationships after rekey rather than parsing memory IDs.
 - The operation returns false when the email does not match exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when `new_person_id` is already used by a different `Person` node.
 - This endpoint does not generate OpenAI text embeddings and does not require `OPENAI_API_KEY`.
 
@@ -169,7 +169,7 @@ Parameters:
 | Name | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `episode` | `EpisodeInput` | yes | Caller-owned episode payload. |
-| `extract_memory` | `bool` | no | When true, create/update/archive durable person memory items from the transcript after storing the episode. |
+| `extract_memory` | `bool` | no | When true, create durable person memory items, support open follow-ups, or address resolved follow-ups from the transcript after storing the episode. |
 
 Returns: `EpisodeRecordResult`.
 
@@ -255,7 +255,7 @@ Notes:
 
 - This is the public high-level API for consumers that need structured semantic hits across episode evidence and durable `MemoryItem` facts/preferences/follow-ups.
 - Episode results use `EpisodeRetrievalService.hybrid_search(...)` internally and include transcript, time/place metadata, and optional score.
-- Memory item results use `MemoryItemService.vector_search(...)` internally and exclude expired, superseded, and inactive memories.
+- Memory item results use `MemoryItemService.vector_search(...)` internally and return only active, unexpired memories; addressed and superseded memories are excluded.
 - Blank `text` or `person_id` returns empty `episodes` and `memory_items` lists without initializing embeddings.
 
 ### `extract_memory_for_episode(episode_id, person_id=None)`
@@ -273,7 +273,7 @@ Returns: `EpisodeMemoryExtractionResult`.
 
 Use this for backfills or debugging extraction after an episode already exists.
 
-The record result includes `episode_id`, `memory_results`, and `memory_errors`. Each per-person memory result includes `person_id`, `update_requested`, `created_memory_ids`, `updated_memory_ids`, `archived_memory_ids`, `skipped_ops`, and `error`. `update_requested` reflects extractor intent; actual changes are the non-empty created, updated, or archived lists.
+The record result includes `episode_id`, `memory_results`, and `memory_errors`. Each per-person memory result includes `person_id`, `update_requested`, `created_memory_ids`, `addressed_memory_ids`, `supported_memory_ids`, `skipped_ops`, and `error`. `update_requested` reflects extractor intent; actual changes are the non-empty created, addressed, or supported lists.
 
 ### `consolidate_memory(*, person_id=None, all_people=False, person_limit=100, min_evidence_episodes=4, seed_limit=25, neighbor_limit=12, cluster_limit=8, episode_text_limit=1200)`
 
@@ -384,7 +384,7 @@ See `examples/event.json` for a complete JSON payload example. Use `"accepted_at
 
 ### `MemoryItemInput`
 
-Advanced callers can mutate durable person memories directly.
+Advanced callers can create durable person memories directly. Existing memory items are append-only; lifecycle changes happen through addressing or supersession.
 
 | Field | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
@@ -393,14 +393,12 @@ Advanced callers can mutate durable person memories directly.
 | `summary` | `str` | yes | none | Prompt-visible memory text. |
 | `source` | `str` | no | `"caller"` | One of `caller`, `calling-system`, `live_chat`, `slack`, `argos`. Direct memory item writes reject other values. |
 | `source_ref` | `str` | no | `""` | Caller/source reference such as an episode ID. |
-| `status` | `str` | no | `"active"` | One of `active`, `archived`, `superseded`. |
 | `observed_at` | `str` | no | `""` | ISO-8601 timestamp. Empty means now for create. |
 | `due_at` | `str` | no | `""` | Follow-up visibility start. Empty means immediately visible. |
 | `expires_at` | `str` | no | `""` | Follow-up expiry. Required for active follow-ups. |
 | `metadata` | `dict[str, Any]` | no | `{}` | Structured caller metadata. |
-| `memory_id` | `str \| None` | no | `None` | Must match Tailwag deterministic ID for direct creates if supplied. Existing IDs should be treated as opaque after person rekeys. |
 
-Memory identity is deterministic by `(person_id, kind, key)` at create time. After a person ID is rekeyed, existing `MemoryItem.id` values are not renamed; use person-scoped APIs and graph relationships instead of parsing IDs.
+Memory IDs are opaque, append-only, and generated by Tailwag. The `key` field is a grouping and dedupe signal, not identity; repeated creates with the same `(person_id, kind, key)` create distinct records unless memory merge creates a replacement memory and marks older records `superseded`. Follow-up extraction can explicitly link an incoming episode as `SUPPORTED_BY` evidence for an existing open follow-up without creating a new memory or addressing the follow-up.
 
 ## Lower-Level Write Endpoints
 
@@ -451,18 +449,18 @@ Methods:
 
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
-| `upsert_item(...)` | `person_id`, `item`, `supported_by_episode_id=None` | `str` | Create or replace deterministic person memory. |
-| `update_item(...)` | `memory_id`, optional `summary`, `source_ref`, `status`, `observed_at`, `due_at`, `expires_at`, `metadata`, `supported_by_episode_id` | `bool` | Update an existing item. Omitted fields preserve existing values. |
-| `archive_item(memory_id)` | `memory_id` | `bool` | Set status to `archived`. |
+| `create_item(...)` | `person_id`, `item`, `supported_by_episode_id=None` | `str` | Create one memory item without replacing existing records. |
 | `link_supported_episodes(memory_id, episode_ids)` | memory ID and episode IDs | `int` | Link existing episodes as support evidence. |
-| `merge_items(...)` | `person_id`, `merged_item`, `source_memory_ids`, optional `supported_by_episode_ids`, optional `merged_memory_id` | `MemoryItemMergeResult` | Merge related source memories into one active merged memory. Copies support evidence, marks sources `superseded`, and writes `SUPERSEDED_BY`. |
+| `merge_items(...)` | `person_id`, `merged_item`, `source_memory_ids`, optional `supported_by_episode_ids` | `MemoryItemMergeResult` | Create one replacement memory. Copies support evidence, marks sources `superseded`, and writes `SUPERSEDED_BY`. |
 | `get_item(memory_id)` | memory ID | `MemoryItemResult \| None` | Fetch one memory item. |
-| `list_items(...)` | `person_id`, `kinds=()`, `statuses=()`, `source=""`, `limit=100` | `list[MemoryItemResult]` | Fetch filtered memory items. |
+| `list_items(...)` | `person_id`, `kinds=()`, `statuses=()`, `source=""`, `limit=100` | `list[MemoryItemResult]` | Fetch filtered memory items. `statuses` accepts `active` and `addressed`; normal read paths omit superseded audit records. |
 | `list_active_items(...)` | `person_id`, `kinds=()`, `source=""`, `now=None`, `limit=100` | `list[MemoryItemResult]` | Fetch active, unexpired items. |
 | `vector_search(...)` | `person_id`, `text`, `limit=10`, `now=None` | `list[MemoryItemResult]` | Rank active memory items by summary similarity. |
 | `candidate_items(...)` | `person_id`, `transcript`, `limit=12` | `list[MemoryItemResult]` | Select existing memories relevant to extraction. |
 
 Normal `MemoryItemService` read methods do not return superseded memories. Superseded memories remain in Neo4j only as developer audit records and point to their merged memory with `SUPERSEDED_BY`.
+
+Follow-up support and addressing are handled internally by transcript extraction after candidate follow-ups have been selected and vetted. Support creates `(:MemoryItem)-[:SUPPORTED_BY]->(:Episode)` while leaving the follow-up active. Addressing marks the follow-up `addressed` and creates `(:MemoryItem)-[:ADDRESSED_BY]->(:Episode)` with the relationship timestamp.
 
 ## Lower-Level Read Endpoints
 
@@ -525,7 +523,7 @@ Most callers should use the high-level client. Use these services to inject cust
 | `consolidate_person(...)` | `person_id`, `min_evidence_episodes=4`, `seed_limit=25`, `neighbor_limit=12`, `cluster_limit=8`, `episode_text_limit=1200` | `PersonMemoryConsolidationResult` | Consolidate repeated evidence for one person. |
 | `consolidate_all(...)` | `person_limit=100`, `min_evidence_episodes=4`, `seed_limit=25`, `neighbor_limit=12`, `cluster_limit=8`, `episode_text_limit=1200` | `MemoryConsolidationResult` | Consolidate across people. |
 
-Custom consolidation providers may return `merge` operations with `memory_ids`, merged `kind`/`key`/`summary`, timestamps, empty `metadata`, and validated `supported_episode_ids`. Merge operations preserve distinct details in the merged memory and supersede the source memories.
+Custom consolidation providers may return `create`, `merge`, or `noop` operations. `create` writes one new active memory, `merge` writes one replacement memory, marks source memories `superseded`, and writes `SUPERSEDED_BY`, and `noop` writes nothing. Merge operations include `memory_ids`, merged `kind`/`key`/`summary`, timestamps, empty `metadata`, and validated `supported_episode_ids`.
 
 The extractor and consolidation providers reject identity-owned directory facts such as title, team, manager, cost center, business function, and leadership org. Those should stay in the calling system's identity or directory layer.
 
@@ -634,9 +632,9 @@ Common return types:
 | `PersonContextItem` | `item_id`, `item_type`, `text`, timestamps, place, role, source, score, transcript lines. |
 | `MemoryItemResult` | `memory_id`, `person_id`, `kind`, `key`, `summary`, `source`, status/timestamps, metadata, optional `score`. |
 | `MemoryItemMergeResult` | `person_id`, `merged_memory_id`, superseded source IDs, linked episode count, skipped source IDs. |
-| `PersonMemoryExtractionResult` | `person_id`, `update_requested`, created/updated/archived IDs, skipped ops, optional error. |
+| `PersonMemoryExtractionResult` | `person_id`, `update_requested`, created/addressed/supported IDs, skipped ops, optional error. |
 | `EpisodeMemoryExtractionResult` | `episode_id`, per-person memory results, memory errors. |
-| `PersonMemoryConsolidationResult` | `person_id`, update flag, created/updated/archived/superseded IDs, skipped ops, candidate episode IDs, provider flag, optional error. |
+| `PersonMemoryConsolidationResult` | `person_id`, update flag, created/superseded IDs, skipped ops, candidate episode IDs, provider flag, optional error. |
 | `MemoryConsolidationResult` | per-person consolidation results and errors. |
 | `EpisodeRecordResult` | stored episode ID plus extraction result fields. |
 

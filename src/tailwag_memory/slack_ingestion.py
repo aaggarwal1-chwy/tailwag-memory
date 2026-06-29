@@ -349,32 +349,27 @@ def build_episode_from_slack_thread(
             user_profiles[user_id] = client.user_profile(user_id)
         user_profile = user_profiles[user_id]
         display_name = user_profile.display_name or f"slack:{user_id}"
-        email = _normalize_email(user_profile.email)
 
         if user_id not in seen_users:
-            person_id, resolved_to_canonical = _resolve_slack_person_id(
-                slack_user_id=user_id,
-                email=email,
-                person_id_resolver=person_id_resolver,
-            )
             participants.append(
-                PersonInput(
-                    id=person_id,
-                    display_name=None if resolved_to_canonical else display_name,
-                    email=None if resolved_to_canonical else email,
+                _slack_person_input(
+                    slack_user_id=user_id,
+                    user_profile=user_profile,
                     role="speaker",
-                    source="slack",
+                    person_id_resolver=person_id_resolver,
                 )
             )
             seen_users.add(user_id)
 
         message_time = _slack_ts_to_datetime(str(message["ts"])).isoformat()
-        text = _format_slack_text(
+        text, message_mentions = _format_slack_text(
             str(message.get("text") or ""),
             client=client,
             user_profiles=user_profiles,
-            mentioned_user_ids=mentioned_user_ids,
         )
+        for mentioned_user_id in message_mentions:
+            if mentioned_user_id not in mentioned_user_ids:
+                mentioned_user_ids.append(mentioned_user_id)
         transcript_lines.append(f"[{message_time}] {display_name}: {text}")
 
     mentioned_people = [
@@ -477,17 +472,15 @@ def _format_slack_text(
     *,
     client: SlackConversationClient,
     user_profiles: dict[str, SlackUserProfile],
-    mentioned_user_ids: list[str] | None = None,
-) -> str:
+) -> tuple[str, list[str]]:
     """Format Slack mrkdwn into transcript text."""
     text = html.unescape(text)
-    text = _replace_user_mentions(
+    text, mentioned_user_ids = _replace_user_mentions(
         text,
         client=client,
         user_profiles=user_profiles,
-        mentioned_user_ids=mentioned_user_ids,
     )
-    return _clean_text(_replace_slack_entities(text))
+    return _clean_text(_replace_slack_entities(text)), mentioned_user_ids
 
 
 def _replace_user_mentions(
@@ -495,21 +488,22 @@ def _replace_user_mentions(
     *,
     client: SlackConversationClient,
     user_profiles: dict[str, SlackUserProfile],
-    mentioned_user_ids: list[str] | None = None,
-) -> str:
+) -> tuple[str, list[str]]:
     """Replace Slack user mention tokens with display names."""
+    mentioned_user_ids: list[str] = []
+
     def replace(match: re.Match[str]) -> str:
         """Return a formatted display name for one mention."""
         user_id = match.group("user_id")
         label = match.group("label")
-        if mentioned_user_ids is not None and user_id not in mentioned_user_ids:
+        if user_id not in mentioned_user_ids:
             mentioned_user_ids.append(user_id)
         if user_id not in user_profiles:
             user_profiles[user_id] = client.user_profile(user_id)
         display_name = user_profiles[user_id].display_name or label or f"slack:{user_id}"
         return f"@{display_name}"
 
-    return re.sub(r"<@(?P<user_id>[A-Z0-9]+)(?:\|(?P<label>[^>]+))?>", replace, text)
+    return re.sub(r"<@(?P<user_id>[A-Z0-9]+)(?:\|(?P<label>[^>]+))?>", replace, text), mentioned_user_ids
 
 
 def _replace_slack_entities(text: str) -> str:

@@ -28,6 +28,7 @@ Implemented now:
 - `ATTENDED`
 - `HAS_MEMORY`
 - `SUPPORTED_BY`
+- `ADDRESSED_BY`
 - `SUPERSEDED_BY`
 - OpenAI-backed episode embeddings
 - OpenAI-backed memory item embeddings

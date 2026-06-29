@@ -2,20 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
 from .memory_item_constants import PINNED_MEMORY_KEYS
 from .memory_item_helpers import (
-    _PRESERVE,
     _is_expired,
     _json_dumps,
     _json_loads,
+    followup_is_visible,
     _tokenize,
     _unique_nonempty,
     _validate_item,
-    _validate_update_fields,
-    stable_memory_id,
 )
 from .models import MemoryItemInput, MemoryItemMergeResult, MemoryItemResult, utc_now_iso
 from .vector_queries import vector_search_clause
@@ -29,32 +28,25 @@ class MemoryItemService:
         self.runner = runner
         self.embeddings = embeddings
 
-    def upsert_item(
+    def create_item(
         self,
         *,
         person_id: str,
         item: MemoryItemInput,
         supported_by_episode_id: str | None = None,
     ) -> str:
-        """Create or replace one deterministic memory item."""
+        """Create one memory item without replacing existing records."""
         rendered_person_id = str(person_id or "").strip()
         if not rendered_person_id:
             raise ValueError("person_id is required")
         validated = _validate_item(item)
-        expected_memory_id = stable_memory_id(
-            person_id=rendered_person_id,
-            kind=validated.kind,
-            key=validated.key,
-        )
-        memory_id = (validated.memory_id or expected_memory_id).strip()
-        if memory_id != expected_memory_id:
-            raise ValueError("memory_id must be the deterministic person/kind/key memory id")
+        memory_id = _new_memory_id()
         now = utc_now_iso()
         observed_at = validated.observed_at or now
         self.runner.run(
             """
             MERGE (p:Person {id: $person_id})
-            MERGE (m:MemoryItem {id: $memory_id})
+            CREATE (m:MemoryItem {id: $memory_id})
             SET m.kind = $kind,
                 m.key = $key,
                 m.summary = $summary,
@@ -84,7 +76,7 @@ class MemoryItemService:
                 "summary_embedding": self.embeddings.embed(validated.summary),
                 "source": validated.source,
                 "source_ref": validated.source_ref,
-                "status": validated.status,
+                "status": "active",
                 "observed_at": observed_at,
                 "due_at": validated.due_at,
                 "expires_at": validated.expires_at,
@@ -95,97 +87,32 @@ class MemoryItemService:
         )
         return memory_id
 
-    def update_item(
-        self,
-        memory_id: str,
-        *,
-        summary: str = "",
-        source_ref: str | None | object = _PRESERVE,
-        status: str | object = _PRESERVE,
-        observed_at: str = "",
-        due_at: str | object = _PRESERVE,
-        expires_at: str | object = _PRESERVE,
-        metadata: dict[str, Any] | object = _PRESERVE,
-        supported_by_episode_id: str | None = None,
-    ) -> bool:
-        """Update an existing memory item when it exists."""
+    def _address_item(self, memory_id: str, *, addressed_at: str, episode_id: str) -> bool:
+        """Mark an active followup as addressed by an episode after extraction vetting."""
         rendered = str(memory_id or "").strip()
-        if not rendered:
+        rendered_episode_id = str(episode_id or "").strip()
+        rendered_addressed_at = str(addressed_at or "").strip() or utc_now_iso()
+        if not rendered or not rendered_episode_id:
             return False
-        existing = self.get_item(rendered)
-        if existing is None:
-            return False
-        next_summary = str(summary or "").strip() or existing.summary
-        if source_ref is _PRESERVE:
-            next_source_ref = existing.source_ref
-        elif source_ref is None:
-            next_source_ref = ""
-        else:
-            next_source_ref = str(source_ref).strip()
-        next_status = str(status).strip() if status is not _PRESERVE else existing.status
-        next_due_at = str(due_at).strip() if due_at is not _PRESERVE else existing.due_at
-        next_expires_at = str(expires_at).strip() if expires_at is not _PRESERVE else existing.expires_at
-        next_observed_at = str(observed_at or "").strip()
-        next_metadata = dict(metadata) if isinstance(metadata, dict) else existing.metadata
-        item = MemoryItemInput(
-            kind=existing.kind,
-            key=existing.key,
-            summary=next_summary,
-            status=next_status,
-            observed_at=next_observed_at,
-            due_at=next_due_at,
-            expires_at=next_expires_at,
-            metadata=next_metadata,
-        )
-        _validate_update_fields(item)
         rows = self.runner.run(
             """
             MATCH (m:MemoryItem {id: $memory_id})
-            SET m.summary = $summary,
-                m.summary_embedding = $summary_embedding,
-                m.source_ref = $source_ref,
-                m.status = $status,
-                m.observed_at = coalesce($observed_at, m.observed_at),
-                m.due_at = $due_at,
-                m.expires_at = $expires_at,
-                m.metadata_json = $metadata_json,
+            MATCH (e:Episode {id: $episode_id})
+            WHERE m.kind = 'followup'
+              AND m.status = 'active'
+            SET m.status = 'addressed',
                 m.updated_at = $now
-            WITH m
-            OPTIONAL MATCH (e:Episode {id: $episode_id})
-            FOREACH (_ IN CASE WHEN e IS NULL THEN [] ELSE [1] END |
-              MERGE (m)-[:SUPPORTED_BY]->(e)
-            )
+            MERGE (m)-[r:ADDRESSED_BY]->(e)
+            SET r.addressed_at = coalesce(r.addressed_at, $addressed_at),
+                r.updated_at = $now
             RETURN m.id AS memory_id
             """,
             {
                 "memory_id": rendered,
-                "summary": next_summary,
-                "summary_embedding": self.embeddings.embed(next_summary),
-                "source_ref": next_source_ref,
-                "status": next_status,
-                "observed_at": next_observed_at or None,
-                "due_at": next_due_at,
-                "expires_at": next_expires_at,
-                "metadata_json": _json_dumps(next_metadata),
+                "episode_id": rendered_episode_id,
+                "addressed_at": rendered_addressed_at,
                 "now": utc_now_iso(),
-                "episode_id": str(supported_by_episode_id or "").strip() or None,
             },
-        )
-        return bool(rows)
-
-    def archive_item(self, memory_id: str) -> bool:
-        """Archive a memory item by id."""
-        rendered = str(memory_id or "").strip()
-        if not rendered:
-            return False
-        rows = self.runner.run(
-            """
-            MATCH (m:MemoryItem {id: $memory_id})
-            SET m.status = 'archived',
-                m.updated_at = $now
-            RETURN m.id AS memory_id
-            """,
-            {"memory_id": rendered, "now": utc_now_iso()},
         )
         return bool(rows)
 
@@ -216,7 +143,6 @@ class MemoryItemService:
         merged_item: MemoryItemInput,
         source_memory_ids: list[str],
         supported_by_episode_ids: list[str] | None = None,
-        merged_memory_id: str | None = None,
     ) -> MemoryItemMergeResult:
         """Merge related person memories into one active memory item."""
         rendered_person_id = str(person_id or "").strip()
@@ -227,56 +153,24 @@ class MemoryItemService:
             raise ValueError("source_memory_ids is required")
 
         validated = _validate_item(merged_item)
-        rendered_merged_id = str(merged_memory_id or "").strip()
-        if rendered_merged_id:
-            valid_merged_ids = self._visible_memory_ids_for_person(
-                rendered_person_id,
-                [rendered_merged_id],
-            )
-            if rendered_merged_id not in valid_merged_ids:
-                raise ValueError("merged_memory_id must be an active memory for person")
-
         valid_source_ids = self._visible_memory_ids_for_person(rendered_person_id, source_ids)
         valid_source_set = set(valid_source_ids)
         skipped_source_ids = [memory_id for memory_id in source_ids if memory_id not in valid_source_set]
         if not valid_source_ids:
             raise ValueError("at least one source memory must be visible for person")
 
-        if rendered_merged_id:
-            self.update_item(
-                rendered_merged_id,
-                summary=validated.summary,
-                source_ref=validated.source_ref,
-                status="active",
-                observed_at=validated.observed_at,
-                due_at=validated.due_at,
-                expires_at=validated.expires_at,
-                metadata=validated.metadata,
-            )
-        else:
-            rendered_merged_id = self.upsert_item(person_id=rendered_person_id, item=validated)
-
-        redundant_source_ids = [memory_id for memory_id in valid_source_ids if memory_id != rendered_merged_id]
-
-        copied_count = self._copy_supported_episodes(
+        rendered_merged_id = self.create_item(person_id=rendered_person_id, item=validated)
+        result = self._supersede_items(
             person_id=rendered_person_id,
-            merged_memory_id=rendered_merged_id,
-            source_memory_ids=redundant_source_ids,
-        )
-        linked_count = self.link_supported_episodes(
-            rendered_merged_id,
-            list(supported_by_episode_ids or []),
-        )
-        superseded_ids = self._mark_superseded(
-            person_id=rendered_person_id,
-            merged_memory_id=rendered_merged_id,
-            source_memory_ids=redundant_source_ids,
+            replacement_memory_id=rendered_merged_id,
+            source_memory_ids=valid_source_ids,
+            supported_by_episode_ids=supported_by_episode_ids,
         )
         return MemoryItemMergeResult(
             person_id=rendered_person_id,
             merged_memory_id=rendered_merged_id,
-            superseded_memory_ids=superseded_ids,
-            linked_episode_count=copied_count + linked_count,
+            superseded_memory_ids=result.superseded_memory_ids,
+            linked_episode_count=result.linked_episode_count,
             skipped_source_memory_ids=skipped_source_ids,
         )
 
@@ -381,6 +275,22 @@ class MemoryItemService:
         now: datetime | None = None,
     ) -> list[MemoryItemResult]:
         """Return active memory items ranked by summary similarity."""
+        return self.vector_search_by_embedding(
+            person_id=person_id,
+            embedding=self.embeddings.embed(text),
+            limit=limit,
+            now=now,
+        )
+
+    def vector_search_by_embedding(
+        self,
+        *,
+        person_id: str,
+        embedding: list[float],
+        limit: int = 10,
+        now: datetime | None = None,
+    ) -> list[MemoryItemResult]:
+        """Return active memory items ranked by a precomputed query embedding."""
         requested_limit = max(1, int(limit or 10))
         candidate_limit = max(requested_limit * 5, 25)
         rows = self.runner.run(
@@ -408,7 +318,7 @@ class MemoryItemService:
             LIMIT $candidate_limit
             """,
             {
-                "embedding": self.embeddings.embed(text),
+                "embedding": embedding,
                 "person_id": str(person_id or "").strip(),
                 "candidate_limit": candidate_limit,
             },
@@ -430,13 +340,17 @@ class MemoryItemService:
 
         def add(item: MemoryItemResult) -> None:
             """Append an unseen candidate until the limit is reached."""
+            if item.kind == "followup" and not followup_is_visible(item):
+                return
             if item.memory_id in seen or len(selected) >= max(1, limit):
                 return
             selected.append(item)
             seen.add(item.memory_id)
 
         for item in active:
-            if item.key in PINNED_MEMORY_KEYS or item.kind in {"boundary", "pet", "followup"}:
+            if item.key in PINNED_MEMORY_KEYS or item.kind in {"boundary", "pet"}:
+                add(item)
+            elif item.kind == "followup" and followup_is_visible(item):
                 add(item)
 
         if len(selected) >= max(1, limit):
@@ -459,6 +373,37 @@ class MemoryItemService:
                 add(item)
 
         return selected
+
+    def _supersede_items(
+        self,
+        *,
+        person_id: str,
+        replacement_memory_id: str,
+        source_memory_ids: list[str],
+        supported_by_episode_ids: list[str] | None = None,
+    ) -> MemoryItemMergeResult:
+        """Copy support to a replacement memory and supersede source memories."""
+        source_ids = _unique_nonempty(source_memory_ids)
+        copied_count = self._copy_supported_episodes(
+            person_id=person_id,
+            merged_memory_id=replacement_memory_id,
+            source_memory_ids=source_ids,
+        )
+        linked_count = self.link_supported_episodes(
+            replacement_memory_id,
+            list(supported_by_episode_ids or []),
+        )
+        superseded_ids = self._mark_superseded(
+            person_id=person_id,
+            merged_memory_id=replacement_memory_id,
+            source_memory_ids=source_ids,
+        )
+        return MemoryItemMergeResult(
+            person_id=person_id,
+            merged_memory_id=replacement_memory_id,
+            superseded_memory_ids=superseded_ids,
+            linked_episode_count=copied_count + linked_count,
+        )
 
     def _visible_memory_ids_for_person(self, person_id: str, memory_ids: list[str]) -> list[str]:
         """Return non-superseded memory IDs owned by a person."""
@@ -565,3 +510,8 @@ class MemoryItemService:
             metadata=_json_loads(row.get("metadata_json")),
             score=row.get("score") if isinstance(row.get("score"), float) else None,
         )
+
+
+def _new_memory_id() -> str:
+    """Return an opaque memory item ID for append-only creates."""
+    return f"mem_{uuid4().hex}"

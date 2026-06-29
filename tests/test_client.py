@@ -165,6 +165,8 @@ class TailwagMemoryClientTest(unittest.TestCase):
                             person_id="person_jamie",
                             update_requested=True,
                             created_memory_ids=["mem_1"],
+                            addressed_memory_ids=["mem_followup_addressed"],
+                            supported_memory_ids=["mem_followup_supported"],
                         )
                     ],
                 )
@@ -176,6 +178,8 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(calls, [("ingest", "episode_1"), ("extract", "episode_1", False)])
         self.assertEqual(result.episode_id, "episode_1")
         self.assertEqual(result.memory_results[0].created_memory_ids, ["mem_1"])
+        self.assertEqual(result.memory_results[0].addressed_memory_ids, ["mem_followup_addressed"])
+        self.assertEqual(result.memory_results[0].supported_memory_ids, ["mem_followup_supported"])
         self.assertEqual(result.memory_errors, [])
 
     def test_record_episode_normalizes_robot_user_label_for_single_speaker(self) -> None:
@@ -390,15 +394,19 @@ class TailwagMemoryClientTest(unittest.TestCase):
     def test_search_semantic_memory_returns_episode_and_memory_item_results(self) -> None:
         runner = FakeRunner()
         calls = []
-        embedding_provider = object()
         now = datetime(2026, 6, 18, tzinfo=timezone.utc)
+
+        class FakeEmbeddingProvider:
+            def embed(self, text: str) -> list[float]:
+                calls.append(("embed", text))
+                return [0.1, 0.2]
 
         class FakeEpisodeRetrieval:
             def __init__(self, runner_arg, embeddings) -> None:
                 calls.append(("episode_init", runner_arg, embeddings))
 
-            def hybrid_search(self, query):
-                calls.append(("episode_search", query))
+            def hybrid_search_with_embedding(self, query, embedding):
+                calls.append(("episode_search", query, embedding))
                 return [
                     EpisodeMemoryResult(
                         episode_id="episode_1",
@@ -415,7 +423,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
             def __init__(self, runner_arg, embeddings) -> None:
                 calls.append(("memory_init", runner_arg, embeddings))
 
-            def vector_search(self, **kwargs):
+            def vector_search_by_embedding(self, **kwargs):
                 calls.append(("memory_search", kwargs))
                 return [
                     MemoryItemResult(
@@ -432,6 +440,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 ]
 
         client = TailwagMemoryClient(runner, _settings())
+        embedding_provider = FakeEmbeddingProvider()
         with patch.object(client, "_embeddings", return_value=embedding_provider):
             with patch("tailwag_memory.client.EpisodeRetrievalService", FakeEpisodeRetrieval):
                 with patch("tailwag_memory.client.MemoryItemService", FakeMemoryItemService):
@@ -443,21 +452,23 @@ class TailwagMemoryClientTest(unittest.TestCase):
                         now=now,
                     )
 
-        self.assertEqual(calls[0], ("episode_init", runner, embedding_provider))
-        self.assertEqual(calls[1][0], "episode_search")
-        self.assertEqual(calls[1][1].text, "robot demos")
-        self.assertEqual(calls[1][1].person_id, "person_jamie")
-        self.assertEqual(calls[1][1].building_code, "BOS")
-        self.assertIsNone(calls[1][1].room_id)
-        self.assertEqual(calls[1][1].limit, 3)
-        self.assertEqual(calls[2], ("memory_init", runner, embedding_provider))
+        self.assertEqual(calls[0], ("embed", "robot demos"))
+        self.assertEqual(calls[1], ("episode_init", runner, embedding_provider))
+        self.assertEqual(calls[2][0], "episode_search")
+        self.assertEqual(calls[2][1].text, "robot demos")
+        self.assertEqual(calls[2][1].person_id, "person_jamie")
+        self.assertEqual(calls[2][1].building_code, "BOS")
+        self.assertIsNone(calls[2][1].room_id)
+        self.assertEqual(calls[2][1].limit, 3)
+        self.assertEqual(calls[2][2], [0.1, 0.2])
+        self.assertEqual(calls[3], ("memory_init", runner, embedding_provider))
         self.assertEqual(
-            calls[3],
+            calls[4],
             (
                 "memory_search",
                 {
                     "person_id": "person_jamie",
-                    "text": "robot demos",
+                    "embedding": [0.1, 0.2],
                     "limit": 3,
                     "now": now,
                 },

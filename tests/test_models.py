@@ -1,11 +1,15 @@
+from dataclasses import fields
+import unittest
+
 from tailwag_memory.models import (
     EpisodeInput,
     EpisodeMemoryResult,
     EventInput,
+    MemoryItemInput,
     MemoryItemMergeResult,
+    PersonMemoryExtractionResult,
     PersonMemoryConsolidationResult,
 )
-import unittest
 
 
 class EpisodeInputTest(unittest.TestCase):
@@ -183,6 +187,18 @@ class MemoryModelTest(unittest.TestCase):
         result = PersonMemoryConsolidationResult(person_id="person_jamie")
 
         self.assertEqual(result.superseded_memory_ids, [])
+
+    def test_extraction_result_tracks_addressed_memory_ids(self) -> None:
+        result = PersonMemoryExtractionResult(person_id="person_jamie")
+
+        self.assertEqual(result.addressed_memory_ids, [])
+        self.assertEqual(result.supported_memory_ids, [])
+
+    def test_memory_item_input_excludes_caller_controlled_lifecycle_fields(self) -> None:
+        names = {field.name for field in fields(MemoryItemInput)}
+
+        self.assertNotIn("memory_id", names)
+        self.assertNotIn("status", names)
 
 
 if __name__ == "__main__":

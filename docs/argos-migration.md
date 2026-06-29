@@ -36,7 +36,7 @@ Argos should construct an adapter where it currently constructs memory runtime o
 
 Expected adapter responsibilities:
 
-- `MemoryStore`: backed by Tailwag services instead of SQLite. It should cover `upsert_item`, `update_item`, `archive_item`, `merge_items`, `get_item`, `list_items`, `list_active_items`, plus compatibility methods such as `record_encounter` and `list_recent_encounters` if Argos still calls them.
+- `MemoryStore`: backed by Tailwag services instead of SQLite. It should cover `create_item`, `merge_items`, `get_item`, `list_items`, `list_active_items`, plus compatibility methods such as `record_encounter` and `list_recent_encounters` if Argos still calls them.
 - `MemoryContextCompiler`: backed by Tailwag `person_context()` and retrieval. It should preserve the prompt fields Argos expects, such as profile lines, follow-up lines, preferred language, and site memory blocks.
 - `PreferenceExtractor`: convert completed Argos live-chat segments into `EpisodeInput` records and call `TailwagMemoryClient.record_episode(..., extract_memory=True)`.
 - `SlackMemoryService`: either wrap Tailwag Slack polling or keep Argos scheduling while recording Slack activity as Tailwag episodes.
@@ -63,7 +63,7 @@ After completed attributed live-chat turns:
 - Buffer the turn or segment in Argos.
 - Convert it to one Tailwag `EpisodeInput`.
 - Call `TailwagMemoryClient.record_episode(..., extract_memory=True)`.
-- Let Tailwag create, update, archive, or merge durable person memory items.
+- Let Tailwag create durable person memory items, support related open follow-ups, or address resolved follow-ups.
 
 For face or speaker recognition:
 
@@ -218,7 +218,7 @@ tailwag memory consolidate --person-id person_jamie
 tailwag memory consolidate --all --person-limit 100
 ```
 
-The consolidation pass uses Neo4j episode transcript vector search to reduce candidate evidence before calling OpenAI. It stays person-scoped, validates provider-supplied supporting episode IDs, and writes only `MemoryItem`, `SUPPORTED_BY`, and `SUPERSEDED_BY` records. It is not the deferred asynchronous semantic consolidation queue/orchestrator and does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
+The consolidation pass uses Neo4j episode transcript vector search to reduce candidate evidence before calling OpenAI. It stays person-scoped, validates provider-supplied supporting episode IDs, and writes only `MemoryItem`, `SUPPORTED_BY`, and `SUPERSEDED_BY` records. Follow-up support and resolution remain part of episode extraction: support writes `SUPPORTED_BY` audit links and addressing writes `ADDRESSED_BY` audit links. Consolidation is not the deferred asynchronous semantic consolidation queue/orchestrator and does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
 
 ## Migration Checklist
 
