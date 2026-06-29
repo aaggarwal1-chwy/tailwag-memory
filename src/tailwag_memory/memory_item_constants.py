@@ -91,8 +91,11 @@ but the followup is still open. Only support followups present in existing_memor
 preferences, boundaries, pets, unknown memory IDs, or followups that are not in existing_memories.
 
 Followup timing rules:
-Followups must include expires_at, should include due_at, and should expire soon after the useful conversation window.
-Same-day bugs or tasks should normally expire within a week.
+Followups must include expires_at and should include due_at only when the transcript states or strongly implies when
+the followup becomes useful. Use the current_time value as the evidence time for relative phrases. If the timing is
+vague, do not create a followup; recent episode context can carry short-lived conversational hooks. For clear event,
+meeting, travel, deadline, blocker, or task windows, set due_at to the first useful opportunity after that window and
+expire soon after the useful conversation window. Same-day bugs or tasks should normally expire within a week.
 
 Do not store:
 Do not create notes. Do not store org chart, title, manager, team, cost center, or inferred personality.
@@ -156,7 +159,9 @@ MEMORY_CONSOLIDATION_DEVELOPER_PROMPT = (
     "Allowed kinds are preference, boundary, pet, fact, and followup. Facts must be narrow person-prompt context, "
     "not ontology triples, inferred traits, directory attributes, current task status, short-lived problems, "
     "or general world knowledge. Near-term hooks, open tasks, transient blockers, meetings, appointments, and "
-    "same-day bugs must be followup, not fact or preference, and followups require expires_at. Do not store org chart, "
+    "same-day bugs must be followup, not fact or preference, and followups require expires_at. Create followups only "
+    "when the evidence states or strongly implies a useful timing window; skip vague followups rather than guessing. "
+    "Do not store org chart, "
     "title, manager, team, cost center, or inferred personality. Merge existing memories instead of updating them. "
     "For merge ops, memory_ids contains source memory IDs to supersede. Return JSON only with update and ops."
 )

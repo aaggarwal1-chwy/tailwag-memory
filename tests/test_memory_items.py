@@ -75,6 +75,21 @@ class MemoryItemServiceTest(unittest.TestCase):
                 ),
             )
 
+    def test_followup_rejects_expiry_before_due(self) -> None:
+        service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
+
+        with self.assertRaisesRegex(ValueError, "greater than or equal to due_at"):
+            service.create_item(
+                person_id="person_jamie",
+                item=MemoryItemInput(
+                    kind="followup",
+                    key="cape_cod_trip",
+                    summary="Cape Cod trip planned for the weekend.",
+                    due_at="2026-06-22T09:00:00+00:00",
+                    expires_at="2026-06-21T23:59:00+00:00",
+                ),
+            )
+
     def test_identity_owned_directory_summary_is_rejected(self) -> None:
         service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
 
@@ -1377,14 +1392,61 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         self.assertEqual(provider.calls[0]["person_id"], "person_jamie")
         self.assertEqual(provider.calls[0]["target_display_name"], "Jamie")
         self.assertEqual(provider.calls[0]["existing_memories"], [])
+        self.assertEqual(provider.calls[0]["current_time"], "2026-06-16T10:00:00+00:00")
         memory_queries = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query]
         self.assertTrue(memory_queries)
         memory_params = memory_queries[-1].parameters
         self.assertEqual(memory_params["episode_id"], "episode_segment_1")
         self.assertEqual(memory_params["source"], "calling-system")
         self.assertEqual(memory_params["source_ref"], "episode_segment_1")
-        self.assertTrue(memory_params["observed_at"])
+        self.assertEqual(memory_params["observed_at"], "2026-06-16T10:00:00+00:00")
         self.assertNotEqual(memory_params["memory_id"], "mem_provider_requested")
+
+    def test_extract_for_episode_skips_provider_followup_already_expired_at_processing_time(self) -> None:
+        class FakeExtractionProvider:
+            def extract(self, **kwargs):
+                del kwargs
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "create",
+                            "memory_id": "",
+                            "kind": "followup",
+                            "key": "old_demo",
+                            "summary": "Ask how the old demo went.",
+                            "observed_at": "",
+                            "due_at": "2000-01-02T08:00:00+00:00",
+                            "expires_at": "2000-01-03T08:00:00+00:00",
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(results=[[], []])
+        service = EpisodeMemoryExtractionService(
+            runner,
+            MockOpenAIEmbeddingProvider(dimension=8),
+            FakeExtractionProvider(),
+        )
+
+        result = service.extract_for_episode(
+            EpisodeInput(
+                id="episode_old",
+                episode_type="conversation",
+                start_time="2000-01-01T10:00:00+00:00",
+                end_time=None,
+                transcript="Jamie: The demo is tomorrow.",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+            )
+        )
+
+        person_result = result.memory_results[0]
+        self.assertEqual(person_result.created_memory_ids, [])
+        self.assertEqual(person_result.skipped_ops[0]["reason"], "followup_already_expired")
+        self.assertFalse(any("CREATE (m:MemoryItem" in query.query for query in runner.queries))
 
     def test_extract_for_episode_skips_unknown_and_bad_operations(self) -> None:
         class FakeExtractionProvider:
@@ -1976,6 +2038,10 @@ class OpenAIMemoryExtractionProviderTest(unittest.TestCase):
         self.assertIn("must be followup, not fact or preference", developer_prompt)
         self.assertIn("Use support", developer_prompt)
         self.assertIn("still open", developer_prompt)
+        self.assertIn("Use the current_time value as the evidence time", developer_prompt)
+        self.assertIn("If the timing is", developer_prompt)
+        self.assertIn("vague, do not create a followup", developer_prompt)
+        self.assertIn("first useful opportunity after that window", developer_prompt)
         self.assertIn("expire within a week", developer_prompt)
         self.assertIn("Use address", developer_prompt)
         self.assertIn("active, unaddressed, currently relevant", developer_prompt)
@@ -2078,6 +2144,7 @@ class OpenAIMemoryConsolidationProviderTest(unittest.TestCase):
         self.assertIn("required minimum number", developer_prompt)
         self.assertIn("Merge related memories", developer_prompt)
         self.assertIn("source memory IDs", developer_prompt)
+        self.assertIn("skip vague followups rather than guessing", developer_prompt)
         user_payload = json.loads(client.responses.kwargs["input"][1]["content"])
         self.assertEqual(user_payload["min_evidence_episodes"], 4)
         self.assertEqual(user_payload["episode_clusters"][0][0]["episode_id"], "ep1")

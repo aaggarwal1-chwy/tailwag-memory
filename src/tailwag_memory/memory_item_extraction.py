@@ -6,6 +6,7 @@ from .db import QueryRunner
 from .embeddings import EmbeddingProvider
 from .episode_normalization import normalize_robot_speaker_labels
 from .memory_item_helpers import (
+    _followup_expired_at_creation,
     _operation_metadata,
     followup_is_visible,
     normalize_memory_source,
@@ -35,7 +36,8 @@ def _extract_memory_for_participant(
 ) -> PersonMemoryExtractionResult:
     """Extract and apply memory operations for one participant."""
     memory_service = MemoryItemService(runner, embeddings)
-    current_time = utc_now_iso()
+    processing_time = utc_now_iso()
+    current_time = str(episode.start_time or "").strip() or processing_time
     candidates = memory_service.candidate_items(
         person_id=participant.id,
         transcript=episode.transcript,
@@ -56,6 +58,7 @@ def _extract_memory_for_participant(
         observed_at=current_time,
         episode_id=episode.id,
         candidates=candidates,
+        processing_time=processing_time,
     )
     return PersonMemoryExtractionResult(
         person_id=participant.id,
@@ -77,6 +80,7 @@ def _apply_memory_operations(
     observed_at: str,
     episode_id: str,
     candidates: list[MemoryItemResult],
+    processing_time: str | None = None,
 ) -> dict[str, list[Any]]:
     """Apply extraction provider operations to memory items."""
     applied: dict[str, list[Any]] = {
@@ -98,15 +102,24 @@ def _apply_memory_operations(
         if op == "create":
             try:
                 metadata = _operation_metadata(raw, default={})
+                kind = str(raw.get("kind") or "")
+                expires_at = str(raw.get("expires_at") or "")
+                if _followup_expired_at_creation(
+                    kind=kind,
+                    expires_at=expires_at,
+                    now=processing_time,
+                ):
+                    applied["skipped"].append({"reason": "followup_already_expired", "op": raw})
+                    continue
                 item = MemoryItemInput(
-                    kind=str(raw.get("kind") or ""),
+                    kind=kind,
                     key=str(raw.get("key") or ""),
                     summary=str(raw.get("summary") or ""),
                     source=normalize_memory_source(source),
                     source_ref=source_ref,
                     observed_at=str(raw.get("observed_at") or observed_at),
                     due_at=str(raw.get("due_at") or ""),
-                    expires_at=str(raw.get("expires_at") or ""),
+                    expires_at=expires_at,
                     metadata=metadata,
                 )
                 memory_id = memory_service.create_item(

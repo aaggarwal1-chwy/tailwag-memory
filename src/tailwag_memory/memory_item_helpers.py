@@ -112,6 +112,15 @@ def _is_expired(item: MemoryItemResult, *, now: datetime | None = None) -> bool:
     return expires is not None and _now(now) > expires
 
 
+def _followup_expired_at_creation(*, kind: str, expires_at: str, now: str | None) -> bool:
+    """Return whether a generated follow-up is already expired at creation time."""
+    if kind != "followup":
+        return False
+    expires = _parse_iso(expires_at)
+    ref = _parse_iso(now)
+    return expires is not None and ref is not None and ref > expires
+
+
 def _summary_has_identity_owned_prefix(summary: str) -> bool:
     """Return whether a summary starts with directory-owned data."""
     lowered = summary.strip().casefold()
@@ -148,6 +157,10 @@ def _validate_memory_fields(
         raise ValueError("due_at must be an ISO datetime")
     if expires_at and _parse_iso(expires_at) is None:
         raise ValueError("expires_at must be an ISO datetime")
+    due = _parse_iso(due_at)
+    expires = _parse_iso(expires_at)
+    if kind == "followup" and due is not None and expires is not None and expires < due:
+        raise ValueError("followup expires_at must be greater than or equal to due_at")
     if kind == "followup" and require_followup_expiry and not expires_at:
         raise ValueError("followup memory items require expires_at")
 

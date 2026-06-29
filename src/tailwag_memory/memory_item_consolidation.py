@@ -16,6 +16,7 @@ from .memory_item_helpers import (
     _consolidation_metadata,
     _dedupe_episode_evidence,
     _episode_evidence_payload,
+    _followup_expired_at_creation,
     _latest_episode_time,
     _positive_int,
     _row_to_episode_evidence,
@@ -83,6 +84,7 @@ class MemoryConsolidationService:
 
         memory_service = MemoryItemService(self.runner, self.embeddings)
         existing_memories = memory_service.list_active_items(person_id=rendered_person_id, limit=100)
+        current_time = utc_now_iso()
         payload = self.consolidation_provider.consolidate(
             person_id=rendered_person_id,
             existing_memories=existing_memories,
@@ -90,7 +92,7 @@ class MemoryConsolidationService:
                 [_episode_evidence_payload(episode, text_limit=episode_text_limit) for episode in cluster]
                 for cluster in clusters
             ],
-            current_time=utc_now_iso(),
+            current_time=current_time,
             min_evidence_episodes=minimum,
         )
         applied = _apply_consolidation_operations(
@@ -104,6 +106,7 @@ class MemoryConsolidationService:
                 episode.episode_id: episode for cluster in clusters for episode in cluster
             },
             min_evidence_episodes=minimum,
+            processing_time=current_time,
         )
         return PersonMemoryConsolidationResult(
             person_id=rendered_person_id,
@@ -256,6 +259,7 @@ def _apply_consolidation_operations(
     candidate_memories: list[MemoryItemResult],
     evidence_by_id: dict[str, _EpisodeEvidence],
     min_evidence_episodes: int,
+    processing_time: str | None = None,
 ) -> dict[str, list[Any]]:
     """Apply provider consolidation operations after validating evidence IDs."""
     applied: dict[str, list[Any]] = {
@@ -281,17 +285,26 @@ def _apply_consolidation_operations(
         if op == "create":
             try:
                 metadata = _consolidation_metadata(raw, default={})
+                kind = str(raw.get("kind") or "")
+                expires_at = str(raw.get("expires_at") or "")
+                if _followup_expired_at_creation(
+                    kind=kind,
+                    expires_at=expires_at,
+                    now=processing_time,
+                ):
+                    applied["skipped"].append({"reason": "followup_already_expired", "op": raw})
+                    continue
                 memory_id = memory_service.create_item(
                     person_id=person_id,
                     item=MemoryItemInput(
-                        kind=str(raw.get("kind") or ""),
+                        kind=kind,
                         key=str(raw.get("key") or ""),
                         summary=str(raw.get("summary") or ""),
                         source=normalize_memory_source(source),
                         source_ref=source_ref,
                         observed_at=observed_at,
                         due_at=str(raw.get("due_at") or ""),
-                        expires_at=str(raw.get("expires_at") or ""),
+                        expires_at=expires_at,
                         metadata=metadata,
                     ),
                 )
@@ -315,17 +328,26 @@ def _apply_consolidation_operations(
                 continue
             try:
                 metadata = _consolidation_metadata(raw, default={})
+                kind = str(raw.get("kind") or "")
+                expires_at = str(raw.get("expires_at") or "")
+                if _followup_expired_at_creation(
+                    kind=kind,
+                    expires_at=expires_at,
+                    now=processing_time,
+                ):
+                    applied["skipped"].append({"reason": "followup_already_expired", "op": raw})
+                    continue
                 merge_result = memory_service.merge_items(
                     person_id=person_id,
                     merged_item=MemoryItemInput(
-                        kind=str(raw.get("kind") or ""),
+                        kind=kind,
                         key=str(raw.get("key") or ""),
                         summary=str(raw.get("summary") or ""),
                         source=normalize_memory_source(source),
                         source_ref=source_ref,
                         observed_at=observed_at,
                         due_at=str(raw.get("due_at") or ""),
-                        expires_at=str(raw.get("expires_at") or ""),
+                        expires_at=expires_at,
                         metadata=metadata,
                     ),
                     source_memory_ids=valid_source_memory_ids,
