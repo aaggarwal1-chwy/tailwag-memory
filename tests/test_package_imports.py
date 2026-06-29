@@ -7,6 +7,7 @@ from tailwag_memory import (
     EmbeddingProvider,
     EpisodeIngestionService,
     EpisodeInput,
+    EpisodeMentionInput,
     EpisodeMemoryExtractionResult,
     EpisodeMemoryExtractionService,
     EpisodeMemoryResult,
@@ -56,6 +57,7 @@ class PackageImportTest(unittest.TestCase):
             "EmbeddingProvider",
             "EpisodeIngestionService",
             "EpisodeInput",
+            "EpisodeMentionInput",
             "EpisodeMemoryExtractionResult",
             "EpisodeMemoryExtractionService",
             "EpisodeMemoryResult",
@@ -101,6 +103,7 @@ class PackageImportTest(unittest.TestCase):
             EmbeddingProvider,
             EpisodeIngestionService,
             EpisodeInput,
+            EpisodeMentionInput,
             EpisodeMemoryExtractionResult,
             EpisodeMemoryExtractionService,
             EpisodeMemoryResult,
@@ -147,6 +150,7 @@ class PackageImportTest(unittest.TestCase):
         self.assertIs(tailwag_memory.TailwagMemoryClient, TailwagMemoryClient)
         self.assertIs(tailwag_memory.Settings, Settings)
         self.assertIs(tailwag_memory.EpisodeInput, EpisodeInput)
+        self.assertIs(tailwag_memory.EpisodeMentionInput, EpisodeMentionInput)
         self.assertIs(tailwag_memory.EpisodeIngestionService, EpisodeIngestionService)
         self.assertIs(tailwag_memory.EpisodeRetrievalService, EpisodeRetrievalService)
 

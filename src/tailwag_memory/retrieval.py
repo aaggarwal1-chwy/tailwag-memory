@@ -93,7 +93,11 @@ class EpisodeRetrievalService:
               room_id: $room_id
             })
             RETURN e.id AS episode_id,
-                   e.transcript AS transcript
+                   e.transcript AS transcript,
+                   e.start_time AS start_time,
+                   e.end_time AS end_time,
+                   $building_code AS building_code,
+                   $room_id AS room_id
             ORDER BY e.start_time DESC
             LIMIT $limit
             """,
@@ -106,8 +110,13 @@ class EpisodeRetrievalService:
         rows = self.runner.run(
             _vector_search_clause("episode_transcript_embedding", "node", "limit")
             + """
+            OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
             RETURN node.id AS episode_id,
                    node.transcript AS transcript,
+                   node.start_time AS start_time,
+                   node.end_time AS end_time,
+                   place.building_code AS building_code,
+                   place.room_id AS room_id,
                    score AS score
             ORDER BY score DESC
             """,
@@ -136,8 +145,13 @@ class EpisodeRetrievalService:
                 $room_id IS NULL
                 OR any(place IN places WHERE place.room_id = $room_id AND ($building_code IS NULL OR place.building_code = $building_code))
               )
+            WITH node, score, head(places) AS place
             RETURN node.id AS episode_id,
                    node.transcript AS transcript,
+                   node.start_time AS start_time,
+                   node.end_time AS end_time,
+                   place.building_code AS building_code,
+                   place.room_id AS room_id,
                    score AS score
             ORDER BY score DESC
             LIMIT $limit
@@ -159,6 +173,10 @@ class EpisodeRetrievalService:
             episode_id=str(row["episode_id"]),
             transcript=str(row.get("transcript") or ""),
             score=row.get("score") if isinstance(row.get("score"), float) else None,
+            start_time=str(row["start_time"]) if row.get("start_time") is not None else None,
+            end_time=str(row["end_time"]) if row.get("end_time") is not None else None,
+            building_code=str(row["building_code"]) if row.get("building_code") is not None else None,
+            room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
         )
 
 

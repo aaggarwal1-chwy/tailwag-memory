@@ -76,6 +76,7 @@ For Slack memory:
 
 - Prefer Tailwag Slack polling so Slack threads become normal Tailwag episodes.
 - If Argos keeps its own background service controls, that service should call Tailwag polling/recording rather than writing SQLite memory operations.
+- Slack mention links are stored as `MENTIONED_IN` relationships on the same `Person` nodes used for participants. When Argos rekeys `slack:*` people to canonical `person_*` IDs, mention relationships remain attached to the rekeyed node.
 
 ## Person Identity
 
@@ -198,6 +199,8 @@ with TailwagMemoryClient.from_env() as memory:
 ```
 
 If Argos needs old structured prompt fields, the compatibility adapter should parse or map Tailwag context into Argos's expected `profile_lines`, `followup_lines`, `preferred_language`, and site memory blocks. That compatibility shape belongs in the Argos repo unless Tailwag later adopts it as a package contract.
+
+For structured semantic query tools, Argos should call `TailwagMemoryClient.search_semantic_memory(...)`. The public method returns separate `episodes` and `memory_items` result lists for one person and owns the internal `EpisodeRetrievalService`, `MemoryItemService`, runner, and embedding-provider wiring.
 
 ## Memory Consolidation
 

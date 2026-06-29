@@ -1,4 +1,10 @@
-from tailwag_memory.models import EpisodeInput, EventInput, MemoryItemMergeResult, PersonMemoryConsolidationResult
+from tailwag_memory.models import (
+    EpisodeInput,
+    EpisodeMemoryResult,
+    EventInput,
+    MemoryItemMergeResult,
+    PersonMemoryConsolidationResult,
+)
 import unittest
 
 
@@ -35,6 +41,37 @@ class EpisodeInputTest(unittest.TestCase):
         self.assertEqual(episode.participants[0].email, "jamie@example.com")
         self.assertEqual(episode.participants[0].face_embedding, [0.1, 0.2])
         self.assertEqual(episode.participants[0].audio_embedding, [0.3, 0.4])
+        self.assertEqual(episode.mentioned_people, [])
+
+    def test_episode_input_from_dict_accepts_mentioned_people(self) -> None:
+        episode = EpisodeInput.from_dict(
+            {
+                "id": "episode_external_125",
+                "episode_type": "conversation",
+                "start_time": "2026-06-16T10:00:00+00:00",
+                "transcript": "Jamie: Can Chandra review this?",
+                "retention_class": "standard",
+                "place": {"building_code": "MAIN", "room_id": "101"},
+                "mentioned_people": [
+                    {
+                        "person": {
+                            "id": "person_chandra",
+                            "display_name": "Chandra",
+                            "email": "chandra@example.com",
+                        },
+                        "source": "slack",
+                    }
+                ],
+            }
+        )
+
+        mention = episode.mentioned_people[0]
+        self.assertEqual(mention.person.id, "person_chandra")
+        self.assertEqual(mention.person.display_name, "Chandra")
+        self.assertEqual(mention.person.email, "chandra@example.com")
+        self.assertEqual(mention.person.role, "mentioned")
+        self.assertEqual(mention.person.source, "slack")
+        self.assertEqual(mention.source, "slack")
 
     def test_episode_input_allows_existing_person_reference_by_id_only(self) -> None:
         episode = EpisodeInput.from_dict(
@@ -123,6 +160,15 @@ class EventInputTest(unittest.TestCase):
 
 
 class MemoryModelTest(unittest.TestCase):
+    def test_episode_memory_result_keeps_metadata_defaults_optional(self) -> None:
+        result = EpisodeMemoryResult(episode_id="episode_1", transcript="Jamie: Any chargers?")
+
+        self.assertIsNone(result.score)
+        self.assertIsNone(result.start_time)
+        self.assertIsNone(result.end_time)
+        self.assertIsNone(result.building_code)
+        self.assertIsNone(result.room_id)
+
     def test_memory_merge_result_defaults_are_independent(self) -> None:
         first = MemoryItemMergeResult(person_id="person_jamie", merged_memory_id="mem_family")
         second = MemoryItemMergeResult(person_id="person_casey", merged_memory_id="mem_family")

@@ -15,6 +15,7 @@ from .memory_items import (
 )
 from .models import (
     EpisodeInput,
+    EpisodeMentionInput,
     EpisodeMemoryExtractionResult,
     EpisodeMemoryResult,
     EpisodeRecordResult,
@@ -47,6 +48,7 @@ __all__ = [
     "EmbeddingProvider",
     "EpisodeIngestionService",
     "EpisodeInput",
+    "EpisodeMentionInput",
     "EpisodeMemoryExtractionResult",
     "EpisodeMemoryExtractionService",
     "EpisodeMemoryResult",

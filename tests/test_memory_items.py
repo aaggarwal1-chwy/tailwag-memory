@@ -15,7 +15,7 @@ from tailwag_memory.memory_items import (
     followup_is_visible,
     stable_memory_id,
 )
-from tailwag_memory.models import EpisodeInput, MemoryItemInput, MemoryItemResult, PersonInput, PlaceInput
+from tailwag_memory.models import EpisodeInput, EpisodeMentionInput, MemoryItemInput, MemoryItemResult, PersonInput, PlaceInput
 
 
 def _seed_row(episode_id: str) -> dict[str, object]:
@@ -1169,6 +1169,46 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
         self.assertEqual([item.person_id for item in result.memory_results], ["person_jamie", "person_casey"])
         self.assertEqual([call["target_display_name"] for call in provider.calls], ["Jamie", "Casey"])
         self.assertEqual(result.memory_errors, [])
+
+    def test_extract_for_episode_ignores_mention_only_people(self) -> None:
+        class FakeExtractionProvider:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def extract(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"update": False, "ops": []}
+
+        provider = FakeExtractionProvider()
+        service = EpisodeMemoryExtractionService(
+            RecordingQueryRunner(),
+            MockOpenAIEmbeddingProvider(dimension=8),
+            provider,
+        )
+        episode = EpisodeInput(
+            id="episode_mention_only",
+            episode_type="conversation",
+            start_time="2026-06-18T10:00:00+00:00",
+            end_time=None,
+            transcript="Jamie: Can Chandra review this?",
+            retention_class="standard",
+            place=PlaceInput(building_code="MAIN", room_id="101"),
+            mentioned_people=[
+                EpisodeMentionInput(
+                    person=PersonInput(id="person_chandra", display_name="Chandra", role="mentioned"),
+                    source="slack",
+                )
+            ],
+        )
+
+        result = service.extract_for_episode(episode, speaker_only=False)
+
+        self.assertEqual(result.episode_id, "episode_mention_only")
+        self.assertEqual(result.memory_results, [])
+        self.assertEqual(result.memory_errors, [])
+        self.assertEqual(provider.calls, [])
+        with self.assertRaisesRegex(ValueError, "not linked"):
+            service.extract_for_episode(episode, person_id="person_chandra")
 
     def test_extract_for_episode_normalizes_robot_user_label_before_provider_call(self) -> None:
         class FakeExtractionProvider:

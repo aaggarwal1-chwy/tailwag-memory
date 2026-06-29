@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 
 from .config import Settings, load_settings
@@ -15,14 +16,16 @@ from .memory_items import (
     OpenAIMemoryConsolidationProvider,
     OpenAIMemoryExtractionProvider,
 )
+from .memory_item_service import MemoryItemService
 from .models import (
     EpisodeInput,
     EpisodeMemoryExtractionResult,
     EpisodeRecordResult,
     MemoryConsolidationResult,
     PersonInput,
+    SearchQuery,
 )
-from .retrieval import PersonContextRetrievalService
+from .retrieval import EpisodeRetrievalService, PersonContextRetrievalService
 
 
 class TailwagMemoryClient:
@@ -97,6 +100,42 @@ class TailwagMemoryClient:
             semantic_scope=semantic_scope,
         )
         return "\n\n".join(part for part in [memory_context, retrieved_context] if part)
+
+    def search_semantic_memory(
+        self,
+        *,
+        text: str,
+        person_id: str,
+        building_code: str | None = None,
+        limit: int = 5,
+        now: datetime | None = None,
+    ) -> dict[str, list[dict[str, object]]]:
+        """Return vector-ranked episode and memory-item matches for one person."""
+        rendered_text = str(text or "").strip()
+        rendered_person_id = str(person_id or "").strip()
+        if not rendered_text or not rendered_person_id:
+            return {"episodes": [], "memory_items": []}
+
+        bounded_limit = _bounded_search_limit(limit)
+        embeddings = self._embeddings()
+        episode_results = EpisodeRetrievalService(self.runner, embeddings).hybrid_search(
+            SearchQuery(
+                text=rendered_text,
+                person_id=rendered_person_id,
+                building_code=_normalize_optional_text(building_code),
+                limit=bounded_limit,
+            )
+        )
+        memory_item_results = MemoryItemService(self.runner, embeddings).vector_search(
+            person_id=rendered_person_id,
+            text=rendered_text,
+            limit=bounded_limit,
+            now=now,
+        )
+        return {
+            "episodes": [asdict(result) for result in episode_results],
+            "memory_items": [asdict(result) for result in memory_item_results],
+        }
 
     def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
         """Store an episode and optionally extract durable memory items."""
@@ -193,3 +232,17 @@ class TailwagMemoryClient:
                 model=self.settings.synthesis_model,
             ),
         )
+
+
+def _normalize_optional_text(value: str | None) -> str | None:
+    """Normalize optional string filters for semantic search."""
+    rendered = str(value or "").strip()
+    return rendered or None
+
+
+def _bounded_search_limit(limit: int) -> int:
+    """Return a positive semantic search limit."""
+    try:
+        return max(1, int(limit))
+    except (TypeError, ValueError):
+        return 5

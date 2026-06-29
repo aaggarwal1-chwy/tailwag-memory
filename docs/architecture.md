@@ -32,6 +32,7 @@ Implemented now:
 - optional caller-supplied `Person.audio_embedding`
 - graph and vector retrieval services
 - Slack channel polling into conversation episodes
+- episode mention relationships
 - source-provided event attendees
 
 Deferred intentionally:
@@ -166,6 +167,10 @@ Related or redundant memories can be merged into one active memory. Superseded s
   source
 }]->(:Episode)
 
+(:Person)-[:MENTIONED_IN {
+  source
+}]->(:Episode)
+
 (:Episode)-[:OCCURRED_AT]->(:Place)
 
 (:Event)-[:OCCURRED_AT]->(:Place)
@@ -184,6 +189,8 @@ Related or redundant memories can be merged into one active memory. Superseded s
 ```
 
 `PARTICIPATED_IN.source` records how the calling system decided the person participated in the episode. Example values include `face_recognition`, `speaker_recognition`, `manual`, `caller`, `demo`, `example`, and `slack`. It is relationship provenance, not a confidence score.
+
+`MENTIONED_IN.source` records how the calling system decided the person was named or referenced in the episode. It does not imply the person was present, does not update `Person.last_seen`, and does not make the person a memory-extraction target.
 
 `ATTENDED.source` records how the calling system determined attendance. For a future Outlook adapter, `source="outlook"` and `response="accepted"` can map accepted RSVP data without adding Outlook polling to current scope.
 
@@ -224,7 +231,7 @@ The configured embedding dimension must match the Neo4j vector indexes and suppl
 
 ## Write Paths
 
-Episode ingestion stores or updates the episode, upserts participants, updates `Person.last_seen`, creates the `PARTICIPATED_IN` relationships, upserts the place, creates the `OCCURRED_AT` relationship, and generates episode text embeddings.
+Episode ingestion stores or updates the episode, upserts participants, updates participant `Person.last_seen`, creates the `PARTICIPATED_IN` relationships, upserts mentioned people without updating `last_seen`, creates `MENTIONED_IN` relationships, upserts the place, creates the `OCCURRED_AT` relationship, and generates episode text embeddings.
 
 High-level episode recording uses episode ingestion and, by default, runs transcript-derived memory extraction for linked participants. Extraction can create, update, or archive `MemoryItem` records without adding new graph labels.
 
@@ -246,6 +253,7 @@ Source adapters convert third-party activity into Tailwag's core input models. S
 - Slack root/thread to `Episode(id="slack:<channel_id>:<thread_ts>")`
 - Slack users to canonical `person_*` IDs when email resolution is unique and caller-approved, otherwise to temporary `slack:<user_id>` IDs
 - Slack participation to `PARTICIPATED_IN {source: "slack", role: "speaker"}`
+- Slack user mentions to `MENTIONED_IN {source: "slack"}` without participation or `last_seen` semantics
 
 Slack does not add Slack-specific labels or relationships. See [Slack Ingestion Guide](slack-ingestion.md) for operator setup and polling details.
 

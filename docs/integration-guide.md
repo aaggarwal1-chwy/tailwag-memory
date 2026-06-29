@@ -90,7 +90,7 @@ Normal package consumers should start with:
 from tailwag_memory import TailwagMemoryClient
 ```
 
-`TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, episode recording, memory extraction/backfill, memory consolidation, and prompt-ready person context. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
+`TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, episode recording, memory extraction/backfill, memory consolidation, prompt-ready person context, and structured semantic search across a person's episodes and memory items. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
 
 Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, or direct memory item operations. Their constructor and method details also live in the endpoint reference.
 

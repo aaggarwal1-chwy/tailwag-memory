@@ -9,7 +9,7 @@ import re
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Protocol
 
-from .models import EpisodeInput, EpisodeRecordResult, PersonInput, PlaceInput
+from .models import EpisodeInput, EpisodeMentionInput, EpisodeRecordResult, PersonInput, PlaceInput
 
 PersonIdResolver = Callable[[str], str | None]
 
@@ -340,6 +340,7 @@ def build_episode_from_slack_thread(
     user_profiles: dict[str, SlackUserProfile] = {}
     participants: list[PersonInput] = []
     seen_users: set[str] = set()
+    mentioned_user_ids: list[str] = []
     transcript_lines: list[str] = []
 
     for message in ordered:
@@ -368,8 +369,26 @@ def build_episode_from_slack_thread(
             seen_users.add(user_id)
 
         message_time = _slack_ts_to_datetime(str(message["ts"])).isoformat()
-        text = _format_slack_text(str(message.get("text") or ""), client=client, user_profiles=user_profiles)
+        text = _format_slack_text(
+            str(message.get("text") or ""),
+            client=client,
+            user_profiles=user_profiles,
+            mentioned_user_ids=mentioned_user_ids,
+        )
         transcript_lines.append(f"[{message_time}] {display_name}: {text}")
+
+    mentioned_people = [
+        EpisodeMentionInput(
+            person=_slack_person_input(
+                slack_user_id=user_id,
+                user_profile=user_profiles[user_id],
+                role="mentioned",
+                person_id_resolver=person_id_resolver,
+            ),
+            source="slack",
+        )
+        for user_id in mentioned_user_ids
+    ]
 
     return EpisodeInput(
         id=f"slack:{channel}:{thread_ts}",
@@ -380,6 +399,31 @@ def build_episode_from_slack_thread(
         retention_class=retention_class,
         place=PlaceInput(building_code="SLACK", room_id=channel),
         participants=participants,
+        mentioned_people=mentioned_people,
+    )
+
+
+def _slack_person_input(
+    *,
+    slack_user_id: str,
+    user_profile: SlackUserProfile,
+    role: str,
+    person_id_resolver: PersonIdResolver | None,
+) -> PersonInput:
+    """Return Tailwag person input for one Slack user."""
+    display_name = user_profile.display_name or f"slack:{slack_user_id}"
+    email = _normalize_email(user_profile.email)
+    person_id, resolved_to_canonical = _resolve_slack_person_id(
+        slack_user_id=slack_user_id,
+        email=email,
+        person_id_resolver=person_id_resolver,
+    )
+    return PersonInput(
+        id=person_id,
+        display_name=None if resolved_to_canonical else display_name,
+        email=None if resolved_to_canonical else email,
+        role=role,
+        source="slack",
     )
 
 
@@ -433,10 +477,16 @@ def _format_slack_text(
     *,
     client: SlackConversationClient,
     user_profiles: dict[str, SlackUserProfile],
+    mentioned_user_ids: list[str] | None = None,
 ) -> str:
     """Format Slack mrkdwn into transcript text."""
     text = html.unescape(text)
-    text = _replace_user_mentions(text, client=client, user_profiles=user_profiles)
+    text = _replace_user_mentions(
+        text,
+        client=client,
+        user_profiles=user_profiles,
+        mentioned_user_ids=mentioned_user_ids,
+    )
     return _clean_text(_replace_slack_entities(text))
 
 
@@ -445,12 +495,15 @@ def _replace_user_mentions(
     *,
     client: SlackConversationClient,
     user_profiles: dict[str, SlackUserProfile],
+    mentioned_user_ids: list[str] | None = None,
 ) -> str:
     """Replace Slack user mention tokens with display names."""
     def replace(match: re.Match[str]) -> str:
         """Return a formatted display name for one mention."""
         user_id = match.group("user_id")
         label = match.group("label")
+        if mentioned_user_ids is not None and user_id not in mentioned_user_ids:
+            mentioned_user_ids.append(user_id)
         if user_id not in user_profiles:
             user_profiles[user_id] = client.user_profile(user_id)
         display_name = user_profiles[user_id].display_name or label or f"slack:{user_id}"

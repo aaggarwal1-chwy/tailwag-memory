@@ -235,6 +235,29 @@ Recent Episodes:
 - 2026-06-16: Jamie: Luna has a vet visit tomorrow.
 ```
 
+### `search_semantic_memory(*, text, person_id, building_code=None, limit=5, now=None)`
+
+Returns structured semantic search results for one person without requiring callers to instantiate lower-level retrieval services.
+
+Parameters:
+
+| Name | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `text` | `str` | yes | Query text to embed and match against episode transcripts and memory item summaries. |
+| `person_id` | `str` | yes | Caller-owned `Person.id` used to scope both episode and memory item results. |
+| `building_code` | `str \| None` | no | Optional episode place filter. Memory item results are person-scoped only. |
+| `limit` | `int` | no | Maximum episode results and maximum memory item results. |
+| `now` | `datetime \| None` | no | Reference time for filtering expired memory items. |
+
+Returns: `dict[str, list[dict[str, object]]]` with `episodes` and `memory_items` keys.
+
+Notes:
+
+- This is the public high-level API for consumers that need structured semantic hits across episode evidence and durable `MemoryItem` facts/preferences/follow-ups.
+- Episode results use `EpisodeRetrievalService.hybrid_search(...)` internally and include transcript, time/place metadata, and optional score.
+- Memory item results use `MemoryItemService.vector_search(...)` internally and exclude expired, superseded, and inactive memories.
+- Blank `text` or `person_id` returns empty `episodes` and `memory_items` lists without initializing embeddings.
+
 ### `extract_memory_for_episode(episode_id, person_id=None)`
 
 Loads a stored episode and runs memory extraction.
@@ -320,10 +343,18 @@ Omitted profile fields preserve existing `Person` values on later writes. When a
 | `retention_class` | `str` | yes | Caller-defined retention category. |
 | `place` | `PlaceInput` | yes | Episode location. |
 | `participants` | `list[PersonInput]` | no | People linked through `PARTICIPATED_IN`. |
+| `mentioned_people` | `list[EpisodeMentionInput]` | no | People linked through `MENTIONED_IN` without participation or `last_seen` semantics. |
 
 `EpisodeInput.from_dict(payload)` parses the same shape from a dictionary.
 
 See `examples/episode.json` and `examples/existing-person-episode.json` for complete JSON payload examples.
+
+### `EpisodeMentionInput`
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `person` | `PersonInput` | yes | Mentioned person identity/profile payload. |
+| `source` | `str` | no | Provenance for the mention relationship. |
 
 ### `EventInput` And `EventAttendeeInput`
 
@@ -587,6 +618,8 @@ Slack mapping:
 - Unresolved Slack users become `PersonInput.id="slack:<user_id>"`.
 - Optional Slack email is normalized and stored on unresolved Slack-owned `Person.email` only when `include_email=True`.
 - Canonical-resolved Slack participants do not send Slack display name or email into person upsert; the Slack display name is kept in transcript text.
+- Slack `<@U...>` user mention tokens populate `EpisodeInput.mentioned_people` and write `MENTIONED_IN {source: "slack"}` when recorded.
+- Mention fallback labels are used for transcript rendering only; Slack user ID and email resolution determine graph identity.
 
 ## Result Models
 
@@ -594,7 +627,7 @@ Common return types:
 
 | Type | Important fields |
 | --- | --- |
-| `EpisodeMemoryResult` | `episode_id`, `transcript`, optional `score`. |
+| `EpisodeMemoryResult` | `episode_id`, `transcript`, optional `start_time`, `end_time`, `building_code`, `room_id`, and `score`. |
 | `EventResult` | `event_id`, `description`, `start_time`, `end_time`, `building_code`, `room_id`. |
 | `PersonRecognitionResult` | `person_id`, `display_name`, `consent_status`, `last_seen`, optional `score`. |
 | `PersonContextSource` | `person_id`, `display_name`, `items`. |
