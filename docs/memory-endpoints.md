@@ -154,7 +154,7 @@ Returns: `bool`, true when one person was rekeyed.
 
 Notes:
 
-- This endpoint is intended for Slack-first identity convergence to an Argos canonical ID after Argos confirms the match.
+- This endpoint is intended for Slack-first identity convergence to a caller-owned canonical ID after the consuming system confirms the match.
 - Rekeying changes the `id` property in place, so existing episode, event, and memory item relationships stay attached to the same graph node.
 - Rekeying does not rename existing opaque `MemoryItem.id` values; use person-scoped APIs and relationships after rekey rather than parsing memory IDs.
 - The operation returns false when the email does not match exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when `new_person_id` is already used by a different `Person` node.
@@ -614,7 +614,7 @@ Slack mapping:
 
 - Slack channel becomes `PlaceInput(building_code="SLACK", room_id=<channel_id>)`.
 - Slack thread/root becomes `EpisodeInput.id="slack:<channel_id>:<thread_ts>"`.
-- Slack users become an existing canonical Argos `person_*` when `person_id_resolver` returns one for the normalized Slack profile email.
+- Slack users become an existing caller-owned canonical `person_*` when `person_id_resolver` returns one for the normalized Slack profile email.
 - Unresolved Slack users become `PersonInput.id="slack:<user_id>"`.
 - Optional Slack email is normalized and stored on unresolved Slack-owned `Person.email` only when `include_email=True`.
 - Canonical-resolved Slack participants do not send Slack display name or email into person upsert; the Slack display name is kept in transcript text.

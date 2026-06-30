@@ -4,7 +4,7 @@
 
 Tailwag Memory is a compact Neo4j-only memory package. It accepts caller-owned people, places, episodes, and events; stores them as graph records; generates OpenAI-backed text embeddings in production; and returns deterministic/vector-derived person context for downstream agents.
 
-This document is the source of truth for current architecture and scope boundaries. For package API details, see [Memory Endpoints Reference](memory-endpoints.md). For package-consumer workflows, see [Python Package Integration Guide](integration-guide.md). For Argos migration planning, see [Argos Migration Guide](argos-migration.md).
+This document is the source of truth for current architecture and scope boundaries. For package API details, see [Memory Endpoints Reference](memory-endpoints.md). For package-consumer workflows, see [Python Package Integration Guide](integration-guide.md). For the current Argos integration boundary, see [Argos Compatibility Note](argos-migration.md).
 
 ## Current Scope
 

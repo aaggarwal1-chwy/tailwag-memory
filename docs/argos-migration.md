@@ -1,14 +1,19 @@
-# Argos Migration Guide
+# Argos Post-Migration Compatibility Note
 
 ## Purpose
 
-This guide describes the Tailwag-side plan for replacing or bypassing `argos-agent/argos_src/memory`. Tailwag should be treated as the durable memory engine and Python package. Argos should keep ownership of realtime turn handling, robot/runtime identity, face and speaker recognition, transcription, profile configuration, and prompt assembly.
+Current Argos integration lives in `argos_src/memory_provider/`, especially:
 
-Tailwag is not a drop-in `argos_src.memory` module. The migration should use a small Argos compatibility adapter that preserves Argos-facing call sites while delegating persistence, retrieval, extraction, and consolidation to Tailwag.
+- `argos_src/memory_provider/tailwag.py`
+- `argos_src/memory_provider/slack.py`
+- `docs/memory_provider.md`
+- `docs/slack_memory.md`
 
-For Tailwag API details, see [Memory Endpoints Reference](memory-endpoints.md). For general package usage, see [Python Package Integration Guide](integration-guide.md). For the current graph model and scope boundaries, see [Architecture](architecture.md).
+Tailwag remains the source of truth for durable social/context memory. Argos
+remains the source of truth for realtime runtime behavior, robot identity,
+face/speaker recognition, raw media handling, and final prompt assembly.
 
-## Ownership Boundary
+## Current Boundary
 
 Tailwag owns:
 
@@ -28,228 +33,61 @@ Argos owns:
 - raw audio, video, and transcript production
 - profile and directory configuration
 - final prompt assembly
-- operator rollout and compatibility adapter wiring
+- Tailwag provider wiring and operator rollout
 
-## Required Compatibility Adapter
+Argos currently keeps biometric vectors local. Tailwag still supports optional
+caller-supplied `Person.face_embedding` and `Person.audio_embedding`, but the
+current Argos provider sends non-biometric person metadata for encounter and
+identity updates.
 
-Argos should construct an adapter where it currently constructs memory runtime objects. The adapter can preserve old Argos-facing exports or equivalent call sites while delegating to Tailwag.
+## Live Argos Contracts
 
-Expected adapter responsibilities:
+Argos relies on these Tailwag package surfaces:
 
-- `MemoryStore`: backed by Tailwag services instead of SQLite. It should cover `create_item`, `merge_items`, `get_item`, `list_items`, `list_active_items`, plus compatibility methods such as `record_encounter` and `list_recent_encounters` if Argos still calls them.
-- `MemoryContextCompiler`: backed by Tailwag `person_context()` and retrieval. It should preserve the prompt fields Argos expects, such as profile lines, follow-up lines, preferred language, and site memory blocks.
-- `PreferenceExtractor`: convert completed Argos live-chat segments into `EpisodeInput` records and call `TailwagMemoryClient.record_episode(..., extract_memory=True)`.
-- `SlackMemoryService`: either wrap Tailwag Slack polling or keep Argos scheduling while recording Slack activity as Tailwag episodes.
+- `TailwagMemoryClient.from_env()`
+- `TailwagMemoryClient.person_context(person_id, current_text=...)`
+- `TailwagMemoryClient.record_episode(episode, extract_memory=...)`
+- `TailwagMemoryClient.search_semantic_memory(...)`
+- `TailwagMemoryClient.upsert_person(PersonInput(...))`
+- `TailwagMemoryClient.archive_person(person_id)`
+- `TailwagMemoryClient.rekey_person_by_email(email, new_person_id)`
+- `tailwag_memory.slack_ingestion.SlackWebApiClient`
+- `tailwag_memory.slack_ingestion.SlackMemoryPoller`
 
-The old `memory_store.db_path` setting should become deprecated or ignored in Tailwag mode. Neo4j, OpenAI, and Slack configuration should come from Tailwag settings or the process environment.
+Argos treats `person_context()` as prompt-ready text and maps it into existing
+prompt fields such as `About`, `Potential Followups`, and preferred language.
+If Tailwag changes the rendered context format, Argos provider tests should be
+updated with the Tailwag change.
 
-## Runtime Mapping
+Argos records live conversation memory as normal Tailwag `EpisodeInput` records
+with `episode_type="conversation"`, `source="live_chat"` participants, and
+caller-owned `person_id` values. Argos treats `EpisodeRecordResult` as
+Tailwag-owned and should not depend on generated memory item IDs.
 
-On Argos startup:
+Argos semantic memory tools call `search_semantic_memory(...)` and expect
+separate `episodes` and `memory_items` lists.
 
-- Load Tailwag configuration.
-- Construct the Argos compatibility adapter.
-- Run schema initialization through an operator/admin path, not repeatedly during every realtime turn.
-- Keep SQLite memory writes disabled or read-only during a staged cutover.
+## Slack And Identity
 
-On each realtime turn:
+Slack ingestion is Tailwag-backed. Argos can schedule polling, but Tailwag owns
+Slack episode construction, transcript formatting, memory extraction, and
+persistence.
 
-- Use the adapter compiler to populate Argos prompt fields.
-- Call Tailwag `person_context(person_id, current_text=...)` when Argos has an identified person.
-- Keep final prompt assembly in Argos.
+Slack users may start as temporary `Person.id="slack:<user_id>"` records. When a
+consuming system later confirms a canonical identity by email, it can call
+`rekey_person_by_email(email, new_person_id)` to converge that Slack-created
+person to a caller-owned canonical ID. Rekeying changes the `Person.id` in place
+so existing episodes, events, mentions, and memory items stay attached to the
+same graph node.
 
-After completed attributed live-chat turns:
+`MemoryItem.id` values are opaque and are not renamed during person rekeying.
+Consumers should use person-scoped APIs and graph relationships after rekey
+rather than parsing memory IDs.
 
-- Buffer the turn or segment in Argos.
-- Convert it to one Tailwag `EpisodeInput`.
-- Call `TailwagMemoryClient.record_episode(..., extract_memory=True)`.
-- Let Tailwag create durable person memory items, support related open follow-ups, or address resolved follow-ups.
+## Compatibility Checks
 
-For face or speaker recognition:
-
-- Argos decides the canonical `Person.id`.
-- Argos supplies face/audio embeddings only after consent and enrollment decisions.
-- Tailwag stores supplied vectors and excludes archived or non-consented people from recognition.
-- Encounter-only behavior should become either a short encounter episode or an adapter-level compatibility record backed by Tailwag data.
-
-For Slack memory:
-
-- Prefer Tailwag Slack polling so Slack threads become normal Tailwag episodes.
-- If Argos keeps its own background service controls, that service should call Tailwag polling/recording rather than writing SQLite memory operations.
-- Slack mention links are stored as `MENTIONED_IN` relationships on the same `Person` nodes used for participants. When Argos rekeys `slack:*` people to canonical `person_*` IDs, mention relationships remain attached to the rekeyed node.
-
-## Person Identity
-
-Argos should pass canonical person IDs that match Tailwag's current canonical Slack resolution convention: `person_*`.
-
-Enroll or refresh a known person profile:
-
-When consented Argos biometric vectors are available, pass them as caller-owned values:
-
-```python
-from tailwag_memory import PersonInput, TailwagMemoryClient
-
-person = PersonInput(
-    id="person_jamie",
-    display_name="Jamie",
-    email="jamie@example.com",
-    consent_status="consented",
-    face_embedding=argos_face_vector,
-    audio_embedding=argos_audio_vector,
-)
-
-with TailwagMemoryClient.from_env() as memory:
-    person_id = memory.upsert_person(person)
-```
-
-Later identity refreshes can send only the fields Argos wants to change. Omitted fields preserve existing Tailwag values:
-
-```python
-with TailwagMemoryClient.from_env() as memory:
-    memory.upsert_person(
-        PersonInput(
-            id="person_jamie",
-            display_name="Jamie A.",
-        )
-    )
-```
-
-When Slack has already created a person such as `slack:U0123456789`, Argos can converge that node to a canonical person ID after it confirms a unique shared email identity:
-
-```python
-with TailwagMemoryClient.from_env() as memory:
-    rekeyed = memory.rekey_person_by_email(
-        email="jamie@example.com",
-        new_person_id="person_jamie",
-    )
-```
-
-`rekey_person_by_email()` changes one Slack-owned temporary `Person.id` property in place. Existing Slack episodes, events, and memory items stay attached to the same graph node. Existing `MemoryItem.id` values are not renamed, so Argos should treat memory IDs as opaque stable IDs and use person-scoped Tailwag APIs plus graph relationships after rekey.
-
-The method returns `False` when email does not identify exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when the canonical ID is already used by a different `Person` node. Tailwag stores `Person.email` as `lower(trim(email))` with a Neo4j uniqueness constraint, and normal ingestion uses that email to attach same-person writes instead of creating duplicates.
-
-Archive a person when Argos needs to retire an identity or revoke biometric recognition:
-
-```python
-with TailwagMemoryClient.from_env() as memory:
-    archived = memory.archive_person("person_jamie")
-```
-
-Archived people keep historical graph data, including prior episodes, events, and memory items. Archiving removes stored biometric vectors and excludes the profile from biometric recognition. Archive is not a full retention deletion mechanism; retention and deletion policy remains caller-owned.
-
-## Recording Argos Episodes
-
-New live conversation memory should enter Tailwag as normal episodes through the high-level client:
-
-```python
-from tailwag_memory import EpisodeInput, PersonInput, PlaceInput, TailwagMemoryClient
-
-episode = EpisodeInput(
-    id="episode_external_001",
-    episode_type="conversation",
-    start_time="2026-06-16T14:00:00+00:00",
-    end_time=None,
-    transcript="Jamie: I prefer Spanish and like hands-on robot demos.",
-    retention_class="standard",
-    place=PlaceInput(building_code="MAIN", room_id="101"),
-    participants=[
-        PersonInput(
-            id="person_jamie",
-            display_name="Jamie",
-            role="speaker",
-            source="live_chat",
-        )
-    ],
-)
-
-with TailwagMemoryClient.from_env() as memory:
-    result = memory.record_episode(episode)
-
-print(result.episode_id)
-print(result.memory_results)
-print(result.memory_errors)
-```
-
-`record_episode(..., extract_memory=True)` is the default. If Argos wants to store an episode without OpenAI-backed memory extraction, pass `extract_memory=False`.
-
-Backfill or debug extraction for an episode that is already in Neo4j:
-
-```python
-with TailwagMemoryClient.from_env() as memory:
-    result = memory.extract_memory_for_episode(
-        "episode_external_001",
-        person_id="person_jamie",
-    )
-```
-
-High-level episode recording checks every participant. Existing-episode extraction defaults to speaker participants, falling back to all participants when no speaker role is present. Use `person_id=` or `tailwag memory extract --person-id` to narrow debugging.
-
-## Person Context Shape
-
-Argos prompt code should treat Tailwag `person_context()` output as prompt-ready text, not as a structured schema. The context includes durable memory sections, visible follow-ups, and bounded recent transcript lines spoken by the target person when available.
-
-```python
-from tailwag_memory import TailwagMemoryClient
-
-with TailwagMemoryClient.from_env() as memory:
-    context = memory.person_context(
-        "person_jamie",
-        current_text="robot demo later today",
-    )
-```
-
-If Argos needs old structured prompt fields, the compatibility adapter should parse or map Tailwag context into Argos's expected `profile_lines`, `followup_lines`, `preferred_language`, and site memory blocks. That compatibility shape belongs in the Argos repo unless Tailwag later adopts it as a package contract.
-
-For structured semantic query tools, Argos should call `TailwagMemoryClient.search_semantic_memory(...)`. The public method returns separate `episodes` and `memory_items` result lists for one person and owns the internal `EpisodeRetrievalService`, `MemoryItemService`, runner, and embedding-provider wiring.
-
-## Memory Consolidation
-
-Episode memory extraction works one episode at a time. For slower background work, Tailwag can consolidate repeated or related per-person episode evidence:
-
-```python
-with TailwagMemoryClient.from_env() as memory:
-    result = memory.consolidate_memory(person_id="person_jamie")
-```
-
-CLI workflow:
-
-```bash
-tailwag memory consolidate --person-id person_jamie
-tailwag memory consolidate --all --person-limit 100
-```
-
-The consolidation pass uses Neo4j episode transcript vector search to reduce candidate evidence before calling OpenAI. It stays person-scoped, validates provider-supplied supporting episode IDs, and writes only `MemoryItem`, `SUPPORTED_BY`, and `SUPERSEDED_BY` records. Follow-up support and resolution remain part of episode extraction: support writes `SUPPORTED_BY` audit links and addressing writes `ADDRESSED_BY` audit links. Consolidation is not the deferred asynchronous semantic consolidation queue/orchestrator and does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
-
-## Migration Checklist
-
-1. Install Tailwag into the Argos environment.
-2. Configure Neo4j and OpenAI settings, including `TAILWAG_EMBEDDING_DIMENSION`, `TAILWAG_EMBEDDING_MODEL`, and `TAILWAG_SYNTHESIS_MODEL`.
-3. Initialize the Tailwag Neo4j schema through an operator/admin step.
-4. Add an Argos compatibility adapter around Tailwag services.
-5. Switch live-chat segment recording to Tailwag `record_episode()`.
-6. Switch prompt context reads to Tailwag `person_context()` through the adapter.
-7. Route Slack memory through Tailwag polling or Tailwag episode recording.
-8. Use `person_*` canonical IDs and `rekey_person_by_email()` for Slack-to-Argos identity convergence.
-9. Archive rather than delete retired identities when historical memory should remain inspectable.
-10. Disable old SQLite writes after parity checks pass.
-
-## Compatibility Tests
-
-Argos-side compatibility tests should cover:
-
-- startup wiring and Tailwag configuration loading
-- schema initialization handled outside realtime turn flow
-- turn-context prompt output
-- preferred-language propagation
-- live-chat segment recording through Tailwag episodes
-- memory extraction result handling
-- face-recognition encounter compatibility
-- Slack background enable/disable behavior
-- Slack temporary-to-canonical identity convergence
-- archive and re-enrollment behavior
-- replacement or retirement path for the old `memory.manage_memory` CLI
-
-Tailwag-side smoke checks before a package-facing handoff:
+Before package-facing changes that could affect Argos, run Tailwag API smoke
+checks when practical:
 
 ```bash
 PYTHONPATH=src python3 -m unittest tests.test_models tests.test_examples
@@ -258,5 +96,9 @@ tailwag schema init --help
 tailwag episode create --help
 tailwag memory extract --help
 tailwag memory consolidate --help
-tailwag person context --help
+tailwag slack poll --help
 ```
+
+When the Argos repo is included in the task, also run or request the Argos
+memory provider tests that cover prompt context mapping, live episode recording,
+encounter updates, Slack polling, and factory wiring.
