@@ -82,16 +82,19 @@ def _person_upsert_cypher(
     set_lifecycle_fields: bool = False,
     monotonic_last_seen: bool = True,
     preserve_archived_biometrics: bool = True,
+    update_last_seen: bool = True,
 ) -> str:
     """Return Cypher for consent-aware person upserts."""
-    last_seen_assignment = (
-        f"""CASE
+    last_seen_assignment = "p.last_seen"
+    if update_last_seen:
+        last_seen_assignment = (
+            f"""CASE
                       WHEN p.last_seen IS NULL OR datetime(p.last_seen) < datetime($last_seen) THEN $last_seen
                       ELSE p.last_seen
                     END"""
-        if monotonic_last_seen
-        else "$last_seen"
-    )
+            if monotonic_last_seen
+            else "$last_seen"
+        )
     lifecycle_fields = (
         """,
                     p.updated_at = $updated_at,
@@ -258,10 +261,30 @@ class EpisodeIngestionService:
             )
             for person in episode.participants
         ]
+        mentioned_people = [
+            _resolve_person_data_by_email(
+                self.runner,
+                {
+                    "person_id": mention.person.id,
+                    "id": mention.person.id,
+                    "display_name": mention.person.display_name,
+                    "email": _normalize_email(mention.person.email),
+                    "consent_status": mention.person.consent_status,
+                    "face_embedding": mention.person.face_embedding,
+                    "audio_embedding": mention.person.audio_embedding,
+                    "source": mention.source,
+                },
+                updated_at=written_at,
+            )
+            for mention in episode.mentioned_people
+        ]
 
         participant_ids = [str(person["id"]) for person in participants]
         for person, participant_id in zip(participants, participant_ids, strict=True):
             person["id"] = participant_id
+        mentioned_person_ids = [str(person["id"]) for person in mentioned_people]
+        for person, mentioned_person_id in zip(mentioned_people, mentioned_person_ids, strict=True):
+            person["person_id"] = mentioned_person_id
 
         self.runner.run(
             """
@@ -285,13 +308,32 @@ class EpisodeIngestionService:
             WITH e, old_person, old_rel
             FOREACH (_ IN CASE WHEN old_person IS NOT NULL AND NOT old_person.id IN $participant_ids THEN [1] ELSE [] END | DELETE old_rel)
             WITH DISTINCT e
-            UNWIND $participants AS person
+            OPTIONAL MATCH (old_mentioned:Person)-[old_mention:MENTIONED_IN]->(e)
+            WITH e, old_mentioned, old_mention
+            FOREACH (_ IN CASE WHEN old_mentioned IS NOT NULL AND NOT old_mentioned.id IN $mentioned_person_ids THEN [1] ELSE [] END | DELETE old_mention)
+            WITH DISTINCT e
+            CALL {
+              WITH e
+              UNWIND $participants AS person
             """
             + _person_upsert_cypher("person", "id")
             + """
                 MERGE (p)-[r:PARTICIPATED_IN]->(e)
                 SET r.role = person.role,
                     r.source = person.source
+              RETURN count(*) AS participant_write_count
+            }
+            CALL {
+              WITH e
+              UNWIND $mentioned_people AS mentioned
+            """
+            + _person_upsert_cypher("mentioned", "person_id", update_last_seen=False)
+            + """
+                MERGE (p)-[r:MENTIONED_IN]->(e)
+                SET r.source = mentioned.source
+              RETURN count(*) AS mention_write_count
+            }
+            RETURN e.id AS episode_id
                 """,
             {
                 "id": episode.id,
@@ -305,6 +347,8 @@ class EpisodeIngestionService:
                 "room_id": episode.place.room_id,
                 "participants": participants,
                 "participant_ids": participant_ids,
+                "mentioned_people": mentioned_people,
+                "mentioned_person_ids": mentioned_person_ids,
                 "created_at": written_at,
                 "updated_at": written_at,
                 "last_seen": episode.end_time or episode.start_time,

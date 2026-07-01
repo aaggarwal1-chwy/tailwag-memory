@@ -5,7 +5,12 @@ from typing import Any
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
 from .episode_normalization import normalize_robot_speaker_labels
-from .memory_item_helpers import _PRESERVE, _operation_metadata, normalize_memory_source
+from .memory_item_helpers import (
+    _followup_expired_at_creation,
+    _operation_metadata,
+    followup_is_visible,
+    normalize_memory_source,
+)
 from .memory_item_protocols import MemoryExtractionProvider
 from .memory_item_service import MemoryItemService
 from .models import (
@@ -31,6 +36,8 @@ def _extract_memory_for_participant(
 ) -> PersonMemoryExtractionResult:
     """Extract and apply memory operations for one participant."""
     memory_service = MemoryItemService(runner, embeddings)
+    processing_time = utc_now_iso()
+    current_time = str(episode.start_time or "").strip() or processing_time
     candidates = memory_service.candidate_items(
         person_id=participant.id,
         transcript=episode.transcript,
@@ -40,7 +47,7 @@ def _extract_memory_for_participant(
         target_display_name=participant.display_name,
         transcript=episode.transcript,
         existing_memories=candidates,
-        current_time=utc_now_iso(),
+        current_time=current_time,
     )
     applied = _apply_memory_operations(
         memory_service,
@@ -48,16 +55,17 @@ def _extract_memory_for_participant(
         operations=payload,
         source=participant.source,
         source_ref=source_ref or episode.id,
-        observed_at=episode.end_time or episode.start_time,
+        observed_at=current_time,
         episode_id=episode.id,
         candidates=candidates,
+        processing_time=processing_time,
     )
     return PersonMemoryExtractionResult(
         person_id=participant.id,
         update_requested=bool(isinstance(payload, dict) and payload.get("update")),
         created_memory_ids=applied["created"],
-        updated_memory_ids=applied["updated"],
-        archived_memory_ids=applied["archived"],
+        addressed_memory_ids=applied["addressed"],
+        supported_memory_ids=applied["supported"],
         skipped_ops=applied["skipped"],
     )
 
@@ -72,9 +80,15 @@ def _apply_memory_operations(
     observed_at: str,
     episode_id: str,
     candidates: list[MemoryItemResult],
+    processing_time: str | None = None,
 ) -> dict[str, list[Any]]:
     """Apply extraction provider operations to memory items."""
-    applied: dict[str, list[Any]] = {"created": [], "updated": [], "archived": [], "skipped": []}
+    applied: dict[str, list[Any]] = {
+        "created": [],
+        "addressed": [],
+        "supported": [],
+        "skipped": [],
+    }
     if not isinstance(operations, dict) or not operations.get("update"):
         return applied
     candidate_by_id = {item.memory_id: item for item in candidates}
@@ -88,19 +102,29 @@ def _apply_memory_operations(
         if op == "create":
             try:
                 metadata = _operation_metadata(raw, default={})
-                memory_id = memory_service.upsert_item(
+                kind = str(raw.get("kind") or "")
+                expires_at = str(raw.get("expires_at") or "")
+                if _followup_expired_at_creation(
+                    kind=kind,
+                    expires_at=expires_at,
+                    now=processing_time,
+                ):
+                    applied["skipped"].append({"reason": "followup_already_expired", "op": raw})
+                    continue
+                item = MemoryItemInput(
+                    kind=kind,
+                    key=str(raw.get("key") or ""),
+                    summary=str(raw.get("summary") or ""),
+                    source=normalize_memory_source(source),
+                    source_ref=source_ref,
+                    observed_at=str(raw.get("observed_at") or observed_at),
+                    due_at=str(raw.get("due_at") or ""),
+                    expires_at=expires_at,
+                    metadata=metadata,
+                )
+                memory_id = memory_service.create_item(
                     person_id=person_id,
-                    item=MemoryItemInput(
-                        kind=str(raw.get("kind") or ""),
-                        key=str(raw.get("key") or ""),
-                        summary=str(raw.get("summary") or ""),
-                        source=normalize_memory_source(source),
-                        source_ref=source_ref,
-                        observed_at=str(raw.get("observed_at") or observed_at),
-                        due_at=str(raw.get("due_at") or ""),
-                        expires_at=str(raw.get("expires_at") or ""),
-                        metadata=metadata,
-                    ),
+                    item=item,
                     supported_by_episode_id=episode_id,
                 )
                 applied["created"].append(memory_id)
@@ -112,35 +136,34 @@ def _apply_memory_operations(
         if not memory_id or memory_id not in candidate_by_id:
             applied["skipped"].append({"reason": "unknown_memory_id", "op": raw})
             continue
-        if op == "archive":
-            if memory_service.archive_item(memory_id):
-                applied["archived"].append(memory_id)
-            else:
-                applied["skipped"].append({"reason": "archive_noop", "op": raw})
-        elif op == "update":
-            raw_due_at = str(raw.get("due_at") or "").strip()
-            raw_expires_at = str(raw.get("expires_at") or "").strip()
-            due_at = raw_due_at if raw_due_at else _PRESERVE
-            expires_at = raw_expires_at if raw_expires_at else _PRESERVE
-            try:
-                metadata = _operation_metadata(raw, default=_PRESERVE)
-                updated = memory_service.update_item(
-                    memory_id,
-                    summary=str(raw.get("summary") or ""),
-                    source_ref=source_ref,
-                    observed_at=str(raw.get("observed_at") or observed_at),
-                    due_at=due_at,
-                    expires_at=expires_at,
-                    metadata=metadata,
-                    supported_by_episode_id=episode_id,
-                )
-                if updated:
-                    applied["updated"].append(memory_id)
-                else:
-                    applied["skipped"].append({"reason": "update_noop", "op": raw})
-            except ValueError as exc:
-                applied["skipped"].append({"reason": str(exc), "op": raw})
+        if op == "address":
+            candidate = candidate_by_id[memory_id]
+            if candidate.kind != "followup":
+                applied["skipped"].append({"reason": "address_non_followup", "op": raw})
                 continue
+            if not followup_is_visible(candidate):
+                applied["skipped"].append({"reason": "address_followup_not_at_play", "op": raw})
+                continue
+            if memory_service._address_item(
+                memory_id,
+                addressed_at=observed_at,
+                episode_id=episode_id,
+            ):
+                applied["addressed"].append(memory_id)
+            else:
+                applied["skipped"].append({"reason": "address_noop", "op": raw})
+        elif op == "support":
+            candidate = candidate_by_id[memory_id]
+            if candidate.kind != "followup":
+                applied["skipped"].append({"reason": "support_non_followup", "op": raw})
+                continue
+            if not followup_is_visible(candidate):
+                applied["skipped"].append({"reason": "support_followup_not_at_play", "op": raw})
+                continue
+            if memory_service.link_supported_episodes(memory_id, [episode_id]):
+                applied["supported"].append(memory_id)
+            else:
+                applied["skipped"].append({"reason": "support_noop", "op": raw})
         else:
             applied["skipped"].append({"reason": "unknown_operation", "op": raw})
     return applied

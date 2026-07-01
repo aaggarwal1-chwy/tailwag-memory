@@ -8,13 +8,14 @@ The adapter does not add Slack-specific Neo4j labels or relationships. It maps S
 
 - Slack channel: `Place` with `building_code="SLACK"` and `room_id=<channel_id>`
 - Slack thread/root message: `Episode` with ID `slack:<channel_id>:<thread_ts>`
-- Slack user: existing canonical Argos `person_*` when `--include-email` is used and exactly one canonical person already has the Slack profile email; otherwise `Person` with ID `slack:<user_id>`
+- Slack user: existing caller-owned canonical `person_*` when `--include-email` is used and exactly one canonical person already has the Slack profile email; otherwise `Person` with ID `slack:<user_id>`
 - Slack user email: stored on unresolved Slack-owned people only when `--include-email` is used and Slack provides it
 - Slack participation: `PARTICIPATED_IN` with `source="slack"` and `role="speaker"`
+- Slack user mentions: `MENTIONED_IN` with `source="slack"` without participation or `last_seen` semantics
 
-Slack-created people do not include face or audio embeddings. When Slack resolves to an existing canonical Argos person, Slack uses the canonical ID for participation but does not send Slack display name or email into the person upsert, so Argos-owned profile fields remain authoritative. When no canonical email match exists, the Slack-owned temporary person keeps the normalized email as identity evidence; Tailwag uses it to attach later same-email writes and rekeys the temporary Slack ID when a matching canonical `person_*` write arrives.
+Slack-created people do not include face or audio embeddings. When Slack resolves to an existing caller-owned canonical person, Slack uses the canonical ID for participation but does not send Slack display name or email into the person upsert, so caller-owned profile fields remain authoritative. When no canonical email match exists, the Slack-owned temporary person keeps the normalized email as identity evidence; Tailwag uses it to attach later same-email writes and rekeys the temporary Slack ID when a matching canonical `person_*` write arrives.
 
-Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. Rendered person context uses bounded recent transcript lines spoken by the target person.
+Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. The adapter also preserves those mention targets in `EpisodeInput.mentioned_people`, resolving them through the same canonical-email path as speakers. Rendered person context uses bounded recent transcript lines spoken by the target person; mention-only people are not treated as speakers.
 
 ## Slack App Setup
 
@@ -193,3 +194,7 @@ LIMIT 20;
 - Newly seen standalone root messages stay in the active-thread watchlist for `--active-thread-hours` so a later first reply can refresh the same episode. The default watch window is 24 hours.
 - Deleted, bot, join, and leave system messages are skipped.
 - The state cursor advances after an empty history check, or after discovered threads are ingested successfully.
+
+## Mention Backfill
+
+No Neo4j schema migration is required for `MENTIONED_IN`; new relationship types can be written by episode ingestion. Existing Slack episodes remain valid but do not gain mention edges automatically. To add mention edges for historical Slack messages, re-ingest or backfill those Slack threads from source messages with memory extraction disabled so old conversations are not reprocessed for durable memories.

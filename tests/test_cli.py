@@ -699,7 +699,13 @@ class CliTest(unittest.TestCase):
                 calls.append({"episode_id": episode_id, "person_id": person_id})
                 return EpisodeMemoryExtractionResult(
                     episode_id=episode_id,
-                    memory_results=[PersonMemoryExtractionResult(person_id=person_id or "person_jamie")],
+                    memory_results=[
+                        PersonMemoryExtractionResult(
+                            person_id=person_id or "person_jamie",
+                            addressed_memory_ids=["mem_followup_addressed"],
+                            supported_memory_ids=["mem_followup_supported"],
+                        )
+                    ],
                 )
 
         with patch("tailwag_memory.cli.load_settings", return_value=settings):
@@ -723,6 +729,8 @@ class CliTest(unittest.TestCase):
         output = json.loads(stdout.getvalue())
         self.assertEqual(output["episode_id"], "episode_1")
         self.assertEqual(output["memory_results"][0]["person_id"], "person_jamie")
+        self.assertEqual(output["memory_results"][0]["addressed_memory_ids"], ["mem_followup_addressed"])
+        self.assertEqual(output["memory_results"][0]["supported_memory_ids"], ["mem_followup_supported"])
 
     def test_memory_extract_missing_episode_id_exits_before_runner(self) -> None:
         with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:

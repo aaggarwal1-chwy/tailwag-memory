@@ -13,9 +13,8 @@ from tailwag_memory.memory_items import (
     OpenAIMemoryConsolidationProvider,
     OpenAIMemoryExtractionProvider,
     followup_is_visible,
-    stable_memory_id,
 )
-from tailwag_memory.models import EpisodeInput, MemoryItemInput, MemoryItemResult, PersonInput, PlaceInput
+from tailwag_memory.models import EpisodeInput, EpisodeMentionInput, MemoryItemInput, MemoryItemResult, PersonInput, PlaceInput
 
 
 def _seed_row(episode_id: str) -> dict[str, object]:
@@ -34,11 +33,11 @@ def _neighbor_row(episode_id: str) -> dict[str, object]:
 
 
 class MemoryItemServiceTest(unittest.TestCase):
-    def test_upsert_item_writes_memory_item_relationships_and_embedding(self) -> None:
+    def test_create_item_writes_memory_item_relationships_and_embedding(self) -> None:
         runner = RecordingQueryRunner()
         service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
 
-        memory_id = service.upsert_item(
+        memory_id = service.create_item(
             person_id="person_jamie",
             item=MemoryItemInput(
                 kind="preference",
@@ -50,18 +49,14 @@ class MemoryItemServiceTest(unittest.TestCase):
             supported_by_episode_id="episode_1",
         )
 
-        self.assertEqual(
-            memory_id,
-            stable_memory_id(
-                person_id="person_jamie",
-                kind="preference",
-                key="likes_robot_demos",
-            ),
-        )
+        self.assertTrue(memory_id.startswith("mem_"))
         query = runner.queries[0]
+        self.assertIn("CREATE (m:MemoryItem", query.query)
+        self.assertNotIn("MERGE (m:MemoryItem", query.query)
         self.assertIn("MemoryItem", query.query)
         self.assertIn("HAS_MEMORY", query.query)
         self.assertIn("SUPPORTED_BY", query.query)
+        self.assertEqual(query.parameters["memory_id"], memory_id)
         self.assertEqual(query.parameters["person_id"], "person_jamie")
         self.assertEqual(query.parameters["episode_id"], "episode_1")
         self.assertEqual(len(query.parameters["summary_embedding"]), 8)
@@ -70,7 +65,7 @@ class MemoryItemServiceTest(unittest.TestCase):
         service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
 
         with self.assertRaisesRegex(ValueError, "expires_at"):
-            service.upsert_item(
+            service.create_item(
                 person_id="person_jamie",
                 item=MemoryItemInput(
                     kind="followup",
@@ -80,35 +75,18 @@ class MemoryItemServiceTest(unittest.TestCase):
                 ),
             )
 
-    def test_memory_id_is_deterministic_by_person_kind_and_key(self) -> None:
-        jamie_id = stable_memory_id(
-            person_id="person_jamie",
-            kind="preference",
-            key="likes_robot_demos",
-        )
-        casey_id = stable_memory_id(
-            person_id="person_casey",
-            kind="preference",
-            key="likes_robot_demos",
-        )
-
-        self.assertEqual(
-            jamie_id,
-            stable_memory_id(person_id="person_jamie", kind="preference", key="likes_robot_demos"),
-        )
-        self.assertNotEqual(jamie_id, casey_id)
-
-    def test_rejects_caller_supplied_cross_person_memory_id(self) -> None:
+    def test_followup_rejects_expiry_before_due(self) -> None:
         service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
 
-        with self.assertRaisesRegex(ValueError, "deterministic"):
-            service.upsert_item(
+        with self.assertRaisesRegex(ValueError, "greater than or equal to due_at"):
+            service.create_item(
                 person_id="person_jamie",
                 item=MemoryItemInput(
-                    memory_id="mem_shared",
-                    kind="fact",
-                    key="robot_memory_project",
-                    summary="working on robot social memory extraction",
+                    kind="followup",
+                    key="cape_cod_trip",
+                    summary="Cape Cod trip planned for the weekend.",
+                    due_at="2026-06-22T09:00:00+00:00",
+                    expires_at="2026-06-21T23:59:00+00:00",
                 ),
             )
 
@@ -116,7 +94,7 @@ class MemoryItemServiceTest(unittest.TestCase):
         service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
 
         with self.assertRaisesRegex(ValueError, "directory"):
-            service.upsert_item(
+            service.create_item(
                 person_id="person_jamie",
                 item=MemoryItemInput(
                     kind="fact",
@@ -129,7 +107,7 @@ class MemoryItemServiceTest(unittest.TestCase):
         service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
 
         with self.assertRaisesRegex(ValueError, "transient task status"):
-            service.upsert_item(
+            service.create_item(
                 person_id="person_jamie",
                 item=MemoryItemInput(
                     kind="fact",
@@ -142,7 +120,7 @@ class MemoryItemServiceTest(unittest.TestCase):
         runner = RecordingQueryRunner()
         service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
 
-        memory_id = service.upsert_item(
+        memory_id = service.create_item(
             person_id="person_jamie",
             item=MemoryItemInput(
                 kind="followup",
@@ -156,6 +134,24 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters["kind"], "followup")
         self.assertEqual(runner.queries[0].parameters["expires_at"], "2026-06-25T00:00:00+00:00")
         self.assertTrue(memory_id.startswith("mem_"))
+
+    def test_same_person_kind_and_key_creates_distinct_memory_items(self) -> None:
+        runner = RecordingQueryRunner()
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+        item = MemoryItemInput(
+            kind="fact",
+            key="robot_memory_project",
+            summary="working on robot memory",
+        )
+
+        first_id = service.create_item(person_id="person_jamie", item=item)
+        second_id = service.create_item(person_id="person_jamie", item=item)
+
+        self.assertNotEqual(first_id, second_id)
+        create_queries = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query]
+        self.assertEqual(len(create_queries), 2)
+        self.assertEqual(create_queries[0].parameters["key"], "robot_memory_project")
+        self.assertEqual(create_queries[1].parameters["key"], "robot_memory_project")
 
     def test_vector_search_scores_memory_items_within_person_scope(self) -> None:
         runner = RecordingQueryRunner(
@@ -284,63 +280,27 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertEqual(items, [])
         self.assertEqual(runner.queries[0].parameters["limit"], 100)
 
-    def test_update_item_preserves_followup_window_and_metadata_by_default(self) -> None:
-        runner = RecordingQueryRunner(
-            results=[
-                [
-                    {
-                        "memory_id": "mem_followup",
-                        "person_id": "person_jamie",
-                        "kind": "followup",
-                        "key": "cape_cod_trip",
-                        "summary": "Cape Cod trip planned for the weekend.",
-                        "source": "live_chat",
-                        "source_ref": "segment_1",
-                        "status": "active",
-                        "due_at": "2026-06-22T09:00:00+00:00",
-                        "expires_at": "2026-06-27T23:59:00+00:00",
-                        "metadata_json": '{"destination":"Cape Cod"}',
-                    }
-                ],
-                [{"memory_id": "mem_followup"}],
-            ]
-        )
+    def test_internal_address_item_marks_active_followup_and_links_addressing_episode(self) -> None:
+        runner = RecordingQueryRunner(results=[[{"memory_id": "mem_followup"}]])
         service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
 
-        updated = service.update_item("mem_followup", summary="Cape Cod trip is still planned.")
-
-        self.assertTrue(updated)
-        params = runner.queries[1].parameters
-        self.assertEqual(params["due_at"], "2026-06-22T09:00:00+00:00")
-        self.assertEqual(params["expires_at"], "2026-06-27T23:59:00+00:00")
-        self.assertIn("Cape Cod", params["metadata_json"])
-
-    def test_update_item_treats_source_ref_none_as_empty_string(self) -> None:
-        runner = RecordingQueryRunner(
-            results=[
-                [
-                    {
-                        "memory_id": "mem_fact",
-                        "person_id": "person_jamie",
-                        "kind": "fact",
-                        "key": "robot_memory",
-                        "summary": "working on robot memory",
-                        "source": "live_chat",
-                        "source_ref": "segment_1",
-                        "status": "active",
-                    }
-                ],
-                [{"memory_id": "mem_fact"}],
-            ]
+        addressed = service._address_item(
+            "mem_followup",
+            addressed_at="2026-06-18T10:30:00+00:00",
+            episode_id="episode_answer",
         )
-        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
 
-        self.assertTrue(service.update_item("mem_fact", source_ref=None))
-
-        self.assertEqual(runner.queries[1].parameters["source_ref"], "")
+        self.assertTrue(addressed)
+        query = runner.queries[0]
+        self.assertIn("m.status = 'addressed'", query.query)
+        self.assertIn("MERGE (m)-[r:ADDRESSED_BY]->(e)", query.query)
+        self.assertIn("r.addressed_at", query.query)
+        self.assertNotIn("m.addressed_at", query.query)
+        self.assertEqual(query.parameters["memory_id"], "mem_followup")
+        self.assertEqual(query.parameters["episode_id"], "episode_answer")
+        self.assertEqual(query.parameters["addressed_at"], "2026-06-18T10:30:00+00:00")
 
     def test_merge_items_copies_support_and_supersedes_source_memories(self) -> None:
-        merged_id = stable_memory_id(person_id="person_jamie", kind="fact", key="family")
         runner = RecordingQueryRunner(
             results=[
                 [{"memory_id": "mem_old_spouse"}, {"memory_id": "mem_old_kids"}],
@@ -365,7 +325,10 @@ class MemoryItemServiceTest(unittest.TestCase):
             supported_by_episode_ids=["ep_new"],
         )
 
+        merged_id = runner.queries[1].parameters["memory_id"]
         self.assertEqual(result.merged_memory_id, merged_id)
+        self.assertTrue(result.merged_memory_id.startswith("mem_"))
+        self.assertIn("CREATE (m:MemoryItem", runner.queries[1].query)
         self.assertEqual(result.superseded_memory_ids, ["mem_old_spouse", "mem_old_kids"])
         self.assertEqual(result.linked_episode_count, 4)
         self.assertEqual(result.skipped_source_memory_ids, [])
@@ -459,7 +422,7 @@ class MemoryItemServiceTest(unittest.TestCase):
         service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
 
         with self.assertRaisesRegex(ValueError, "observed_at"):
-            service.upsert_item(
+            service.create_item(
                 person_id="person_jamie",
                 item=MemoryItemInput(
                     kind="fact",
@@ -469,35 +432,23 @@ class MemoryItemServiceTest(unittest.TestCase):
                 ),
             )
 
-    def test_update_item_rejects_clearing_active_followup_expiry(self) -> None:
-        runner = RecordingQueryRunner(
-            results=[
-                [
-                    {
-                        "memory_id": "mem_followup",
-                        "person_id": "person_jamie",
-                        "kind": "followup",
-                        "key": "cape_cod_trip",
-                        "summary": "Cape Cod trip planned for the weekend.",
-                        "source": "live_chat",
-                        "status": "active",
-                        "expires_at": "2026-06-27T23:59:00+00:00",
-                    }
-                ]
-            ]
-        )
-        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
-
-        with self.assertRaisesRegex(ValueError, "expires_at"):
-            service.update_item("mem_followup", expires_at="")
-
-        self.assertEqual(len(runner.queries), 1)
-
     def test_candidate_items_prioritizes_pinned_context_then_lexical_and_vector(self) -> None:
         class CandidateService(MemoryItemService):
             def vector_search(self, **kwargs):
                 self.vector_kwargs = kwargs
                 return [
+                    MemoryItemResult(
+                        memory_id="mem_future_vector_followup",
+                        person_id="person_jamie",
+                        kind="followup",
+                        key="future_trip",
+                        summary="Ask about the future trip.",
+                        source="live_chat",
+                        status="active",
+                        due_at="2099-06-18T09:00:00+00:00",
+                        expires_at="2099-07-18T00:00:00+00:00",
+                        score=0.95,
+                    ),
                     MemoryItemResult(
                         memory_id="mem_vector",
                         person_id="person_jamie",
@@ -512,6 +463,28 @@ class MemoryItemServiceTest(unittest.TestCase):
         runner = RecordingQueryRunner(
             results=[
                 [
+                    {
+                        "memory_id": "mem_followup",
+                        "person_id": "person_jamie",
+                        "kind": "followup",
+                        "key": "cape_cod_trip",
+                        "summary": "Cape Cod trip planned for the weekend.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "due_at": "2026-06-22T09:00:00+00:00",
+                        "expires_at": "2099-06-27T23:59:00+00:00",
+                    },
+                    {
+                        "memory_id": "mem_addressed",
+                        "person_id": "person_jamie",
+                        "kind": "followup",
+                        "key": "old_trip",
+                        "summary": "Old trip follow-up.",
+                        "source": "live_chat",
+                        "status": "addressed",
+                        "due_at": "2026-06-20T09:00:00+00:00",
+                        "expires_at": "2026-06-27T23:59:00+00:00",
+                    },
                     {
                         "memory_id": "mem_boundary",
                         "person_id": "person_jamie",
@@ -547,10 +520,15 @@ class MemoryItemServiceTest(unittest.TestCase):
         selected = service.candidate_items(
             person_id="person_jamie",
             transcript="Jamie wants a hands-on robot demo with memory examples.",
-            limit=4,
+            limit=5,
         )
 
-        self.assertEqual([item.memory_id for item in selected], ["mem_boundary", "mem_pref", "mem_lexical", "mem_vector"])
+        self.assertEqual(
+            [item.memory_id for item in selected],
+            ["mem_followup", "mem_boundary", "mem_pref", "mem_lexical", "mem_vector"],
+        )
+        self.assertNotIn("mem_addressed", [item.memory_id for item in selected])
+        self.assertNotIn("mem_future_vector_followup", [item.memory_id for item in selected])
         self.assertEqual(service.vector_kwargs["person_id"], "person_jamie")
 
 
@@ -603,7 +581,7 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
         )
         self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[1].query)
         self.assertIn("WHERE node:Episode", runner.queries[1].query)
-        memory_query = [query for query in runner.queries if "MERGE (m:MemoryItem" in query.query][-1]
+        memory_query = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query][-1]
         self.assertEqual(memory_query.parameters["source_ref"], "consolidation")
         link_query = runner.queries[-1]
         self.assertEqual(link_query.parameters["episode_ids"], ["ep1", "ep2", "ep3", "ep4"])
@@ -640,7 +618,7 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
         self.assertEqual(result.created_memory_ids, [])
         self.assertIn("unsupported_episode_id", {item["reason"] for item in result.skipped_ops})
         self.assertIn("insufficient_valid_evidence", {item["reason"] for item in result.skipped_ops})
-        self.assertFalse(any("MERGE (m:MemoryItem" in query.query for query in runner.queries))
+        self.assertFalse(any("CREATE (m:MemoryItem" in query.query for query in runner.queries))
 
     def test_duplicate_supporting_episode_ids_count_once(self) -> None:
         class FakeConsolidationProvider:
@@ -673,21 +651,21 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
         self.assertEqual(result.created_memory_ids, [])
         self.assertEqual([item["reason"] for item in result.skipped_ops], ["insufficient_valid_evidence"])
 
-    def test_consolidation_updates_only_known_candidate_memory_ids_and_links_support(self) -> None:
+    def test_consolidation_skips_unknown_operations(self) -> None:
         class FakeConsolidationProvider:
             def consolidate(self, **kwargs):
                 return {
                     "update": True,
                     "ops": [
                         {
-                            "op": "update",
+                            "op": "replace",
                             "memory_id": "mem_existing",
                             "summary": "uses robot demos to understand memory systems",
                             "supported_episode_ids": ["ep1", "ep2", "ep3", "ep4"],
                             "metadata": {},
                         },
                         {
-                            "op": "archive",
+                            "op": "retire",
                             "memory_id": "mem_missing",
                             "supported_episode_ids": ["ep1", "ep2", "ep3", "ep4"],
                             "metadata": {},
@@ -695,33 +673,21 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
                     ],
                 }
 
-        existing = {
-            "memory_id": "mem_existing",
-            "person_id": "person_jamie",
-            "kind": "fact",
-            "key": "robot_memory_demos",
-            "summary": "likes robot demos",
-            "source": "live_chat",
-            "status": "active",
-        }
         runner = RecordingQueryRunner(
             results=[
                 [_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3"), _seed_row("ep4")],
                 [_neighbor_row("ep1"), _neighbor_row("ep2"), _neighbor_row("ep3"), _neighbor_row("ep4")],
-                [existing],
-                [existing],
-                [{"memory_id": "mem_existing"}],
-                [{"linked_count": 4}],
+                [],
             ]
         )
         service = MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), FakeConsolidationProvider())
 
         result = service.consolidate_person("person_jamie", cluster_limit=1)
 
-        self.assertEqual(result.updated_memory_ids, ["mem_existing"])
-        self.assertEqual(result.archived_memory_ids, [])
-        self.assertIn("unknown_memory_id", {item["reason"] for item in result.skipped_ops})
-        self.assertEqual(runner.queries[-1].parameters["episode_ids"], ["ep1", "ep2", "ep3", "ep4"])
+        self.assertEqual(result.created_memory_ids, [])
+        self.assertEqual({item["reason"] for item in result.skipped_ops}, {"unknown_operation"})
+        self.assertFalse(any("SET m.summary" in query.query for query in runner.queries))
+        self.assertFalse(any("status = 'archived'" in query.query for query in runner.queries))
 
     def test_consolidation_merges_related_candidate_memories(self) -> None:
         class FakeConsolidationProvider:
@@ -775,8 +741,10 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
 
         result = service.consolidate_person("person_jamie", cluster_limit=1)
 
-        merged_id = stable_memory_id(person_id="person_jamie", kind="fact", key="family")
+        memory_queries = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query]
+        merged_id = memory_queries[-1].parameters["memory_id"]
         self.assertEqual(result.created_memory_ids, [merged_id])
+        self.assertTrue(merged_id.startswith("mem_"))
         self.assertEqual(result.superseded_memory_ids, ["mem_spouse", "mem_kids"])
         self.assertEqual(result.skipped_ops, [])
         self.assertTrue(any("SUPERSEDED_BY" in query.query for query in runner.queries))
@@ -880,6 +848,27 @@ class MemoryItemMarkdownTest(unittest.TestCase):
                 now=datetime(2026, 6, 28, 0, 0, tzinfo=timezone.utc),
             )
         )
+
+    def test_markdown_excludes_addressed_followups(self) -> None:
+        markdown = format_person_memory_markdown(
+            [
+                MemoryItemResult(
+                    memory_id="mem_followup",
+                    person_id="person_jamie",
+                    kind="followup",
+                    key="cape_cod_trip",
+                    summary="Cape Cod trip planned for the weekend.",
+                    source="live_chat",
+                    status="addressed",
+                    due_at="2026-06-22T09:00:00+00:00",
+                    expires_at="2026-06-27T23:59:00+00:00",
+                )
+            ],
+            now=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertNotIn("Potential Follow-Ups:", markdown)
+        self.assertNotIn("Cape Cod trip", markdown)
 
     def test_markdown_context_groups_sections_and_omits_empty_sections(self) -> None:
         now = datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc)
@@ -1139,6 +1128,7 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
                     "ops": [
                         {
                             "op": "create",
+                            "memory_id": "mem_provider_requested",
                             "kind": "preference",
                             "key": "likes_robot_demos",
                             "summary": "likes: hands-on robot demos",
@@ -1169,6 +1159,46 @@ class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
         self.assertEqual([item.person_id for item in result.memory_results], ["person_jamie", "person_casey"])
         self.assertEqual([call["target_display_name"] for call in provider.calls], ["Jamie", "Casey"])
         self.assertEqual(result.memory_errors, [])
+
+    def test_extract_for_episode_ignores_mention_only_people(self) -> None:
+        class FakeExtractionProvider:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def extract(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"update": False, "ops": []}
+
+        provider = FakeExtractionProvider()
+        service = EpisodeMemoryExtractionService(
+            RecordingQueryRunner(),
+            MockOpenAIEmbeddingProvider(dimension=8),
+            provider,
+        )
+        episode = EpisodeInput(
+            id="episode_mention_only",
+            episode_type="conversation",
+            start_time="2026-06-18T10:00:00+00:00",
+            end_time=None,
+            transcript="Jamie: Can Chandra review this?",
+            retention_class="standard",
+            place=PlaceInput(building_code="MAIN", room_id="101"),
+            mentioned_people=[
+                EpisodeMentionInput(
+                    person=PersonInput(id="person_chandra", display_name="Chandra", role="mentioned"),
+                    source="slack",
+                )
+            ],
+        )
+
+        result = service.extract_for_episode(episode, speaker_only=False)
+
+        self.assertEqual(result.episode_id, "episode_mention_only")
+        self.assertEqual(result.memory_results, [])
+        self.assertEqual(result.memory_errors, [])
+        self.assertEqual(provider.calls, [])
+        with self.assertRaisesRegex(ValueError, "not linked"):
+            service.extract_for_episode(episode, person_id="person_chandra")
 
     def test_extract_for_episode_normalizes_robot_user_label_before_provider_call(self) -> None:
         class FakeExtractionProvider:
@@ -1320,6 +1350,7 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
                     "ops": [
                         {
                             "op": "create",
+                            "memory_id": "mem_provider_requested",
                             "kind": "preference",
                             "key": "likes_robot_demos",
                             "summary": "likes: hands-on robot demos",
@@ -1361,22 +1392,70 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         self.assertEqual(provider.calls[0]["person_id"], "person_jamie")
         self.assertEqual(provider.calls[0]["target_display_name"], "Jamie")
         self.assertEqual(provider.calls[0]["existing_memories"], [])
-        memory_queries = [query for query in runner.queries if "MERGE (m:MemoryItem" in query.query]
+        self.assertEqual(provider.calls[0]["current_time"], "2026-06-16T10:00:00+00:00")
+        memory_queries = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query]
         self.assertTrue(memory_queries)
         memory_params = memory_queries[-1].parameters
         self.assertEqual(memory_params["episode_id"], "episode_segment_1")
         self.assertEqual(memory_params["source"], "calling-system")
         self.assertEqual(memory_params["source_ref"], "episode_segment_1")
         self.assertEqual(memory_params["observed_at"], "2026-06-16T10:00:00+00:00")
+        self.assertNotEqual(memory_params["memory_id"], "mem_provider_requested")
 
-    def test_extract_for_episode_reports_update_archive_and_skipped_operations(self) -> None:
+    def test_extract_for_episode_skips_provider_followup_already_expired_at_processing_time(self) -> None:
+        class FakeExtractionProvider:
+            def extract(self, **kwargs):
+                del kwargs
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "create",
+                            "memory_id": "",
+                            "kind": "followup",
+                            "key": "old_demo",
+                            "summary": "Ask how the old demo went.",
+                            "observed_at": "",
+                            "due_at": "2000-01-02T08:00:00+00:00",
+                            "expires_at": "2000-01-03T08:00:00+00:00",
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(results=[[], []])
+        service = EpisodeMemoryExtractionService(
+            runner,
+            MockOpenAIEmbeddingProvider(dimension=8),
+            FakeExtractionProvider(),
+        )
+
+        result = service.extract_for_episode(
+            EpisodeInput(
+                id="episode_old",
+                episode_type="conversation",
+                start_time="2000-01-01T10:00:00+00:00",
+                end_time=None,
+                transcript="Jamie: The demo is tomorrow.",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+            )
+        )
+
+        person_result = result.memory_results[0]
+        self.assertEqual(person_result.created_memory_ids, [])
+        self.assertEqual(person_result.skipped_ops[0]["reason"], "followup_already_expired")
+        self.assertFalse(any("CREATE (m:MemoryItem" in query.query for query in runner.queries))
+
+    def test_extract_for_episode_skips_unknown_and_bad_operations(self) -> None:
         class FakeExtractionProvider:
             def extract(self, **kwargs):
                 return {
                     "update": True,
                     "ops": [
                         {
-                            "op": "update",
+                            "op": "replace",
                             "memory_id": "mem_existing",
                             "kind": "",
                             "key": "",
@@ -1387,7 +1466,7 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
                             "metadata": {},
                         },
                         {
-                            "op": "archive",
+                            "op": "retire",
                             "memory_id": "mem_existing",
                             "kind": "",
                             "key": "",
@@ -1398,7 +1477,7 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
                             "metadata": {},
                         },
                         {
-                            "op": "archive",
+                            "op": "retire",
                             "memory_id": "mem_unknown",
                             "kind": "",
                             "key": "",
@@ -1467,10 +1546,401 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         )
 
         person_result = result.memory_results[0]
-        self.assertEqual(person_result.updated_memory_ids, ["mem_existing"])
-        self.assertEqual(person_result.archived_memory_ids, ["mem_existing"])
-        self.assertEqual(len(person_result.skipped_ops), 3)
+        self.assertEqual(person_result.created_memory_ids, [])
+        self.assertEqual(person_result.addressed_memory_ids, [])
+        self.assertEqual(person_result.supported_memory_ids, [])
+        self.assertEqual(len(person_result.skipped_ops), 5)
+        self.assertIn("unknown_operation", {item["reason"] for item in person_result.skipped_ops})
         self.assertIn("unknown_memory_id", {item["reason"] for item in person_result.skipped_ops})
+        self.assertFalse(any("SET m.summary" in query.query for query in runner.queries))
+        self.assertFalse(any("status = 'archived'" in query.query for query in runner.queries))
+
+    def test_extract_for_episode_applies_address_operations_for_followups_at_play(self) -> None:
+        class FakeExtractionProvider:
+            def extract(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "address",
+                            "memory_id": "mem_followup",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "memory_id": "mem_followup",
+                        "person_id": "person_jamie",
+                        "kind": "followup",
+                        "key": "cape_cod_trip",
+                        "summary": "Ask how the Cape Cod trip went.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "due_at": "2026-06-18T09:00:00+00:00",
+                        "expires_at": "2099-07-18T00:00:00+00:00",
+                    }
+                ],
+                [],
+                [{"memory_id": "mem_followup"}],
+            ]
+        )
+        service = EpisodeMemoryExtractionService(
+            runner,
+            MockOpenAIEmbeddingProvider(dimension=8),
+            FakeExtractionProvider(),
+        )
+
+        result = service.extract_for_episode(
+            EpisodeInput(
+                id="episode_answer",
+                episode_type="conversation",
+                start_time="2026-06-20T10:00:00+00:00",
+                end_time="2026-06-20T10:30:00+00:00",
+                transcript="Jamie: Cape Cod was wonderful.",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+            )
+        )
+
+        person_result = result.memory_results[0]
+        self.assertEqual(person_result.addressed_memory_ids, ["mem_followup"])
+        address_query = runner.queries[-1]
+        self.assertIn("ADDRESSED_BY", address_query.query)
+        self.assertEqual(address_query.parameters["memory_id"], "mem_followup")
+        self.assertEqual(address_query.parameters["episode_id"], "episode_answer")
+        self.assertTrue(address_query.parameters["addressed_at"])
+
+    def test_extract_for_episode_reports_address_noop(self) -> None:
+        class FakeExtractionProvider:
+            def extract(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "address",
+                            "memory_id": "mem_followup",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "memory_id": "mem_followup",
+                        "person_id": "person_jamie",
+                        "kind": "followup",
+                        "key": "cape_cod_trip",
+                        "summary": "Ask how the Cape Cod trip went.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "due_at": "2026-06-18T09:00:00+00:00",
+                        "expires_at": "2099-07-18T00:00:00+00:00",
+                    }
+                ],
+                [],
+                [],
+            ]
+        )
+        service = EpisodeMemoryExtractionService(
+            runner,
+            MockOpenAIEmbeddingProvider(dimension=8),
+            FakeExtractionProvider(),
+        )
+
+        result = service.extract_for_episode(
+            EpisodeInput(
+                id="episode_answer",
+                episode_type="conversation",
+                start_time="2026-06-20T10:00:00+00:00",
+                end_time=None,
+                transcript="Jamie: Cape Cod was wonderful.",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+            )
+        )
+
+        person_result = result.memory_results[0]
+        self.assertEqual(person_result.addressed_memory_ids, [])
+        self.assertEqual(person_result.skipped_ops[0]["reason"], "address_noop")
+
+    def test_extract_for_episode_applies_support_operations_for_followups_at_play(self) -> None:
+        class FakeExtractionProvider:
+            def extract(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "support",
+                            "memory_id": "mem_followup",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "memory_id": "mem_followup",
+                        "person_id": "person_jamie",
+                        "kind": "followup",
+                        "key": "cape_cod_trip",
+                        "summary": "Ask how the Cape Cod trip went.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "due_at": "2026-06-18T09:00:00+00:00",
+                        "expires_at": "2099-07-18T00:00:00+00:00",
+                    }
+                ],
+                [],
+                [{"linked_count": 1}],
+            ]
+        )
+        service = EpisodeMemoryExtractionService(
+            runner,
+            MockOpenAIEmbeddingProvider(dimension=8),
+            FakeExtractionProvider(),
+        )
+
+        result = service.extract_for_episode(
+            EpisodeInput(
+                id="episode_related",
+                episode_type="conversation",
+                start_time="2026-06-20T10:00:00+00:00",
+                end_time="2026-06-20T10:30:00+00:00",
+                transcript="Jamie: We are still planning Cape Cod.",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+            )
+        )
+
+        person_result = result.memory_results[0]
+        self.assertEqual(person_result.supported_memory_ids, ["mem_followup"])
+        self.assertEqual(person_result.addressed_memory_ids, [])
+        support_query = runner.queries[-1]
+        self.assertIn("MERGE (m)-[:SUPPORTED_BY]->(e)", support_query.query)
+        self.assertEqual(support_query.parameters["memory_id"], "mem_followup")
+        self.assertEqual(support_query.parameters["episode_ids"], ["episode_related"])
+
+    def test_extract_for_episode_reports_support_noop(self) -> None:
+        class FakeExtractionProvider:
+            def extract(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "support",
+                            "memory_id": "mem_followup",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        }
+                    ],
+                }
+
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "memory_id": "mem_followup",
+                        "person_id": "person_jamie",
+                        "kind": "followup",
+                        "key": "cape_cod_trip",
+                        "summary": "Ask how the Cape Cod trip went.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "due_at": "2026-06-18T09:00:00+00:00",
+                        "expires_at": "2099-07-18T00:00:00+00:00",
+                    }
+                ],
+                [],
+                [{"linked_count": 0}],
+            ]
+        )
+        service = EpisodeMemoryExtractionService(
+            runner,
+            MockOpenAIEmbeddingProvider(dimension=8),
+            FakeExtractionProvider(),
+        )
+
+        result = service.extract_for_episode(
+            EpisodeInput(
+                id="episode_related",
+                episode_type="conversation",
+                start_time="2026-06-20T10:00:00+00:00",
+                end_time=None,
+                transcript="Jamie: We are still planning Cape Cod.",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+            )
+        )
+
+        person_result = result.memory_results[0]
+        self.assertEqual(person_result.supported_memory_ids, [])
+        self.assertEqual(person_result.skipped_ops[0]["reason"], "support_noop")
+
+    def test_extract_for_episode_skips_address_or_support_for_invalid_candidates(self) -> None:
+        class FakeExtractionProvider:
+            def extract(self, **kwargs):
+                return {
+                    "update": True,
+                    "ops": [
+                        {
+                            "op": "address",
+                            "memory_id": "mem_fact",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        },
+                        {
+                            "op": "address",
+                            "memory_id": "mem_future",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        },
+                        {
+                            "op": "address",
+                            "memory_id": "mem_unknown",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        },
+                        {
+                            "op": "support",
+                            "memory_id": "mem_fact",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        },
+                        {
+                            "op": "support",
+                            "memory_id": "mem_future",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        },
+                        {
+                            "op": "support",
+                            "memory_id": "mem_unknown",
+                            "kind": "",
+                            "key": "",
+                            "summary": "",
+                            "observed_at": "",
+                            "due_at": "",
+                            "expires_at": "",
+                            "metadata": {},
+                        },
+                    ],
+                }
+
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "memory_id": "mem_fact",
+                        "person_id": "person_jamie",
+                        "kind": "fact",
+                        "key": "robot_memory",
+                        "summary": "working on robot memory",
+                        "source": "live_chat",
+                        "status": "active",
+                    },
+                    {
+                        "memory_id": "mem_future",
+                        "person_id": "person_jamie",
+                        "kind": "followup",
+                        "key": "future_trip",
+                        "summary": "Ask about the future trip.",
+                        "source": "live_chat",
+                        "status": "active",
+                        "due_at": "2099-06-18T09:00:00+00:00",
+                        "expires_at": "2099-07-18T00:00:00+00:00",
+                    },
+                ],
+                [],
+            ]
+        )
+        service = EpisodeMemoryExtractionService(
+            runner,
+            MockOpenAIEmbeddingProvider(dimension=8),
+            FakeExtractionProvider(),
+        )
+
+        result = service.extract_for_episode(
+            EpisodeInput(
+                id="episode_answer",
+                episode_type="conversation",
+                start_time="2026-06-20T10:00:00+00:00",
+                end_time=None,
+                transcript="Jamie: Robot memory is going well.",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+            )
+        )
+
+        person_result = result.memory_results[0]
+        self.assertEqual(person_result.addressed_memory_ids, [])
+        self.assertEqual(person_result.supported_memory_ids, [])
+        self.assertEqual(
+            {item["reason"] for item in person_result.skipped_ops},
+            {"address_non_followup", "support_non_followup", "unknown_memory_id"},
+        )
+        self.assertFalse(any("ADDRESSED_BY" in query.query for query in runner.queries))
+        self.assertFalse(any("MERGE (m)-[:SUPPORTED_BY]->(e)" in query.query for query in runner.queries))
 
     def test_metadata_value_alias_is_not_accepted(self) -> None:
         class FakeExtractionProvider:
@@ -1508,7 +1978,7 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
             )
         )
 
-        memory_queries = [query for query in runner.queries if "MERGE (m:MemoryItem" in query.query]
+        memory_queries = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query]
         self.assertEqual(memory_queries[-1].parameters["metadata_json"], "{}")
 
 
@@ -1545,12 +2015,41 @@ class OpenAIMemoryExtractionProviderTest(unittest.TestCase):
         self.assertEqual(metadata_schema["additionalProperties"], False)
         self.assertEqual(metadata_schema["properties"], {})
         developer_prompt = client.responses.kwargs["input"][0]["content"]
+        headings = (
+            "Task:",
+            "Durability rules:",
+            "Allowed kinds:",
+            "Allowed operations:",
+            "Create rules:",
+            "Address rules:",
+            "Followup timing rules:",
+            "Do not store:",
+        )
+        heading_positions = []
+        for heading in headings:
+            self.assertIn(heading, developer_prompt)
+            self.assertEqual(developer_prompt.count(heading), 1)
+            heading_positions.append(developer_prompt.index(heading))
+        self.assertEqual(heading_positions, sorted(heading_positions))
         self.assertIn("stay relevant for weeks at a time", developer_prompt)
         self.assertIn("Insignificant observations", developer_prompt)
         self.assertIn("future conversation more fruitful", developer_prompt)
         self.assertIn("bugs being debugged today", developer_prompt)
         self.assertIn("must be followup, not fact or preference", developer_prompt)
+        self.assertIn("Use support", developer_prompt)
+        self.assertIn("still open", developer_prompt)
+        self.assertIn("Use the current_time value as the evidence time", developer_prompt)
+        self.assertIn("If the timing is", developer_prompt)
+        self.assertIn("vague, do not create a followup", developer_prompt)
+        self.assertIn("first useful opportunity after that window", developer_prompt)
         self.assertIn("expire within a week", developer_prompt)
+        self.assertIn("Use address", developer_prompt)
+        self.assertIn("active, unaddressed, currently relevant", developer_prompt)
+        self.assertNotIn("Update rules:", developer_prompt)
+        self.assertNotIn("Archive rules:", developer_prompt)
+        self.assertNotIn("archive", developer_prompt.casefold())
+        op_schema = text_format["schema"]["properties"]["ops"]["items"]["properties"]["op"]
+        self.assertEqual(op_schema["enum"], ["create", "address", "support", "noop"])
 
     def test_extract_reads_sdk_response_shape(self) -> None:
         class FakeContent:
@@ -1634,6 +2133,8 @@ class OpenAIMemoryConsolidationProviderTest(unittest.TestCase):
         self.assertEqual(text_format["name"], "memory_consolidation")
         op_schema = text_format["schema"]["properties"]["ops"]["items"]
         self.assertIn("merge", op_schema["properties"]["op"]["enum"])
+        self.assertNotIn("update", op_schema["properties"]["op"]["enum"])
+        self.assertNotIn("archive", op_schema["properties"]["op"]["enum"])
         self.assertIn("memory_ids", op_schema["properties"])
         self.assertIn("memory_ids", op_schema["required"])
         self.assertIn("supported_episode_ids", op_schema["properties"])
@@ -1643,6 +2144,7 @@ class OpenAIMemoryConsolidationProviderTest(unittest.TestCase):
         self.assertIn("required minimum number", developer_prompt)
         self.assertIn("Merge related memories", developer_prompt)
         self.assertIn("source memory IDs", developer_prompt)
+        self.assertIn("skip vague followups rather than guessing", developer_prompt)
         user_payload = json.loads(client.responses.kwargs["input"][1]["content"])
         self.assertEqual(user_payload["min_evidence_episodes"], 4)
         self.assertEqual(user_payload["episode_clusters"][0][0]["episode_id"], "ep1")

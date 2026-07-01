@@ -2,11 +2,13 @@ import inspect
 import unittest
 
 import tailwag_memory
+import tailwag_memory.memory_items as memory_items
 from tailwag_memory import (
     DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
     EmbeddingProvider,
     EpisodeIngestionService,
     EpisodeInput,
+    EpisodeMentionInput,
     EpisodeMemoryExtractionResult,
     EpisodeMemoryExtractionService,
     EpisodeMemoryResult,
@@ -56,6 +58,7 @@ class PackageImportTest(unittest.TestCase):
             "EmbeddingProvider",
             "EpisodeIngestionService",
             "EpisodeInput",
+            "EpisodeMentionInput",
             "EpisodeMemoryExtractionResult",
             "EpisodeMemoryExtractionService",
             "EpisodeMemoryResult",
@@ -101,6 +104,7 @@ class PackageImportTest(unittest.TestCase):
             EmbeddingProvider,
             EpisodeIngestionService,
             EpisodeInput,
+            EpisodeMentionInput,
             EpisodeMemoryExtractionResult,
             EpisodeMemoryExtractionService,
             EpisodeMemoryResult,
@@ -147,8 +151,13 @@ class PackageImportTest(unittest.TestCase):
         self.assertIs(tailwag_memory.TailwagMemoryClient, TailwagMemoryClient)
         self.assertIs(tailwag_memory.Settings, Settings)
         self.assertIs(tailwag_memory.EpisodeInput, EpisodeInput)
+        self.assertIs(tailwag_memory.EpisodeMentionInput, EpisodeMentionInput)
         self.assertIs(tailwag_memory.EpisodeIngestionService, EpisodeIngestionService)
         self.assertIs(tailwag_memory.EpisodeRetrievalService, EpisodeRetrievalService)
+        self.assertNotIn("address_item", tailwag_memory.__all__)
+        self.assertNotIn("address_item", memory_items.__all__)
+        self.assertNotIn("stable_memory_id", tailwag_memory.__all__)
+        self.assertNotIn("stable_memory_id", memory_items.__all__)
 
     def test_client_exposes_email_rekey_contract(self) -> None:
         signature = inspect.signature(TailwagMemoryClient.rekey_person_by_email)

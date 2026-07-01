@@ -44,6 +44,14 @@ class EventAttendeeInput:
 
 
 @dataclass(frozen=True)
+class EpisodeMentionInput:
+    """Person mentioned in an episode without implying participation."""
+
+    person: PersonInput
+    source: str = "caller"
+
+
+@dataclass(frozen=True)
 class EpisodeInput:
     """Caller-supplied episode payload for ingestion."""
 
@@ -55,6 +63,7 @@ class EpisodeInput:
     retention_class: str
     place: PlaceInput
     participants: list[PersonInput] = field(default_factory=list)
+    mentioned_people: list[EpisodeMentionInput] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "EpisodeInput":
@@ -62,6 +71,7 @@ class EpisodeInput:
 
         place = payload.get("place") or {}
         participants = payload.get("participants") or []
+        mentioned_people = payload.get("mentioned_people") or []
         return cls(
             id=payload["id"],
             episode_type=payload["episode_type"],
@@ -85,6 +95,22 @@ class EpisodeInput:
                     source=item.get("source", "caller"),
                 )
                 for item in participants
+            ],
+            mentioned_people=[
+                EpisodeMentionInput(
+                    person=PersonInput(
+                        id=item["person"]["id"],
+                        display_name=item["person"].get("display_name"),
+                        email=item["person"].get("email"),
+                        consent_status=item["person"].get("consent_status"),
+                        face_embedding=item["person"].get("face_embedding"),
+                        audio_embedding=item["person"].get("audio_embedding"),
+                        role=item["person"].get("role", "mentioned"),
+                        source=item["person"].get("source", item.get("source", "caller")),
+                    ),
+                    source=item.get("source", "caller"),
+                )
+                for item in mentioned_people
             ],
         )
 
@@ -149,11 +175,15 @@ class SearchQuery:
 
 @dataclass(frozen=True)
 class EpisodeMemoryResult:
-    """Episode search result with optional vector score."""
+    """Episode search result with optional time, place, and vector score."""
 
     episode_id: str
     transcript: str
     score: float | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    building_code: str | None = None
+    room_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -216,19 +246,17 @@ class PersonContextSource:
 
 @dataclass(frozen=True)
 class MemoryItemInput:
-    """Caller-supplied memory item mutation payload."""
+    """Caller-supplied memory item creation payload."""
 
     kind: str
     key: str
     summary: str
     source: str = "caller"
     source_ref: str = ""
-    status: str = "active"
     observed_at: str = ""
     due_at: str = ""
     expires_at: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
-    memory_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -270,8 +298,8 @@ class PersonMemoryExtractionResult:
     person_id: str
     update_requested: bool = False
     created_memory_ids: list[str] = field(default_factory=list)
-    updated_memory_ids: list[str] = field(default_factory=list)
-    archived_memory_ids: list[str] = field(default_factory=list)
+    addressed_memory_ids: list[str] = field(default_factory=list)
+    supported_memory_ids: list[str] = field(default_factory=list)
     skipped_ops: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
 
@@ -292,8 +320,6 @@ class PersonMemoryConsolidationResult:
     person_id: str
     update_requested: bool = False
     created_memory_ids: list[str] = field(default_factory=list)
-    updated_memory_ids: list[str] = field(default_factory=list)
-    archived_memory_ids: list[str] = field(default_factory=list)
     skipped_ops: list[dict[str, Any]] = field(default_factory=list)
     candidate_episode_ids: list[str] = field(default_factory=list)
     provider_called: bool = False

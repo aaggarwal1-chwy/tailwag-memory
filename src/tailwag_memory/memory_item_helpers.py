@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-import hashlib
 import json
 from typing import Any
 
@@ -11,14 +10,10 @@ from .memory_item_constants import (
     IDENTITY_OWNED_PREFIXES,
     MEMORY_ITEM_KINDS,
     MEMORY_ITEM_SOURCES,
-    MEMORY_ITEM_STATUSES,
     TRANSIENT_TASK_MARKERS,
     TRANSIENT_TASK_TOPICS,
 )
 from .models import MemoryItemInput, MemoryItemResult, utc_now_iso
-
-
-_PRESERVE = object()
 
 
 @dataclass(frozen=True)
@@ -43,12 +38,6 @@ def normalize_memory_source(value: Any) -> str:
     """Normalize a memory item source to an allowed value."""
     source = str(value or "").strip()
     return source if source in MEMORY_ITEM_SOURCES else "caller"
-
-
-def stable_memory_id(*, person_id: str, kind: str, key: str) -> str:
-    """Return the deterministic memory id for a person item."""
-    seed = "|".join([person_id, kind, key]).encode("utf-8")
-    return f"mem_{hashlib.sha256(seed).hexdigest()[:32]}"
 
 
 def _json_dumps(value: Any) -> str:
@@ -123,6 +112,15 @@ def _is_expired(item: MemoryItemResult, *, now: datetime | None = None) -> bool:
     return expires is not None and _now(now) > expires
 
 
+def _followup_expired_at_creation(*, kind: str, expires_at: str, now: str | None) -> bool:
+    """Return whether a generated follow-up is already expired at creation time."""
+    if kind != "followup":
+        return False
+    expires = _parse_iso(expires_at)
+    ref = _parse_iso(now)
+    return expires is not None and ref is not None and ref > expires
+
+
 def _summary_has_identity_owned_prefix(summary: str) -> bool:
     """Return whether a summary starts with directory-owned data."""
     lowered = summary.strip().casefold()
@@ -140,7 +138,6 @@ def _looks_like_transient_task_status(summary: str) -> bool:
 def _validate_memory_fields(
     *,
     kind: str,
-    status: str,
     summary: str,
     observed_at: str,
     due_at: str,
@@ -154,14 +151,16 @@ def _validate_memory_fields(
         raise ValueError("identity-owned directory facts do not belong in memory items")
     if kind != "followup" and _looks_like_transient_task_status(summary):
         raise ValueError("transient task status belongs in a followup memory item")
-    if status not in MEMORY_ITEM_STATUSES:
-        raise ValueError(f"invalid memory item status: {status!r}")
     if observed_at and _parse_iso(observed_at) is None:
         raise ValueError("observed_at must be an ISO datetime")
     if due_at and _parse_iso(due_at) is None:
         raise ValueError("due_at must be an ISO datetime")
     if expires_at and _parse_iso(expires_at) is None:
         raise ValueError("expires_at must be an ISO datetime")
+    due = _parse_iso(due_at)
+    expires = _parse_iso(expires_at)
+    if kind == "followup" and due is not None and expires is not None and expires < due:
+        raise ValueError("followup expires_at must be greater than or equal to due_at")
     if kind == "followup" and require_followup_expiry and not expires_at:
         raise ValueError("followup memory items require expires_at")
 
@@ -170,7 +169,6 @@ def _validate_item(item: MemoryItemInput) -> MemoryItemInput:
     """Validate and normalize a memory item input."""
     kind = str(item.kind or "").strip()
     source = str(item.source or "").strip()
-    status = str(item.status or "").strip()
     key = normalize_memory_key(item.key)
     summary = str(item.summary or "").strip()
     if kind not in MEMORY_ITEM_KINDS:
@@ -181,7 +179,6 @@ def _validate_item(item: MemoryItemInput) -> MemoryItemInput:
         raise ValueError("memory item key is required")
     _validate_memory_fields(
         kind=kind,
-        status=status,
         summary=summary,
         observed_at=str(item.observed_at or "").strip(),
         due_at=str(item.due_at or "").strip(),
@@ -194,7 +191,6 @@ def _validate_item(item: MemoryItemInput) -> MemoryItemInput:
         key=key,
         summary=summary,
         source=source,
-        status=status,
         source_ref=str(item.source_ref or "").strip(),
         observed_at=str(item.observed_at or "").strip(),
         due_at=str(item.due_at or "").strip(),
@@ -203,30 +199,13 @@ def _validate_item(item: MemoryItemInput) -> MemoryItemInput:
     )
 
 
-def _validate_update_fields(item: MemoryItemInput) -> None:
-    """Validate fields allowed during memory item updates."""
-    summary = str(item.summary or "").strip()
-    status = str(item.status or "").strip()
-    _validate_memory_fields(
-        kind=str(item.kind or "").strip(),
-        status=status,
-        summary=summary,
-        observed_at=str(item.observed_at or "").strip(),
-        due_at=str(item.due_at or "").strip(),
-        expires_at=str(item.expires_at or "").strip(),
-        require_followup_expiry=False,
-    )
-    if item.kind == "followup" and status == "active" and not item.expires_at:
-        raise ValueError("active followup memory items require expires_at")
-
-
 def _tokenize(text: str) -> set[str]:
     """Return coarse tokens for transcript-memory matching."""
     normalized = "".join(char.casefold() if char.isalnum() else " " for char in str(text or ""))
     return {part for part in normalized.split() if len(part) >= 3}
 
 
-def _operation_metadata(raw: dict[str, Any], *, default: dict[str, Any] | object) -> dict[str, Any] | object:
+def _operation_metadata(raw: dict[str, Any], *, default: dict[str, Any]) -> dict[str, Any]:
     """Extract and validate metadata from an operation payload."""
     if "metadata" not in raw:
         return default
@@ -236,6 +215,7 @@ def _operation_metadata(raw: dict[str, Any], *, default: dict[str, Any] | object
     if not isinstance(value, dict):
         raise ValueError("memory operation metadata must be an object")
     return dict(value)
+
 
 def _consolidation_metadata(raw: dict[str, Any], *, default: dict[str, Any] | object) -> dict[str, Any] | object:
     """Return consolidation metadata only when it is the strict empty object."""

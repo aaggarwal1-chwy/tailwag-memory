@@ -17,7 +17,7 @@ from .memory_item_constants import (
 )
 from .memory_item_consolidation import MemoryConsolidationService
 from .memory_item_extraction import EpisodeMemoryExtractionService
-from .memory_item_helpers import followup_is_visible, normalize_memory_key, normalize_memory_source, stable_memory_id
+from .memory_item_helpers import followup_is_visible, normalize_memory_key, normalize_memory_source
 from .memory_item_openai import OpenAIMemoryConsolidationProvider, OpenAIMemoryExtractionProvider
 from .memory_item_protocols import MemoryConsolidationProvider, MemoryExtractionProvider
 from .memory_item_service import MemoryItemService
@@ -46,5 +46,4 @@ __all__ = [
     "followup_is_visible",
     "normalize_memory_key",
     "normalize_memory_source",
-    "stable_memory_id",
 ]

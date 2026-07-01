@@ -7,7 +7,7 @@ Neo4j-only hybrid memory service with OpenAI-backed embeddings and deterministic
 - [Repository agent instructions](AGENTS.md)
 - [Project-scoped Codex custom agents](.codex/agents/)
 - [Architecture](docs/architecture.md)
-- [Argos migration guide](docs/argos-migration.md)
+- [Argos compatibility note](docs/argos-migration.md)
 - [Agent and subagent trigger matrix](docs/agent-trigger-matrix.md)
 - [Memory endpoints reference](docs/memory-endpoints.md)
 - [Python package integration guide](docs/integration-guide.md)
@@ -28,6 +28,7 @@ Implemented now:
 - `ATTENDED`
 - `HAS_MEMORY`
 - `SUPPORTED_BY`
+- `ADDRESSED_BY`
 - `SUPERSEDED_BY`
 - OpenAI-backed episode embeddings
 - OpenAI-backed memory item embeddings
@@ -111,7 +112,7 @@ For Slack polling, also add your bot token:
 SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
-For the current graph model and scope boundaries, see the [architecture](docs/architecture.md). For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package setup and integration ownership, see the [Python package integration guide](docs/integration-guide.md). For local commands, see the [CLI reference](docs/cli-reference.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md). For replacing Argos memory behavior, see the [Argos migration guide](docs/argos-migration.md).
+For the current graph model and scope boundaries, see the [architecture](docs/architecture.md). For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package setup and integration ownership, see the [Python package integration guide](docs/integration-guide.md). For local commands, see the [CLI reference](docs/cli-reference.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md). For the current Argos integration boundary, see the [Argos compatibility note](docs/argos-migration.md).
 
 Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
 Episode transcripts and memory item summaries are sent to OpenAI for text embeddings when the OpenAI provider is configured. Person context is assembled deterministically from durable memory items, visible follow-ups, and the target person's recent transcript lines. When `--semantic-scope` is provided for person context, the package uses vector matching to rank durable memory items; rendered episode context remains bounded to lines spoken by the target person.

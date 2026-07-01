@@ -12,7 +12,7 @@ This guide stays at the package setup and integration-boundary level. For detail
 - Python endpoints, parameters, input models, return shapes, and service constructors: [Memory Endpoints Reference](memory-endpoints.md)
 - Local command examples and CLI workflow: [CLI Reference](cli-reference.md)
 - Slack app setup, CLI polling, package-level polling, and Slack state behavior: [Slack Ingestion Guide](slack-ingestion.md)
-- Argos replacement boundary, adapter contract, identity rules, and migration checklist: [Argos Migration Guide](argos-migration.md)
+- Current Argos integration boundary and compatibility expectations: [Argos Compatibility Note](argos-migration.md)
 
 ## Install From Another Local Repo
 
@@ -90,7 +90,7 @@ Normal package consumers should start with:
 from tailwag_memory import TailwagMemoryClient
 ```
 
-`TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, episode recording, memory extraction/backfill, memory consolidation, and prompt-ready person context. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
+`TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, episode recording, memory extraction/backfill, memory consolidation, prompt-ready person context, and structured semantic search across a person's episodes and memory items. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
 
 Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, or direct memory item operations. Their constructor and method details also live in the endpoint reference.
 

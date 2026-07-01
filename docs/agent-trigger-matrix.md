@@ -22,7 +22,7 @@ Concrete repo-local custom agents and their usage log live in `.codex/agents/`, 
 | CLI Mockup Agent | Developer-facing command surface | CLI commands, command docs |
 | Source Adapter Agent | External source adapters that convert third-party activity into memory inputs | adapter services, adapter tests, source-specific docs and CLI wiring |
 | Integration Contract Agent | Package-consumer boundaries and compatibility | integration guide updates, API compatibility checks, example payload validation |
-| Argos Migration Agent | Tailwag compatibility and migration planning for replacing argos-agent memory | Argos-facing API contracts, migration notes, compatibility tests, handoff plans |
+| Argos Migration Agent | Tailwag compatibility for the post-migration argos-agent memory provider | Argos-facing API contracts, compatibility notes, compatibility tests, handoff plans |
 | Privacy/Biometric Review Agent | Consent, biometric vectors, retention language, and raw media boundaries | privacy review notes, consent/biometric docs, guardrail tests |
 | Scope Guard Agent | Scope boundary checks and deferred concept protection | scope review notes, deferred-concept checks, scope documentation updates |
 | Release Quality Gate Agent | Final pre-merge or pre-release verification | quality checklist, verification summary, release readiness notes |
@@ -35,7 +35,7 @@ Concrete repo-local custom agents and their usage log live in `.codex/agents/`, 
 | Trigger | Agent | Subagents To Consider | Scope Boundary | Handoff |
 | --- | --- | --- | --- | --- |
 | Repo lacks package structure, local run instructions, or environment examples | Project Scaffold Agent | Documentation Agent | Create scaffolding only; do not implement domain logic | Handoff to Schema Agent and CLI Mockup Agent |
-| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, `HAS_MEMORY`, `SUPPORTED_BY`, `SUPERSEDED_BY`, episode transcript vector index, person biometric vector indexes, and the `MemoryItem.summary_embedding` vector index | Handoff to Ingestion Agent once schema is available |
+| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `PARTICIPATED_IN`, `OCCURRED_AT`, `ATTENDED`, `HAS_MEMORY`, `SUPPORTED_BY`, `ADDRESSED_BY`, `SUPERSEDED_BY`, episode transcript vector index, person biometric vector indexes, and the `MemoryItem.summary_embedding` vector index | Handoff to Ingestion Agent once schema is available |
 | Need embedding generation or embedding configuration | OpenAI Embeddings Agent | Test Agent, Code Refactor Agent | Runtime embeddings use OpenAI; tests use deterministic mocks and no network calls | Handoff to Ingestion Agent and Retrieval Agent |
 | Need to create or update episode memory records or place events | Ingestion Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Test Agent | Write path only; no retrieval ranking logic | Handoff to Retrieval Agent for query behavior |
 | Need durable transcript-derived memory items, memory item extraction, memory item context formatting, or memory item vector retrieval | Memory Item Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Retrieval Agent, Integration Contract Agent, Test Agent, Scope Guard Agent | Memory item semantics only; do not expand into a broad ontology, triple store, or open-ended semantic fact graph | Handoff to Retrieval Agent for context selection and Integration Contract Agent for public APIs |
@@ -44,7 +44,7 @@ Concrete repo-local custom agents and their usage log live in `.codex/agents/`, 
 | Need a developer command, shellable workflow, or local demo entry point | CLI Mockup Agent | Ingestion Agent, Retrieval Agent, Source Adapter Agent, Documentation Agent | CLI-first; no API surface | Handoff to Documentation Agent for usage docs |
 | Need to ingest Slack or another external source into `EpisodeInput` or `EventInput` | Source Adapter Agent | Ingestion Agent, CLI Mockup Agent, Privacy/Biometric Review Agent, Test Agent | Adapter and mapping behavior only; core writes stay in ingestion services | Handoff to Ingestion Agent for write behavior |
 | Public dataclasses, service methods, env vars, package metadata, examples, or integration docs change | Integration Contract Agent | Documentation Agent, Test Agent, Release Quality Gate Agent | Package-consumer boundaries only; no internal refactor unless needed to preserve compatibility | Handoff to owning implementation agent for behavior gaps |
-| Need to replace or integrate with `argos-agent`, remove `argos_src/memory`, or validate Argos-facing Tailwag APIs | Argos Migration Agent | Integration Contract Agent, Memory Item Agent, Source Adapter Agent, Documentation Agent, Test Agent, Release Quality Gate Agent | Tailwag compatibility and migration planning only; no unrelated Argos runtime, robot, face, speaker, navigation, or display internals | Handoff to Memory Item Agent for Tailwag memory behavior and Source Adapter Agent for moved Slack ingestion |
+| Need to preserve or validate `argos-agent` Tailwag memory provider compatibility, including Argos-facing Tailwag APIs | Argos Migration Agent | Integration Contract Agent, Memory Item Agent, Source Adapter Agent, Documentation Agent, Test Agent, Release Quality Gate Agent | Tailwag compatibility only; no unrelated Argos runtime, robot, face, speaker, navigation, or display internals | Handoff to Memory Item Agent for Tailwag memory behavior and Source Adapter Agent for Slack ingestion behavior |
 | Consent, `face_embedding`, `audio_embedding`, retention, recognition source, Slack identity, or raw media language changes | Privacy/Biometric Review Agent | Ingestion Agent, Retrieval Agent, Documentation Agent, Scope Guard Agent | Review and guardrails only; no upstream recognition implementation | Handoff to owning implementation agent for behavior fixes |
 | A change risks adding deferred concepts, confidence fields, `org_id`, secondary persistence, or external vector databases | Scope Guard Agent | Neo4j Schema Agent, Ingestion Agent, Memory Item Agent, Documentation Agent, Test Agent | Scope review and guardrails only unless scope is explicitly updated; approved `MemoryItem` work is limited to durable transcript-derived memory, not a broad ontology | Handoff to Documentation Agent when scope changes |
 | Broad work is ready for final handoff, merge, package-facing release, or tag | Release Quality Gate Agent | Test Agent, Documentation Agent, Integration Contract Agent | Final verification only; do not implement feature behavior | Handoff back to owning agent if verification fails |
@@ -170,8 +170,8 @@ Inputs:
 Outputs:
 
 - memory item models and services
-- create, update, archive, and retrieval behavior for memory items
-- evidence links such as `(:Person)-[:HAS_MEMORY]->(:MemoryItem)`, `(:MemoryItem)-[:SUPPORTED_BY]->(:Episode)`, and supersession links such as `(:MemoryItem)-[:SUPERSEDED_BY]->(:MemoryItem)`
+- create, support, address, supersede, merge, and retrieval behavior for memory items
+- evidence links such as `(:Person)-[:HAS_MEMORY]->(:MemoryItem)`, `(:MemoryItem)-[:SUPPORTED_BY]->(:Episode)`, follow-up resolution links such as `(:MemoryItem)-[:ADDRESSED_BY]->(:Episode)`, and supersession links such as `(:MemoryItem)-[:SUPERSEDED_BY]->(:MemoryItem)`
 - tests for memory item validation, dedupe, lifecycle, extraction, and context formatting
 
 Non-goals:
@@ -303,19 +303,19 @@ Non-goals:
 
 ### Argos Migration Agent
 
-Owns Tailwag compatibility and migration planning for replacing `argos-agent` memory.
+Owns Tailwag compatibility for the post-migration `argos-agent` memory provider.
 
 Inputs:
 
 - current Argos memory, identity, Slack, and prompt-context behavior
 - Tailwag package APIs and runtime configuration
 - required Argos prompt-context shape
-- migration constraints, rollout sequence, and explicitly stated compatibility expectations
+- post-migration constraints and explicitly stated compatibility expectations
 
 Outputs:
 
 - Tailwag integration contracts for Argos
-- migration checklist for removing or bypassing `argos_src/memory`
+- post-migration compatibility notes for `argos_src/memory_provider`
 - compatibility notes for live-chat transcripts, Slack-derived memory, and person context retrieval
 - tests or manual checks that compare Tailwag behavior with Argos expectations
 
@@ -466,7 +466,7 @@ Non-goals:
 - If a task touches ingestion and retrieval, keep writes in the Ingestion Agent and reads in the Retrieval Agent.
 - If a change adds a new concept beyond `Person`, `Episode`, `Event`, `Place`, or approved transcript-derived `MemoryItem`, pause and update the project scope before implementation.
 - If a change adds or changes memory item semantics, trigger the Memory Item Agent before handing off to schema, embeddings, or retrieval owners.
-- If a change targets `argos-agent` compatibility or replacement of `argos_src/memory`, trigger the Argos Migration Agent.
+- If a change targets `argos-agent` Tailwag memory provider compatibility, trigger the Argos Migration Agent.
 - If code starts mixing provider logic, Cypher, CLI parsing, and domain models in one file, trigger the Code Refactor Agent.
 - If a feature is difficult to test, trigger the Test Agent before expanding the feature.
 - If a change touches external source polling or source-to-memory mapping, trigger the Source Adapter Agent.

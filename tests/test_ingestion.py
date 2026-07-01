@@ -6,7 +6,7 @@ from tailwag_memory.ingestion import (
     PersonIngestionService,
     _person_upsert_cypher,
 )
-from tailwag_memory.models import EpisodeInput, EventAttendeeInput, EventInput, PersonInput, PlaceInput
+from tailwag_memory.models import EpisodeInput, EpisodeMentionInput, EventAttendeeInput, EventInput, PersonInput, PlaceInput
 import unittest
 
 
@@ -258,6 +258,72 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertIn("p.display_name = coalesce(person.display_name, p.display_name)", query.query)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", query.query)
         self.assertIn("person.consent_status <> 'consented'", query.query)
+
+    def test_ingest_episode_writes_mentions_without_participation(self) -> None:
+        runner = RecordingQueryRunner()
+        service = EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        service.ingest(
+            EpisodeInput(
+                id="episode_external_mentions",
+                episode_type="conversation",
+                start_time="2026-06-15T10:00:00+00:00",
+                end_time="2026-06-15T10:05:00+00:00",
+                transcript="Jamie: Can Chandra review this?",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                mentioned_people=[
+                    EpisodeMentionInput(
+                        person=PersonInput(id="person_chandra", display_name="Chandra", role="mentioned"),
+                        source="slack",
+                    )
+                ],
+            )
+        )
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["participant_ids"], [])
+        self.assertEqual(query.parameters["mentioned_person_ids"], ["person_chandra"])
+        self.assertEqual(query.parameters["mentioned_people"][0]["person_id"], "person_chandra")
+        self.assertEqual(query.parameters["mentioned_people"][0]["source"], "slack")
+        self.assertIn("MERGE (p)-[r:MENTIONED_IN]->(e)", query.query)
+        self.assertIn("SET r.source = mentioned.source", query.query)
+        self.assertIn("DELETE old_mention", query.query)
+        self.assertIn("p.last_seen = p.last_seen", query.query)
+
+    def test_ingest_episode_resolves_mentioned_person_by_email(self) -> None:
+        runner = RecordingQueryRunner(results=[[{"person_id": "person_chandra"}]])
+        service = EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        service.ingest(
+            EpisodeInput(
+                id="episode_external_mentions",
+                episode_type="conversation",
+                start_time="2026-06-15T10:00:00+00:00",
+                end_time="2026-06-15T10:05:00+00:00",
+                transcript="Jamie: Can Chandra review this?",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                mentioned_people=[
+                    EpisodeMentionInput(
+                        person=PersonInput(
+                            id="slack:U3",
+                            display_name="Chandra Slack",
+                            email="chandra@example.com",
+                            role="mentioned",
+                            source="slack",
+                        ),
+                        source="slack",
+                    )
+                ],
+            )
+        )
+
+        query = runner.queries[1]
+        self.assertEqual(query.parameters["mentioned_person_ids"], ["person_chandra"])
+        self.assertEqual(query.parameters["mentioned_people"][0]["person_id"], "person_chandra")
+        self.assertEqual(query.parameters["mentioned_people"][0]["id"], "person_chandra")
+        self.assertEqual(query.parameters["mentioned_people"][0]["source"], "slack")
 
     def test_ingest_episode_attaches_slack_participant_to_existing_email_person(self) -> None:
         runner = RecordingQueryRunner(results=[[{"person_id": "person_jamie"}]])

@@ -51,6 +51,10 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
                     {
                         "episode_id": "episode_1",
                         "transcript": "Jamie: Any chargers?",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "end_time": "2026-06-16T14:05:00+00:00",
+                        "building_code": "MAIN",
+                        "room_id": "101",
                     }
                 ]
             ]
@@ -60,8 +64,39 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         results = service.by_person("person_jamie", limit=2)
 
         self.assertEqual(results[0].episode_id, "episode_1")
+        self.assertEqual(results[0].start_time, "2026-06-16T14:00:00+00:00")
+        self.assertEqual(results[0].end_time, "2026-06-16T14:05:00+00:00")
+        self.assertEqual(results[0].building_code, "MAIN")
+        self.assertEqual(results[0].room_id, "101")
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 2})
         self.assertIn("e.id AS episode_id", runner.queries[0].query)
+
+    def test_by_place_returns_episode_time_and_place(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "episode_id": "episode_1",
+                        "transcript": "Jamie: Any chargers?",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "end_time": "2026-06-16T14:05:00+00:00",
+                        "building_code": "MAIN",
+                        "room_id": "101",
+                    }
+                ]
+            ]
+        )
+        service = EpisodeRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        results = service.by_place("MAIN", "101", limit=2)
+
+        self.assertEqual(results[0].episode_id, "episode_1")
+        self.assertEqual(results[0].start_time, "2026-06-16T14:00:00+00:00")
+        self.assertEqual(results[0].end_time, "2026-06-16T14:05:00+00:00")
+        self.assertEqual(results[0].building_code, "MAIN")
+        self.assertEqual(results[0].room_id, "101")
+        self.assertIn("e.start_time AS start_time", runner.queries[0].query)
+        self.assertIn("$building_code AS building_code", runner.queries[0].query)
 
     def test_vector_search_uses_transcript_index(self) -> None:
         runner = RecordingQueryRunner(
@@ -70,6 +105,9 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
                     {
                         "episode_id": "episode_1",
                         "transcript": "Jamie: Any chargers?",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "building_code": "MAIN",
+                        "room_id": "101",
                         "score": 0.91,
                     }
                 ]
@@ -81,8 +119,12 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
 
         self.assertEqual(results[0].episode_id, "episode_1")
         self.assertEqual(results[0].score, 0.91)
+        self.assertEqual(results[0].start_time, "2026-06-16T14:00:00+00:00")
+        self.assertEqual(results[0].building_code, "MAIN")
+        self.assertEqual(results[0].room_id, "101")
         self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[0].query)
         self.assertIn("WHERE node:Episode", runner.queries[0].query)
+        self.assertIn("OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)", runner.queries[0].query)
 
     def test_search_clause_rejects_unknown_index_identifiers(self) -> None:
         # Vector index names are interpolated as string literals from a known allowlist.
@@ -90,10 +132,24 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
             _vector_search_clause("episode_transcript_embedding) RETURN 1 //", "node", "limit")
 
     def test_hybrid_search_includes_graph_filters(self) -> None:
-        runner = RecordingQueryRunner()
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "episode_id": "episode_1",
+                        "transcript": "Jamie: Any chargers?",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "end_time": "2026-06-16T14:05:00+00:00",
+                        "building_code": "MAIN",
+                        "room_id": "101",
+                        "score": 0.91,
+                    }
+                ]
+            ]
+        )
         service = EpisodeRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
 
-        service.hybrid_search(
+        results = service.hybrid_search(
             SearchQuery(
                 text="chargers",
                 person_id="person_jamie",
@@ -110,6 +166,13 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(params["limit"], 5)
         self.assertEqual(params["candidate_limit"], 25)
         self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[0].query)
+        self.assertEqual(results[0].start_time, "2026-06-16T14:00:00+00:00")
+        self.assertEqual(results[0].end_time, "2026-06-16T14:05:00+00:00")
+        self.assertEqual(results[0].building_code, "MAIN")
+        self.assertEqual(results[0].room_id, "101")
+        self.assertIn("node.start_time AS start_time", runner.queries[0].query)
+        self.assertIn("place.building_code AS building_code", runner.queries[0].query)
+        self.assertIn("WITH node, score, head(places) AS place", runner.queries[0].query)
 
     def test_hybrid_search_supports_one_sided_place_filters(self) -> None:
         runner = RecordingQueryRunner()

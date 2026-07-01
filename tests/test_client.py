@@ -8,7 +8,9 @@ from tailwag_memory.episode_normalization import normalize_robot_speaker_labels
 from tailwag_memory.models import (
     EpisodeInput,
     EpisodeMemoryExtractionResult,
+    EpisodeMemoryResult,
     MemoryConsolidationResult,
+    MemoryItemResult,
     PersonInput,
     PersonMemoryConsolidationResult,
     PersonMemoryExtractionResult,
@@ -163,6 +165,8 @@ class TailwagMemoryClientTest(unittest.TestCase):
                             person_id="person_jamie",
                             update_requested=True,
                             created_memory_ids=["mem_1"],
+                            addressed_memory_ids=["mem_followup_addressed"],
+                            supported_memory_ids=["mem_followup_supported"],
                         )
                     ],
                 )
@@ -174,6 +178,8 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(calls, [("ingest", "episode_1"), ("extract", "episode_1", False)])
         self.assertEqual(result.episode_id, "episode_1")
         self.assertEqual(result.memory_results[0].created_memory_ids, ["mem_1"])
+        self.assertEqual(result.memory_results[0].addressed_memory_ids, ["mem_followup_addressed"])
+        self.assertEqual(result.memory_results[0].supported_memory_ids, ["mem_followup_supported"])
         self.assertEqual(result.memory_errors, [])
 
     def test_record_episode_normalizes_robot_user_label_for_single_speaker(self) -> None:
@@ -384,6 +390,133 @@ class TailwagMemoryClientTest(unittest.TestCase):
         )
         self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4, 2)])
         self.assertEqual(retrieval_calls, [("person_jamie", 3, "chargers")])
+
+    def test_search_semantic_memory_returns_episode_and_memory_item_results(self) -> None:
+        runner = FakeRunner()
+        calls = []
+        now = datetime(2026, 6, 18, tzinfo=timezone.utc)
+
+        class FakeEmbeddingProvider:
+            def embed(self, text: str) -> list[float]:
+                calls.append(("embed", text))
+                return [0.1, 0.2]
+
+        class FakeEpisodeRetrieval:
+            def __init__(self, runner_arg, embeddings) -> None:
+                calls.append(("episode_init", runner_arg, embeddings))
+
+            def hybrid_search_with_embedding(self, query, embedding):
+                calls.append(("episode_search", query, embedding))
+                return [
+                    EpisodeMemoryResult(
+                        episode_id="episode_1",
+                        transcript="Jamie: Robot demos are scheduled.",
+                        score=0.7,
+                        start_time="2026-06-01T10:00:00Z",
+                        end_time="2026-06-01T10:05:00Z",
+                        building_code="BOS",
+                        room_id="lab",
+                    )
+                ]
+
+        class FakeMemoryItemService:
+            def __init__(self, runner_arg, embeddings) -> None:
+                calls.append(("memory_init", runner_arg, embeddings))
+
+            def vector_search_by_embedding(self, **kwargs):
+                calls.append(("memory_search", kwargs))
+                return [
+                    MemoryItemResult(
+                        memory_id="memory_1",
+                        person_id="person_jamie",
+                        kind="preference",
+                        key="demos",
+                        summary="Likes robot demos.",
+                        source="extracted",
+                        source_ref="episode_1",
+                        observed_at="2026-06-01T10:00:00Z",
+                        score=0.9,
+                    )
+                ]
+
+        client = TailwagMemoryClient(runner, _settings())
+        embedding_provider = FakeEmbeddingProvider()
+        with patch.object(client, "_embeddings", return_value=embedding_provider):
+            with patch("tailwag_memory.client.EpisodeRetrievalService", FakeEpisodeRetrieval):
+                with patch("tailwag_memory.client.MemoryItemService", FakeMemoryItemService):
+                    result = client.search_semantic_memory(
+                        text=" robot demos ",
+                        person_id=" person_jamie ",
+                        building_code=" BOS ",
+                        limit=3,
+                        now=now,
+                    )
+
+        self.assertEqual(calls[0], ("embed", "robot demos"))
+        self.assertEqual(calls[1], ("episode_init", runner, embedding_provider))
+        self.assertEqual(calls[2][0], "episode_search")
+        self.assertEqual(calls[2][1].text, "robot demos")
+        self.assertEqual(calls[2][1].person_id, "person_jamie")
+        self.assertEqual(calls[2][1].building_code, "BOS")
+        self.assertIsNone(calls[2][1].room_id)
+        self.assertEqual(calls[2][1].limit, 3)
+        self.assertEqual(calls[2][2], [0.1, 0.2])
+        self.assertEqual(calls[3], ("memory_init", runner, embedding_provider))
+        self.assertEqual(
+            calls[4],
+            (
+                "memory_search",
+                {
+                    "person_id": "person_jamie",
+                    "embedding": [0.1, 0.2],
+                    "limit": 3,
+                    "now": now,
+                },
+            ),
+        )
+        self.assertEqual(
+            result,
+            {
+                "episodes": [
+                    {
+                        "episode_id": "episode_1",
+                        "transcript": "Jamie: Robot demos are scheduled.",
+                        "score": 0.7,
+                        "start_time": "2026-06-01T10:00:00Z",
+                        "end_time": "2026-06-01T10:05:00Z",
+                        "building_code": "BOS",
+                        "room_id": "lab",
+                    }
+                ],
+                "memory_items": [
+                    {
+                        "memory_id": "memory_1",
+                        "person_id": "person_jamie",
+                        "kind": "preference",
+                        "key": "demos",
+                        "summary": "Likes robot demos.",
+                        "source": "extracted",
+                        "source_ref": "episode_1",
+                        "status": "active",
+                        "observed_at": "2026-06-01T10:00:00Z",
+                        "created_at": "",
+                        "updated_at": "",
+                        "due_at": "",
+                        "expires_at": "",
+                        "metadata": {},
+                        "score": 0.9,
+                    }
+                ],
+            },
+        )
+
+    def test_search_semantic_memory_skips_empty_requests_without_embeddings(self) -> None:
+        client = TailwagMemoryClient(FakeRunner(), _settings())
+
+        empty_result = {"episodes": [], "memory_items": []}
+        with patch.object(client, "_embeddings", side_effect=AssertionError("embeddings should not be initialized")):
+            self.assertEqual(client.search_semantic_memory(text=" ", person_id="person_jamie"), empty_result)
+            self.assertEqual(client.search_semantic_memory(text="demos", person_id=" "), empty_result)
 
     def test_consolidate_memory_routes_single_person_and_all_people(self) -> None:
         calls = []
