@@ -182,11 +182,25 @@ def _distributions(records: list[dict[str, object]]) -> dict[str, dict[str, int]
     }
     for record in records:
         _increment(distributions["kind"], record.get("kind") or "unknown")
-        _increment(distributions["status"], record.get("status") or "unknown")
+        _increment(distributions["status"], _display_status(record))
         _increment(distributions["source"], record.get("source") or "unknown")
         _increment(distributions["person"], record.get("person_id") or "unknown")
         _increment(distributions["followup_state"], record.get("followup_state") or "unknown")
     return distributions
+
+
+def _display_status(record: dict[str, object]) -> object:
+    """Return the status bucket used by memory inspection reports."""
+
+    if record.get("status") == "superseded" or _has_values(record.get("superseded_by_memory_ids")):
+        return "superseded"
+    return record.get("status") or "unknown"
+
+
+def _has_values(raw: object) -> bool:
+    """Return whether a collected row value has any truthy entries."""
+
+    return isinstance(raw, list) and any(str(value or "").strip() for value in raw)
 
 
 def _increment(bucket: dict[str, int], value: object) -> None:

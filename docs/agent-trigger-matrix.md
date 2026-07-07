@@ -6,7 +6,7 @@ This document defines the project agents and subagents for the Neo4j-only memory
 
 Each agent owns a clear scope, trigger conditions, expected outputs, and handoff points. The goal is to prevent broad, tangled implementation passes.
 
-Concrete repo-local custom agents and their usage log live in `.codex/agents/`, and the root `AGENTS.md` makes agent selection part of the repository workflow. Use this matrix to decide which custom agent applies, then record material work in `.codex/agents/usage-log.md`.
+Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS.md` makes agent selection part of the repository workflow. Use this matrix to decide which custom agent applies.
 
 ## Agent Roster
 

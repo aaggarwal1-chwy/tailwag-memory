@@ -9,7 +9,6 @@ Before work, read AGENTS.md and docs/agent-trigger-matrix.md. Treat this file as
 
 Owns:
 - final verification checklist
-- agent usage log completeness
 - test and example sanity checks
 - release-readiness notes
 
@@ -32,7 +31,6 @@ Non-goals:
 Verification:
 - PYTHONPATH=src python3 -m unittest discover -s tests
 - review git status --short so unrelated dirty files are not mistaken for release changes
-- check .codex/agents/usage-log.md has an entry for material work
 - check README and integration examples still point to existing files and commands
 
 Handoff:

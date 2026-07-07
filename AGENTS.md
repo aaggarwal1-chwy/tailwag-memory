@@ -8,7 +8,6 @@ Before making a non-trivial change:
 2. Read each selected custom agent file.
 3. Keep edits inside the selected agents' ownership boundaries.
 4. Run the verification named by the selected custom agent when practical.
-5. Record the work in `.codex/agents/usage-log.md` with the date, task, active agents, and verification.
 
 When using Codex platform subagents, spawn or prompt each subagent to act as one named custom agent from `.codex/agents/`.
 If a task spans multiple roles, keep write ownership separate and document the handoff.

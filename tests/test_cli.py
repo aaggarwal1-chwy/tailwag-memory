@@ -653,6 +653,11 @@ class CliTest(unittest.TestCase):
         self.assertIn("tailwag-memory-items.html", html)
         self.assertIn("function renderLanes(visible)", html)
         self.assertIn("class=\"timeline-canvas\"", html)
+        self.assertIn("function selectedPeopleFromHash()", html)
+        self.assertIn("function togglePerson(personId)", html)
+        self.assertIn("overflow: visible", html)
+        self.assertIn("function bringMarkerToFront(marker)", html)
+        self.assertIn(".timeline-marker.active", html)
         self.assertIn("function hasLinkedMemory(record)", html)
         self.assertIn("memory-marker", html)
 

@@ -115,7 +115,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
     .timeline {{
       padding: 18px 24px 32px;
       min-width: 0;
-      overflow: auto;
+      overflow: visible;
     }}
     .toolbar {{
       display: flex;
@@ -195,6 +195,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
     .timeline-marker {{
       position: absolute;
       transform: translateX(-50%);
+      z-index: 1;
       width: min(230px, 28vw);
       min-width: 160px;
       border: 1px solid var(--line);
@@ -206,6 +207,13 @@ def person_timeline_report_html(report: InspectReport) -> str:
       font-size: 12px;
       line-height: 1.35;
       box-shadow: 0 5px 16px rgba(31, 41, 51, .08);
+    }}
+    .timeline-marker.active {{
+      z-index: 30;
+      box-shadow: 0 10px 28px rgba(31, 41, 51, .22);
+    }}
+    .timeline-marker.active .marker-text {{
+      max-height: none;
     }}
     .timeline-marker.event {{ border-top-color: var(--event); }}
     .timeline-marker.with-memory {{
@@ -317,20 +325,37 @@ def person_timeline_report_html(report: InspectReport) -> str:
       document.getElementById('warnings').innerHTML = `<div class="warnings">${{warnings.map(escapeHtml).join('<br>')}}</div>`;
     }}
     renderPeople();
-    renderTimeline(selectedPersonFromHash());
-    window.addEventListener('hashchange', () => renderTimeline(selectedPersonFromHash()));
+    renderTimeline(selectedPeopleFromHash());
+    window.addEventListener('hashchange', () => renderTimeline(selectedPeopleFromHash()));
 
-    function selectedPersonFromHash() {{
+    function selectedPeopleFromHash() {{
       const params = new URLSearchParams(location.hash.slice(1));
-      return params.get('person') || '';
+      const ids = params.getAll('person').flatMap((value) => String(value || '').split(','));
+      return [...new Set(ids.map((value) => value.trim()).filter(Boolean))];
     }}
-    function setPerson(personId) {{
-      if (personId) {{
-        location.hash = `person=${{encodeURIComponent(personId)}}`;
+    function setPeople(personIds) {{
+      const selected = [...new Set((personIds || []).filter(Boolean))];
+      if (selected.length) {{
+        const params = new URLSearchParams();
+        selected.forEach((personId) => params.append('person', personId));
+        location.hash = params.toString();
       }} else {{
         history.pushState('', document.title, location.pathname + location.search);
-        renderTimeline('');
+        renderTimeline([]);
       }}
+    }}
+    function togglePerson(personId) {{
+      if (!personId) {{
+        setPeople([]);
+        return;
+      }}
+      const selected = new Set(selectedPeopleFromHash());
+      if (selected.has(personId)) {{
+        selected.delete(personId);
+      }} else {{
+        selected.add(personId);
+      }}
+      setPeople([...selected]);
     }}
     function personSummaries() {{
       const people = new Map();
@@ -362,23 +387,34 @@ def person_timeline_report_html(report: InspectReport) -> str:
       button.type = 'button';
       button.className = 'person-button';
       button.dataset.personId = personId;
+      button.setAttribute('aria-pressed', 'false');
       button.innerHTML = `<span>${{escapeHtml(label)}}</span><span class="count">${{count}}</span>`;
-      button.addEventListener('click', () => setPerson(personId));
+      button.addEventListener('click', () => togglePerson(personId));
       return button;
     }}
-    function renderTimeline(personId) {{
+    function renderTimeline(personIds) {{
+      const selected = new Set(personIds || []);
       document.querySelectorAll('.person-button').forEach((button) => {{
-        button.classList.toggle('active', button.dataset.personId === personId);
+        const active = button.dataset.personId ? selected.has(button.dataset.personId) : selected.size === 0;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
       }});
-      const visible = personId ? records.filter((record) => record.person_id === personId) : records;
+      const visible = selected.size ? records.filter((record) => selected.has(record.person_id || '')) : records;
       document.getElementById('recordCount').textContent = visible.length;
-      const first = visible[0];
-      activePersonNode.textContent = personId ? ((first && first.display_name) || personId) : 'All people';
+      activePersonNode.textContent = activePeopleLabel([...selected], visible);
       if (!visible.length) {{
         itemsNode.innerHTML = '<div class="empty">No timeline items matched this selection.</div>';
         return;
       }}
       itemsNode.innerHTML = renderLanes(visible);
+    }}
+    function activePeopleLabel(personIds, visible) {{
+      if (!personIds.length) return 'All people';
+      if (personIds.length === 1) {{
+        const first = visible[0];
+        return (first && first.display_name) || personIds[0];
+      }}
+      return `${{personIds.length}} people selected`;
     }}
     function renderLanes(visible) {{
       const domain = timeDomain(visible);
@@ -427,7 +463,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
       const left = timePercent(timeValue(record.start_time), domain);
       const memoryLabel = hasLinkedMemory(record) ? `Linked memories ${{linkedMemoryCount(record)}}` : 'No linked memory';
       return `
-        <article class="timeline-marker ${{escapeAttr(type)}} ${{memoryClass}}" id="${{escapeAttr(record.item_id || '')}}" style="left:${{left}}%; top:${{top}}px">
+        <article class="timeline-marker ${{escapeAttr(type)}} ${{memoryClass}}" id="${{escapeAttr(record.item_id || '')}}" tabindex="0" onclick="bringMarkerToFront(this)" onfocus="bringMarkerToFront(this)" style="left:${{left}}%; top:${{top}}px">
           <div class="marker-head">
             <strong>${{escapeHtml(formatDate(record.start_time))}}</strong>
             <span class="kind">${{escapeHtml(type)}}</span>
@@ -442,6 +478,10 @@ def person_timeline_report_html(report: InspectReport) -> str:
           </dl>
         </article>
       `;
+    }}
+    function bringMarkerToFront(marker) {{
+      document.querySelectorAll('.timeline-marker.active').forEach((node) => node.classList.remove('active'));
+      marker.classList.add('active');
     }}
     function timeDomain(values) {{
       const times = values.map((record) => timeValue(record.start_time)).filter((value) => Number.isFinite(value));

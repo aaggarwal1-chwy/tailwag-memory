@@ -380,7 +380,7 @@ def memory_items_report_html(report: InspectReport) -> str:
         <tr id="${{escapeAttr(record.memory_id || '')}}">
           <td data-label="Person"><a href="#${{hashWith({{ person: record.person_id || '' }})}}">${{escapeHtml(person)}}</a><br><code>${{escapeHtml(record.person_id || '')}}</code></td>
           <td data-label="Kind">${{pill(record.kind || 'unknown', record.kind)}}<br><code>${{escapeHtml(record.key || '')}}</code></td>
-          <td data-label="Status">${{pill(record.status || 'unknown', record.followup_state)}}${{record.kind === 'followup' ? pill(record.followup_state || 'unknown', record.followup_state) : ''}}</td>
+          <td data-label="Status">${{pill(displayStatus(record), displayStatus(record))}}${{record.kind === 'followup' ? pill(record.followup_state || 'unknown', record.followup_state) : ''}}</td>
           <td data-label="Summary" class="summary-cell">${{escapeHtml(record.summary || '')}}<br><span class="meta">${{escapeHtml(record.source || '')}}${{record.source_ref ? ' / ' + escapeHtml(record.source_ref) : ''}}</span></td>
           <td data-label="Evidence">${{evidenceHtml(supported, addressed, supersededBy, supersedes)}}</td>
           <td data-label="Timing">${{timeHtml(record)}}</td>
@@ -434,10 +434,15 @@ def memory_items_report_html(report: InspectReport) -> str:
     }}
     function countBy(values, key) {{
       return values.reduce((counts, record) => {{
-        const value = String(record[key] || 'unknown');
+        const value = key === 'status' ? displayStatus(record) : String(record[key] || 'unknown');
         counts[value] = (counts[value] || 0) + 1;
         return counts;
       }}, {{}});
+    }}
+    function displayStatus(record) {{
+      const supersededBy = record.superseded_by_memory_ids || [];
+      if (record.status === 'superseded' || supersededBy.length) return 'superseded';
+      return record.status || 'unknown';
     }}
     function hashFilters() {{
       const hash = String(window.location.hash || '').replace(/^#/, '');

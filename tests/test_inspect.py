@@ -339,6 +339,21 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
                         "superseded_by_memory_ids": [],
                         "supersedes_memory_ids": [],
                     },
+                    {
+                        "memory_id": "mem_superseded",
+                        "person_id": "person_jamie",
+                        "display_name": "<Jamie>",
+                        "kind": "fact",
+                        "key": "old_fact",
+                        "summary": "Jamie used to prefer the old demo.",
+                        "source": "extractor",
+                        "status": "active",
+                        "metadata_json": "",
+                        "supported_episode_ids": ["episode_0"],
+                        "addressed_by": [],
+                        "superseded_by_memory_ids": ["mem_new"],
+                        "supersedes_memory_ids": [],
+                    },
                 ]
             ]
         )
@@ -352,13 +367,16 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
 
         self.assertEqual(report.title, "Tailwag Memory Items")
         self.assertEqual(report.metadata["storage"], "read_only")
-        self.assertEqual(report.metadata["distributions"]["kind"], {"preference": 1, "followup": 1})
-        self.assertEqual(report.metadata["distributions"]["person"], {"person_jamie": 2})
+        self.assertEqual(report.metadata["distributions"]["kind"], {"preference": 1, "followup": 1, "fact": 1})
+        self.assertEqual(report.metadata["distributions"]["person"], {"person_jamie": 3})
+        self.assertEqual(report.metadata["distributions"]["status"], {"active": 2, "superseded": 1})
         self.assertEqual(report.metadata["distributions"]["followup_state"]["visible_now"], 1)
         _assert_canonical_nav(self, html, "tailwag-memory-items.html")
         self.assertIn("Follow-Up State", html)
         self.assertNotIn("['followup_state', 'Follow-Up']", html)
         self.assertIn("const followupStates = ['visible_now', 'not_yet_due', 'expired_active', 'addressed', 'invalid'];", html)
+        self.assertIn("function displayStatus(record)", html)
+        self.assertIn("return 'superseded'", html)
         self.assertIn('data-followup-state="${escapeAttr(state)}"', html)
         self.assertIn("function hashFilters()", html)
         self.assertIn("followup_state", html)
@@ -496,11 +514,20 @@ class PersonTimelineReportTest(unittest.TestCase):
         self.assertIn("tailwag-affect.html", html)
         self.assertIn("tailwag-memory-items.html", html)
         self.assertIn("new URLSearchParams(location.hash.slice(1))", html)
-        self.assertIn("params.get('person')", html)
-        self.assertIn("location.hash = `person=${encodeURIComponent(personId)}`", html)
+        self.assertIn("function selectedPeopleFromHash()", html)
+        self.assertIn("params.getAll('person')", html)
+        self.assertIn("function togglePerson(personId)", html)
+        self.assertIn("params.append('person', personId)", html)
+        self.assertIn("function activePeopleLabel(personIds, visible)", html)
+        self.assertIn("overflow: visible", html)
+        self.assertIn("aria-pressed", html)
         self.assertIn("function renderLanes(visible)", html)
         self.assertIn("class=\"person-lane\"", html)
         self.assertIn("class=\"timeline-lane\"", html)
+        self.assertIn(".timeline-marker.active", html)
+        self.assertIn("function bringMarkerToFront(marker)", html)
+        self.assertIn('onclick="bringMarkerToFront(this)"', html)
+        self.assertIn('tabindex="0"', html)
         self.assertIn("class=\"memory-marker", html)
         self.assertIn("function hasLinkedMemory(record)", html)
         self.assertIn("Linked memories", html)
