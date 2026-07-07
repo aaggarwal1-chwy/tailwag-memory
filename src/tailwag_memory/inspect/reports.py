@@ -150,30 +150,27 @@ def affect_report_html(report: InspectReport) -> str:
         linear-gradient(to top, rgba(101,113,127,.18) 1px, transparent 1px);
       background-size: 25% 100%, 100% 25%;
     }}
-    .grid::before,
-    .grid::after {{
-      content: "";
+    .axis-line {{
       position: absolute;
       background: var(--ink);
+      pointer-events: none;
     }}
-    .grid::before {{
-      left: 50%;
-      top: 0;
-      bottom: 0;
+    .axis-line-y {{
+      top: 48px;
+      bottom: 44px;
       width: 2px;
       transform: translateX(-1px);
     }}
-    .grid::after {{
-      left: 0;
-      right: 0;
-      top: 50%;
+    .axis-line-x {{
+      left: 58px;
+      right: 44px;
       height: 2px;
       transform: translateY(-1px);
     }}
     .axis-label {{
       position: absolute;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 17px;
       font-weight: 650;
     }}
     .x-label {{ left: 50%; bottom: 12px; transform: translateX(-50%); }}
@@ -181,7 +178,8 @@ def affect_report_html(report: InspectReport) -> str:
     .tick {{
       position: absolute;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 15px;
+      font-weight: 600;
     }}
     .point {{
       position: absolute;
@@ -285,6 +283,8 @@ def affect_report_html(report: InspectReport) -> str:
       </div>
       <div class="plot" id="plot" role="img" aria-label="Valence arousal scatter plot">
         <div class="grid" id="grid"></div>
+        <div class="axis-line axis-line-y" id="axisY"></div>
+        <div class="axis-line axis-line-x" id="axisX"></div>
         <div class="axis-label x-label">Valence</div>
         <div class="axis-label y-label">Arousal</div>
         <div class="selection" id="selection"></div>
@@ -302,6 +302,8 @@ def affect_report_html(report: InspectReport) -> str:
     const records = report.records || [];
     const pointColor = '#1f7a8c';
     const plot = document.getElementById('plot');
+    const axisX = document.getElementById('axisX');
+    const axisY = document.getElementById('axisY');
     const selection = document.getElementById('selection');
     const resetZoom = document.getElementById('resetZoom');
     const detail = document.getElementById('detail');
@@ -416,6 +418,7 @@ def affect_report_html(report: InspectReport) -> str:
       `;
     }}
     function renderTicks() {{
+      renderAxes();
       document.querySelectorAll('.tick').forEach((node) => node.remove());
       tickValues(domain.xMin, domain.xMax).forEach((value) => {{
         const x = document.createElement('div');
@@ -433,6 +436,11 @@ def affect_report_html(report: InspectReport) -> str:
         y.textContent = tickLabel(value);
         plot.appendChild(y);
       }});
+    }}
+    function renderAxes() {{
+      const origin = valueToScreen(0, 0);
+      axisY.style.left = `${{origin.x}}px`;
+      axisX.style.top = `${{origin.y}}px`;
     }}
     function speakerNames(transcript) {{
       const lines = transcript.transcript_lines || [];
