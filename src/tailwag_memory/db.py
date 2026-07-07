@@ -28,6 +28,7 @@ class Neo4jQueryRunner:
         self._driver = GraphDatabase.driver(
             settings.neo4j_uri,
             auth=(settings.neo4j_user, settings.neo4j_password),
+            notifications_disabled_categories=["UNRECOGNIZED"],
         )
 
     def close(self) -> None:
