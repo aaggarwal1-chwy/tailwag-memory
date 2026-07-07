@@ -392,6 +392,7 @@ class CliTest(unittest.TestCase):
                     "room_id": "101",
                     "role": "speaker",
                     "source": "caller",
+                    "memory_item_count": 1,
                 }
             ]
         ]
@@ -447,6 +448,8 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output["records"][0]["valence"], 0.25)
         self.assertEqual(output["records"][0]["arousal"], 0.75)
         self.assertEqual(output["records"][0]["transcript"]["text"], "I felt good about the demo.")
+        self.assertTrue(output["records"][0]["transcript"]["has_memory_items"])
+        self.assertEqual(output["records"][0]["transcript"]["memory_item_count"], 1)
 
     def test_inspect_affect_html_writes_self_contained_report(self) -> None:
         settings = Settings(
@@ -465,6 +468,7 @@ class CliTest(unittest.TestCase):
                     "speaker_labels": ["person_jamie", "<Jamie>", "Assistant"],
                     "transcript": "<Jamie>: <script>alert(1)</script>",
                     "start_time": "2026-06-16T14:00:00+00:00",
+                    "memory_item_count": 2,
                 }
             ]
         ]
@@ -505,6 +509,15 @@ class CliTest(unittest.TestCase):
         self.assertIn("Tailwag Affect Scatter", html)
         self.assertIn("report-data", html)
         self.assertIn("Valence and arousal are displayed from -1 to 1", html)
+        self.assertIn("Linked memory item", html)
+        self.assertIn("No linked memory", html)
+        self.assertIn("const memoryPointColor = '#c2410c'", html)
+        self.assertIn("point.style.background = hasLinkedMemory(record) ? memoryPointColor : pointColor", html)
+        self.assertIn("function hasLinkedMemory(record)", html)
+        self.assertIn("function linkedMemoryCount(record)", html)
+        self.assertIn("<dt>Linked memories</dt>", html)
+        self.assertIn('"has_memory_items": true', html)
+        self.assertIn('"memory_item_count": 2', html)
         self.assertIn("flex: 1 1 auto", html)
         self.assertIn("window.addEventListener('resize'", html)
         self.assertIn("function centered(value)", html)

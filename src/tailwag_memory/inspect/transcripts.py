@@ -12,8 +12,10 @@ def recent_person_episode_rows(runner: QueryRunner, limit: int) -> list[dict[str
             MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)
             OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
             OPTIONAL MATCH (speaker:Person)-[:PARTICIPATED_IN]->(e)
+            OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)
             WITH e, r, person, place,
-                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels
+                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels,
+                 count(DISTINCT memory) AS memory_item_count
             RETURN e.id AS episode_id,
                    person.id AS person_id,
                    person.display_name AS display_name,
@@ -24,7 +26,8 @@ def recent_person_episode_rows(runner: QueryRunner, limit: int) -> list[dict[str
                    place.building_code AS building_code,
                    place.room_id AS room_id,
                    r.role AS role,
-                   r.source AS source
+                   r.source AS source,
+                   memory_item_count AS memory_item_count
             ORDER BY e.start_time DESC, person.id ASC
             LIMIT $limit
             """,
@@ -84,6 +87,7 @@ class PersonEpisodeTranscriptService:
             for turn in turns
         ]
 
+        memory_item_count = _row_memory_item_count(row)
         return PersonEpisodeTranscriptPoint(
             person_id=person_id,
             display_name=display_name,
@@ -96,6 +100,8 @@ class PersonEpisodeTranscriptService:
             room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
             role=str(row["role"]) if row.get("role") is not None else None,
             source=str(row["source"]) if row.get("source") is not None else None,
+            has_memory_items=memory_item_count > 0,
+            memory_item_count=memory_item_count,
             transcript_lines=lines,
         )
 
@@ -107,8 +113,10 @@ def _recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: 
             MATCH (person:Person {id: $person_id})-[r:PARTICIPATED_IN]->(e:Episode)
             OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
             OPTIONAL MATCH (speaker:Person)-[:PARTICIPATED_IN]->(e)
+            OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)
             WITH e, r, person, place,
-                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels
+                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels,
+                 count(DISTINCT memory) AS memory_item_count
             RETURN e.id AS episode_id,
                    person.id AS person_id,
                    person.display_name AS display_name,
@@ -119,7 +127,8 @@ def _recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: 
                    place.building_code AS building_code,
                    place.room_id AS room_id,
                    r.role AS role,
-                   r.source AS source
+                   r.source AS source,
+                   memory_item_count AS memory_item_count
             ORDER BY e.start_time DESC
             LIMIT $limit
             """,
@@ -141,3 +150,11 @@ def _row_speaker_labels(row: dict[str, object]) -> list[str]:
     if not isinstance(raw_labels, list):
         return []
     return [str(label) for label in raw_labels if str(label or "").strip()]
+
+
+def _row_memory_item_count(row: dict[str, object]) -> int:
+    """Return the memory item count for an inspection row."""
+    try:
+        return max(0, int(row.get("memory_item_count") or 0))
+    except (TypeError, ValueError):
+        return 0

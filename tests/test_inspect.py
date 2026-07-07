@@ -45,6 +45,9 @@ class InspectTranscriptRowsTest(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(runner.queries[0].parameters, {"limit": 25})
         self.assertIn("MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)", runner.queries[0].query)
+        self.assertIn("OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)", runner.queries[0].query)
+        self.assertIn("count(DISTINCT memory) AS memory_item_count", runner.queries[0].query)
+        self.assertIn("memory_item_count AS memory_item_count", runner.queries[0].query)
         self.assertIn("person.id AS person_id", runner.queries[0].query)
         self.assertIn("e.id AS episode_id", runner.queries[0].query)
         self.assertIn("LIMIT $limit", runner.queries[0].query)
@@ -70,6 +73,7 @@ class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
                         "room_id": "101",
                         "role": "speaker",
                         "source": "caller",
+                        "memory_item_count": 2,
                     }
                 ]
             ]
@@ -88,6 +92,8 @@ class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
         self.assertEqual(points[0].room_id, "101")
         self.assertEqual(points[0].role, "speaker")
         self.assertEqual(points[0].source, "caller")
+        self.assertTrue(points[0].has_memory_items)
+        self.assertEqual(points[0].memory_item_count, 2)
         self.assertIn("MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)", runner.queries[0].query)
 
     def test_points_with_person_filter_uses_person_episode_query(self) -> None:
@@ -120,6 +126,7 @@ class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
 
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 3})
         self.assertIn("MATCH (person:Person {id: $person_id})", runner.queries[0].query)
+        self.assertIn("OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)", runner.queries[0].query)
         self.assertEqual(points[0].text, "I already reviewed it.")
         self.assertEqual(
             [(line.timestamp, line.speaker, line.text) for line in points[0].transcript_lines],

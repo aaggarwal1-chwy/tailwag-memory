@@ -28,6 +28,8 @@ class PersonEpisodeTranscriptPoint:
     room_id: str | None = None
     role: str | None = None
     source: str | None = None
+    has_memory_items: bool = False
+    memory_item_count: int = 0
     transcript_lines: list[InspectTranscriptLine] = field(default_factory=list)
 
 

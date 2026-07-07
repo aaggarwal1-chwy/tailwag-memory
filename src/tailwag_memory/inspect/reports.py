@@ -64,6 +64,7 @@ def affect_report_html(report: InspectReport) -> str:
       --accent-2: #d94f30;
       --accent-3: #5a7d2b;
       --accent-4: #7a4e9d;
+      --memory: #c2410c;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -131,6 +132,27 @@ def affect_report_html(report: InspectReport) -> str:
       flex-wrap: wrap;
       justify-content: flex-end;
     }}
+    .legend {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    .legend-item {{
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }}
+    .swatch {{
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 1px solid #ffffff;
+      box-shadow: 0 1px 3px rgba(31,41,51,.22);
+    }}
+    .swatch-memory {{ background: var(--memory); }}
     .plot {{
       position: relative;
       width: 100%;
@@ -277,6 +299,10 @@ def affect_report_html(report: InspectReport) -> str:
       <div class="toolbar">
         <span>Valence and arousal are displayed from -1 to 1, centered from the model's native 0 to 1 scores.</span>
         <span class="toolbar-actions">
+          <span class="legend" aria-label="Point colors">
+            <span class="legend-item"><span class="swatch"></span>No linked memory</span>
+            <span class="legend-item"><span class="swatch swatch-memory"></span>Linked memory item</span>
+          </span>
           <span id="filterSummary"></span>
           <button type="button" id="resetZoom" disabled>Reset Zoom</button>
         </span>
@@ -301,6 +327,7 @@ def affect_report_html(report: InspectReport) -> str:
     const report = JSON.parse(document.getElementById('report-data').textContent);
     const records = report.records || [];
     const pointColor = '#1f7a8c';
+    const memoryPointColor = '#c2410c';
     const plot = document.getElementById('plot');
     const axisX = document.getElementById('axisX');
     const axisY = document.getElementById('axisY');
@@ -380,11 +407,12 @@ def affect_report_html(report: InspectReport) -> str:
         if (xValue < domain.xMin || xValue > domain.xMax || yValue < domain.yMin || yValue > domain.yMax) return;
         const point = document.createElement('button');
         point.className = 'point';
-        point.style.background = pointColor;
+        point.style.background = hasLinkedMemory(record) ? memoryPointColor : pointColor;
         const screenPoint = valueToScreen(xValue, yValue);
         point.style.left = `${{screenPoint.x}}px`;
         point.style.top = `${{screenPoint.y}}px`;
-        point.title = `${{transcript.display_name || transcript.person_id}} - valence ${{format(centered(record.valence))}} - arousal ${{format(centered(record.arousal))}}`;
+        const memoryLabel = hasLinkedMemory(record) ? ` - linked memories ${{linkedMemoryCount(record)}}` : '';
+        point.title = `${{transcript.display_name || transcript.person_id}} - valence ${{format(centered(record.valence))}} - arousal ${{format(centered(record.arousal))}}${{memoryLabel}}`;
         point.setAttribute('aria-label', point.title);
         point.addEventListener('click', () => renderDetail(record));
         point.addEventListener('keydown', (event) => {{
@@ -412,6 +440,7 @@ def affect_report_html(report: InspectReport) -> str:
           <dt>Time</dt><dd>${{escapeHtml(formatTimeRange(transcript.start_time, transcript.end_time))}}</dd>
           <dt>Place</dt><dd>${{escapeHtml([transcript.building_code, transcript.room_id].filter(Boolean).join(' / '))}}</dd>
           <dt>Lines</dt><dd>${{escapeHtml(String(transcript.line_count || 0))}}</dd>
+          <dt>Linked memories</dt><dd>${{escapeHtml(String(linkedMemoryCount(record)))}}</dd>
           <dt>Model scores</dt><dd>valence ${{format(record.valence)}} / arousal ${{format(record.arousal)}}</dd>
         </dl>
         <pre>${{escapeHtml(transcript.text || '')}}</pre>
@@ -441,6 +470,15 @@ def affect_report_html(report: InspectReport) -> str:
       const origin = valueToScreen(0, 0);
       axisY.style.left = `${{origin.x}}px`;
       axisX.style.top = `${{origin.y}}px`;
+    }}
+    function hasLinkedMemory(record) {{
+      return linkedMemoryCount(record) > 0;
+    }}
+    function linkedMemoryCount(record) {{
+      const transcript = record.transcript || {{}};
+      const count = Math.max(0, Number(transcript.memory_item_count || 0));
+      if (count > 0) return count;
+      return transcript.has_memory_items ? 1 : 0;
     }}
     function speakerNames(transcript) {{
       const lines = transcript.transcript_lines || [];
