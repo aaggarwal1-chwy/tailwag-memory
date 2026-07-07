@@ -1,5 +1,6 @@
 """Consumer-facing public API for tailwag-memory."""
 
+from .affect import AffectScore, AffectScoringProvider, FoldEnsembleAffectProvider
 from .client import TailwagMemoryClient
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner, QueryRunner
@@ -26,6 +27,8 @@ from .models import (
     MemoryItemMergeResult,
     MemoryItemResult,
     MemoryConsolidationResult,
+    PersonEpisodeAffectPoint,
+    PersonEpisodeTranscriptPoint,
     PersonContextItem,
     PersonContextSource,
     PersonContextTranscriptLine,
@@ -40,11 +43,14 @@ from .retrieval import (
     EpisodeRetrievalService,
     EventRetrievalService,
     PersonContextRetrievalService,
+    PersonEpisodeTranscriptService,
     PersonRecognitionService,
 )
 from .schema import initialize_schema
 
 __all__ = [
+    "AffectScore",
+    "AffectScoringProvider",
     "EmbeddingProvider",
     "EpisodeIngestionService",
     "EpisodeInput",
@@ -59,6 +65,7 @@ __all__ = [
     "EventInput",
     "EventResult",
     "EventRetrievalService",
+    "FoldEnsembleAffectProvider",
     "DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES",
     "MemoryConsolidationResult",
     "MemoryConsolidationService",
@@ -75,6 +82,9 @@ __all__ = [
     "PersonContextRetrievalService",
     "PersonContextSource",
     "PersonContextTranscriptLine",
+    "PersonEpisodeAffectPoint",
+    "PersonEpisodeTranscriptPoint",
+    "PersonEpisodeTranscriptService",
     "PersonIngestionService",
     "PersonInput",
     "PersonMemoryConsolidationResult",

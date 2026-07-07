@@ -27,6 +27,8 @@ class ConfigTest(unittest.TestCase):
             "TAILWAG_SYNTHESIS_MODEL": "gpt-5.5",
             "OPENAI_API_KEY": "test-key",
             "SLACK_BOT_TOKEN": "xoxb-test-token",
+            "TAILWAG_AFFECT_FOLD1_MODEL": " /models/fold1 ",
+            "TAILWAG_AFFECT_FOLD2_MODEL": "/models/fold2",
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -37,6 +39,22 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(settings.synthesis_model, "gpt-5.5")
         self.assertEqual(settings.openai_api_key, "test-key")
         self.assertEqual(settings.slack_bot_token, "xoxb-test-token")
+        self.assertEqual(settings.affect_fold1_model, "/models/fold1")
+        self.assertEqual(settings.affect_fold2_model, "/models/fold2")
+
+    def test_load_settings_treats_blank_affect_model_env_as_missing(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "TAILWAG_AFFECT_FOLD1_MODEL": " ",
+                "TAILWAG_AFFECT_FOLD2_MODEL": "",
+            },
+            clear=True,
+        ):
+            settings = load_settings()
+
+        self.assertIsNone(settings.affect_fold1_model)
+        self.assertIsNone(settings.affect_fold2_model)
 
 
 if __name__ == "__main__":

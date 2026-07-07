@@ -11,6 +11,7 @@ from unittest.mock import patch
 from tailwag_memory.cli import main
 from tailwag_memory.config import Settings
 from tailwag_memory.models import (
+    AffectScore,
     EpisodeMemoryExtractionResult,
     EpisodeRecordResult,
     MemoryConsolidationResult,
@@ -25,9 +26,12 @@ class FakeRunner:
         self.settings = settings
         self.queries: list[tuple[str, dict[str, object] | None]] = []
         self.closed = False
+        self.results: list[list[dict[str, object]]] = []
 
     def run(self, query: str, parameters: dict[str, object] | None = None) -> list[dict[str, object]]:
         self.queries.append((query, parameters))
+        if self.results:
+            return self.results.pop(0)
         return []
 
     def close(self) -> None:
@@ -347,6 +351,159 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(client_calls, [{"token": "xoxb-test-token", "include_email": True}])
+
+    def test_inspect_affect_missing_model_dirs_exits_before_db_runner(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    with self.assertRaises(SystemExit) as raised:
+                        main(["inspect", "affect", "--format", "json"])
+
+        self.assertEqual(raised.exception.code, 2)
+        runner_class.assert_not_called()
+        self.assertIn("--fold1-model or TAILWAG_AFFECT_FOLD1_MODEL is required", stderr.getvalue())
+
+    def test_inspect_affect_json_scores_person_episode_points(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+        runner = FakeRunner(settings)
+        runner.results = [
+            [
+                {
+                    "episode_id": "episode_1",
+                    "person_id": "person_jamie",
+                    "display_name": "Jamie",
+                    "speaker_labels": ["person_jamie", "Jamie", "Assistant"],
+                    "transcript": "Jamie: I felt good about the demo. Assistant: Nice.",
+                    "start_time": "2026-06-16T14:00:00+00:00",
+                    "building_code": "MAIN",
+                    "room_id": "101",
+                    "role": "speaker",
+                    "source": "caller",
+                }
+            ]
+        ]
+
+        class FakeProvider:
+            def score(self, text: str) -> AffectScore:
+                self.text = text
+                return AffectScore(valence=0.25, arousal=0.75, metadata={"fake": True})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fold1 = Path(tmp) / "fold1"
+            fold2 = Path(tmp) / "fold2"
+            fold1.mkdir()
+            fold2.mkdir()
+            with patch("tailwag_memory.cli.load_settings", return_value=settings):
+                with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                    with patch(
+                        "tailwag_memory.cli.FoldEnsembleAffectProvider.from_model_dirs",
+                        return_value=FakeProvider(),
+                    ) as provider_factory:
+                        stdout = StringIO()
+                        with redirect_stdout(stdout):
+                            exit_code = main(
+                                [
+                                    "inspect",
+                                    "affect",
+                                    "--format",
+                                    "json",
+                                    "--output",
+                                    "-",
+                                    "--person-id",
+                                    "person_jamie",
+                                    "--limit",
+                                    "5",
+                                    "--fold1-model",
+                                    str(fold1),
+                                    "--fold2-model",
+                                    str(fold2),
+                                ]
+                            )
+
+            fold1_text = str(fold1)
+            fold2_text = str(fold2)
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(runner.closed)
+        provider_factory.assert_called_once_with(fold1_text, fold2_text)
+        self.assertEqual(runner.queries[0][1], {"person_id": "person_jamie", "limit": 5})
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["title"], "Tailwag Affect Scatter")
+        self.assertEqual(output["filters"], {"limit": 5, "person_id": "person_jamie"})
+        self.assertEqual(output["metadata"]["storage"], "on_demand")
+        self.assertEqual(output["records"][0]["valence"], 0.25)
+        self.assertEqual(output["records"][0]["arousal"], 0.75)
+        self.assertEqual(output["records"][0]["transcript"]["text"], "I felt good about the demo.")
+
+    def test_inspect_affect_html_writes_self_contained_report(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+        runner = FakeRunner(settings)
+        runner.results = [
+            [
+                {
+                    "episode_id": "episode_1",
+                    "person_id": "person_jamie",
+                    "display_name": "<Jamie>",
+                    "speaker_labels": ["person_jamie", "<Jamie>", "Assistant"],
+                    "transcript": "<Jamie>: <script>alert(1)</script>",
+                    "start_time": "2026-06-16T14:00:00+00:00",
+                }
+            ]
+        ]
+
+        class FakeProvider:
+            def score(self, text: str) -> AffectScore:
+                return AffectScore(valence=0.4, arousal=0.6, metadata={"fake": True})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fold1 = Path(tmp) / "fold1"
+            fold2 = Path(tmp) / "fold2"
+            output_path = Path(tmp) / "affect.html"
+            fold1.mkdir()
+            fold2.mkdir()
+            with patch("tailwag_memory.cli.load_settings", return_value=settings):
+                with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                    with patch("tailwag_memory.cli.FoldEnsembleAffectProvider.from_model_dirs", return_value=FakeProvider()):
+                        stdout = StringIO()
+                        with redirect_stdout(stdout):
+                            exit_code = main(
+                                [
+                                    "inspect",
+                                    "affect",
+                                    "--output",
+                                    str(output_path),
+                                    "--fold1-model",
+                                    str(fold1),
+                                    "--fold2-model",
+                                    str(fold2),
+                                ]
+                            )
+
+            html = output_path.read_text()
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn(str(output_path), stdout.getvalue())
+        self.assertIn("Tailwag Affect Scatter", html)
+        self.assertIn("report-data", html)
+        self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
 
     def test_person_context_prints_unified_context(self) -> None:
         settings = Settings(

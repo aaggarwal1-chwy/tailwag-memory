@@ -74,6 +74,21 @@ tailwag person search-face --embedding-file path/to/face-vector.json
 tailwag person search-audio --embedding-file path/to/audio-vector.json
 ```
 
+## Inspect Utilities
+
+Export a read-only valence/arousal scatter plot for recent person-episode transcript text:
+
+```bash
+python3 -m pip install -e ".[affect]"
+tailwag inspect affect --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
+tailwag inspect affect --person-id person_jamie --limit 25 --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
+tailwag inspect affect --format json --output - --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
+```
+
+The affect utility uses external XLM-RoBERTa-large fold model directories and scores on demand. It does not write scores back to Neo4j. You can also set `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` in `.env` instead of passing model paths every time.
+
+Each scatter point represents one person's text within one episode, with assistant and other-person transcript lines excluded before scoring. Future persisted affect scores should live on person-to-episode or person-to-memory relationships rather than on shared episode nodes.
+
 ## Memory Maintenance
 
 Backfill or debug memory extraction for a stored episode:
@@ -115,5 +130,6 @@ tailwag episode create --help
 tailwag search --help
 tailwag person context --help
 tailwag memory consolidate --help
+tailwag inspect affect --help
 tailwag slack poll --help
 ```

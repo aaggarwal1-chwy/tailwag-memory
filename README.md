@@ -112,6 +112,13 @@ For Slack polling, also add your bot token:
 SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
+Optional valence/arousal inspection uses external XLM-RoBERTa-large fold model directories:
+
+```bash
+python3 -m pip install -e ".[affect]"
+tailwag inspect affect --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
+```
+
 For the current graph model and scope boundaries, see the [architecture](docs/architecture.md). For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package setup and integration ownership, see the [Python package integration guide](docs/integration-guide.md). For local commands, see the [CLI reference](docs/cli-reference.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md). For the current Argos integration boundary, see the [Argos compatibility note](docs/argos-migration.md).
 
 Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.

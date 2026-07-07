@@ -10,6 +10,7 @@ from .models import (
     PersonContextItem,
     PersonContextSource,
     PersonContextTranscriptLine,
+    PersonEpisodeTranscriptPoint,
     PersonRecognitionResult,
     SearchQuery,
 )
@@ -17,6 +18,7 @@ from .vector_queries import vector_search_clause as _vector_search_clause
 
 
 _TRANSCRIPT_LINE_RE = re.compile(r"^\[(?P<timestamp>[^\]]+)\]\s+(?P<speaker>[^:]+):\s*(?P<text>.*)$")
+_SPEAKER_TURN_RE_TEMPLATE = r"(?:^|\s)(?:\[(?P<timestamp>[^\]]+)\]\s*)?(?P<speaker>{choices}):\s*"
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _MARKDOWN_CONTROL_CHARS = str.maketrans({char: "" for char in "#*[]>`|"})
 UNKNOWN_PERSON_CONTEXT_MESSAGE = "the database does not have a record of this person"
@@ -54,6 +56,33 @@ def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: i
     )
 
 
+def recent_person_episode_rows(runner: QueryRunner, limit: int) -> list[dict[str, object]]:
+    """Fetch recent episode rows for person/episode participation pairs."""
+    return runner.run(
+        """
+            MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)
+            OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
+            OPTIONAL MATCH (speaker:Person)-[:PARTICIPATED_IN]->(e)
+            WITH e, r, person, place,
+                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels
+            RETURN e.id AS episode_id,
+                   person.id AS person_id,
+                   person.display_name AS display_name,
+                   speaker_labels AS speaker_labels,
+                   e.transcript AS transcript,
+                   e.start_time AS start_time,
+                   e.end_time AS end_time,
+                   place.building_code AS building_code,
+                   place.room_id AS room_id,
+                   r.role AS role,
+                   r.source AS source
+            ORDER BY e.start_time DESC, person.id ASC
+            LIMIT $limit
+            """,
+        {"limit": limit},
+    )
+
+
 def format_person_context_evidence_markdown(
     source: PersonContextSource | None,
     *,
@@ -69,6 +98,66 @@ def format_person_context_evidence_markdown(
     if scope is not None and not source.items:
         return f"{NO_SCOPED_PERSON_EVIDENCE_MESSAGE_PREFIX} {_sanitize_markdown_line(scope)}"
     return ""
+
+
+class PersonEpisodeTranscriptService:
+    """Extract person-specific episode transcript text for inspection utilities."""
+
+    def __init__(self, runner: QueryRunner) -> None:
+        """Store the Neo4j query runner."""
+        self.runner = runner
+
+    def points(
+        self,
+        *,
+        person_id: str | None = None,
+        limit: int = 100,
+    ) -> list[PersonEpisodeTranscriptPoint]:
+        """Return recent person/episode transcript points."""
+        bounded_limit = _bounded_positive_limit(limit, default=100)
+        if bounded_limit == 0:
+            return []
+        rendered_person_id = str(person_id or "").strip()
+        if rendered_person_id:
+            rows = recent_episode_rows_for_person(self.runner, rendered_person_id, bounded_limit)
+        else:
+            rows = recent_person_episode_rows(self.runner, bounded_limit)
+
+        points: list[PersonEpisodeTranscriptPoint] = []
+        for row in rows:
+            point = self._row_to_point(row)
+            if point is not None:
+                points.append(point)
+        return points
+
+    def _row_to_point(self, row: dict[str, object]) -> PersonEpisodeTranscriptPoint | None:
+        """Convert a Neo4j row into a person transcript point when text is available."""
+        transcript = str(row.get("transcript") or row.get("text") or "")
+        person_id = str(row.get("person_id") or "").strip()
+        display_name = str(row.get("display_name") or "").strip() or None
+        lines = _target_transcript_lines(
+            transcript,
+            person_id=person_id,
+            display_name=display_name or "",
+            speaker_labels=_row_speaker_labels(row),
+        )
+        if not lines:
+            return None
+
+        return PersonEpisodeTranscriptPoint(
+            person_id=person_id,
+            display_name=display_name,
+            episode_id=str(row.get("episode_id") or row.get("item_id") or ""),
+            text=" ".join(line.text for line in lines),
+            line_count=len(lines),
+            start_time=str(row["start_time"]) if row.get("start_time") is not None else None,
+            end_time=str(row["end_time"]) if row.get("end_time") is not None else None,
+            building_code=str(row["building_code"]) if row.get("building_code") is not None else None,
+            room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
+            role=str(row["role"]) if row.get("role") is not None else None,
+            source=str(row["source"]) if row.get("source") is not None else None,
+            transcript_lines=lines,
+        )
 
 
 class EpisodeRetrievalService:
@@ -488,6 +577,14 @@ def _bounded_limit(limit: int) -> int:
         return 10
 
 
+def _bounded_positive_limit(limit: int, *, default: int) -> int:
+    """Return a non-negative limit with a caller-provided default."""
+    try:
+        return max(0, int(limit))
+    except (TypeError, ValueError):
+        return default
+
+
 def _normalize_optional_text(value: str | None) -> str | None:
     """Normalize optional user text."""
     if value is None:
@@ -504,3 +601,71 @@ def _sanitize_markdown_line(value: str | None) -> str:
     if len(rendered) <= _MAX_CONTEXT_LINE_CHARS:
         return rendered
     return rendered[: _MAX_CONTEXT_LINE_CHARS - 3].rstrip() + "..."
+
+
+def _target_transcript_lines(
+    transcript: str,
+    *,
+    person_id: str,
+    display_name: str,
+    speaker_labels: list[str],
+) -> list[PersonContextTranscriptLine]:
+    """Return transcript lines spoken by the target person."""
+    labels = {
+        _normalize_speaker_label(label)
+        for label in [display_name, person_id]
+        if _normalize_speaker_label(label)
+    }
+    if not labels:
+        return []
+
+    matcher = _speaker_turn_pattern([*speaker_labels, display_name, person_id, "Assistant", "User"])
+    if matcher is None:
+        return []
+
+    lines: list[PersonContextTranscriptLine] = []
+    for raw_line in transcript.splitlines():
+        matches = list(matcher.finditer(raw_line))
+        for index, match in enumerate(matches):
+            speaker = match.group("speaker").strip()
+            if _normalize_speaker_label(speaker) not in labels:
+                continue
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(raw_line)
+            text = raw_line[match.end() : end].strip()
+            if not text:
+                continue
+            lines.append(
+                PersonContextTranscriptLine(
+                    timestamp=(match.group("timestamp") or "").strip(),
+                    speaker=speaker,
+                    text=text,
+                )
+            )
+    return lines
+
+
+def _normalize_speaker_label(value: str) -> str:
+    """Normalize a transcript speaker label for exact matching."""
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _row_speaker_labels(row: dict[str, object]) -> list[str]:
+    """Return known speaker labels from a Neo4j retrieval row."""
+    raw_labels = row.get("speaker_labels")
+    if not isinstance(raw_labels, list):
+        return []
+    return [str(label) for label in raw_labels if str(label or "").strip()]
+
+
+def _speaker_turn_pattern(labels: list[str]) -> re.Pattern[str] | None:
+    """Build a speaker-turn matcher from known labels."""
+    normalized: dict[str, str] = {}
+    for label in labels:
+        rendered = str(label or "").strip()
+        if not rendered:
+            continue
+        normalized.setdefault(_normalize_speaker_label(rendered), rendered)
+    if not normalized:
+        return None
+    choices = "|".join(re.escape(label) for label in sorted(normalized.values(), key=len, reverse=True))
+    return re.compile(_SPEAKER_TURN_RE_TEMPLATE.format(choices=choices))

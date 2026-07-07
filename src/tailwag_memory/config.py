@@ -17,6 +17,8 @@ class Settings:
     openai_api_key: str | None = None
     synthesis_model: str = "gpt-5.5"
     slack_bot_token: str | None = None
+    affect_fold1_model: str | None = None
+    affect_fold2_model: str | None = None
 
 
 def parse_positive_int_env(name: str, default: int) -> int:
@@ -47,6 +49,8 @@ def load_settings() -> Settings:
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         synthesis_model=os.getenv("TAILWAG_SYNTHESIS_MODEL", "gpt-5.5"),
         slack_bot_token=os.getenv("SLACK_BOT_TOKEN"),
+        affect_fold1_model=_optional_env("TAILWAG_AFFECT_FOLD1_MODEL"),
+        affect_fold2_model=_optional_env("TAILWAG_AFFECT_FOLD2_MODEL"),
     )
 
 
@@ -64,3 +68,12 @@ def load_env_file(path: Path = Path(".env")) -> None:
         key = key.strip()
         if key and key not in os.environ:
             os.environ[key] = value.strip().strip('"').strip("'")
+
+
+def _optional_env(name: str) -> str | None:
+    """Return a stripped optional environment value."""
+    value = os.getenv(name)
+    if value is None:
+        return None
+    rendered = value.strip()
+    return rendered or None
