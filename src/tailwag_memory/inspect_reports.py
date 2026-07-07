@@ -122,12 +122,30 @@ def affect_report_html(report: InspectReport) -> str:
     .grid {{
       position: absolute;
       inset: 48px 44px 44px 58px;
-      border-left: 2px solid var(--ink);
-      border-bottom: 2px solid var(--ink);
       background-image:
         linear-gradient(to right, rgba(101,113,127,.18) 1px, transparent 1px),
         linear-gradient(to top, rgba(101,113,127,.18) 1px, transparent 1px);
       background-size: 25% 100%, 100% 25%;
+    }}
+    .grid::before,
+    .grid::after {{
+      content: "";
+      position: absolute;
+      background: var(--ink);
+    }}
+    .grid::before {{
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      transform: translateX(-1px);
+    }}
+    .grid::after {{
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 2px;
+      transform: translateY(-1px);
     }}
     .axis-label {{
       position: absolute;

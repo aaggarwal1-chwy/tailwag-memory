@@ -507,6 +507,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("flex: 1 1 auto", html)
         self.assertIn("window.addEventListener('resize'", html)
         self.assertIn("function centered(value)", html)
+        self.assertIn(".grid::before", html)
+        self.assertIn(".grid::after", html)
         self.assertIn("<dt>Model scores</dt>", html)
         self.assertIn("<dt>Speaker</dt>", html)
         self.assertNotIn("Colors group points by person.", html)
