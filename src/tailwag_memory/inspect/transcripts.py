@@ -1,38 +1,14 @@
 from __future__ import annotations
 
 from ..db import QueryRunner
-from ..transcript_parsing import target_transcript_turns
+from ..person_episode_rows import person_episode_rows
+from ..transcript_parsing import row_speaker_labels, target_transcript_turns
 from .models import InspectTranscriptLine, PersonEpisodeTranscriptPoint
 
 
 def recent_person_episode_rows(runner: QueryRunner, limit: int) -> list[dict[str, object]]:
     """Fetch recent episode rows for person/episode participation pairs."""
-    return runner.run(
-        """
-            MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)
-            OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
-            OPTIONAL MATCH (speaker:Person)-[:PARTICIPATED_IN]->(e)
-            OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)
-            WITH e, r, person, place,
-                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels,
-                 count(DISTINCT memory) AS memory_item_count
-            RETURN e.id AS episode_id,
-                   person.id AS person_id,
-                   person.display_name AS display_name,
-                   speaker_labels AS speaker_labels,
-                   e.transcript AS transcript,
-                   e.start_time AS start_time,
-                   e.end_time AS end_time,
-                   place.building_code AS building_code,
-                   place.room_id AS room_id,
-                   r.role AS role,
-                   r.source AS source,
-                   memory_item_count AS memory_item_count
-            ORDER BY e.start_time DESC, person.id ASC
-            LIMIT $limit
-            """,
-        {"limit": limit},
-    )
+    return person_episode_rows(runner, limit=limit, include_memory_count=True)
 
 
 class PersonEpisodeTranscriptService:
@@ -74,7 +50,7 @@ class PersonEpisodeTranscriptService:
             transcript,
             person_id=person_id,
             display_name=display_name or "",
-            speaker_labels=_row_speaker_labels(row),
+            speaker_labels=row_speaker_labels(row),
         )
         if not turns:
             return None
@@ -108,32 +84,7 @@ class PersonEpisodeTranscriptService:
 
 def _recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: int) -> list[dict[str, object]]:
     """Fetch recent episode rows linked to a person for inspection."""
-    return runner.run(
-        """
-            MATCH (person:Person {id: $person_id})-[r:PARTICIPATED_IN]->(e:Episode)
-            OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
-            OPTIONAL MATCH (speaker:Person)-[:PARTICIPATED_IN]->(e)
-            OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)
-            WITH e, r, person, place,
-                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels,
-                 count(DISTINCT memory) AS memory_item_count
-            RETURN e.id AS episode_id,
-                   person.id AS person_id,
-                   person.display_name AS display_name,
-                   speaker_labels AS speaker_labels,
-                   e.transcript AS transcript,
-                   e.start_time AS start_time,
-                   e.end_time AS end_time,
-                   place.building_code AS building_code,
-                   place.room_id AS room_id,
-                   r.role AS role,
-                   r.source AS source,
-                   memory_item_count AS memory_item_count
-            ORDER BY e.start_time DESC
-            LIMIT $limit
-            """,
-        {"person_id": person_id, "limit": limit},
-    )
+    return person_episode_rows(runner, person_id=person_id, limit=limit, include_memory_count=True)
 
 
 def _bounded_positive_limit(limit: int, *, default: int) -> int:
@@ -142,14 +93,6 @@ def _bounded_positive_limit(limit: int, *, default: int) -> int:
         return max(0, int(limit))
     except (TypeError, ValueError):
         return default
-
-
-def _row_speaker_labels(row: dict[str, object]) -> list[str]:
-    """Return known speaker labels from a Neo4j retrieval row."""
-    raw_labels = row.get("speaker_labels")
-    if not isinstance(raw_labels, list):
-        return []
-    return [str(label) for label in raw_labels if str(label or "").strip()]
 
 
 def _row_memory_item_count(row: dict[str, object]) -> int:

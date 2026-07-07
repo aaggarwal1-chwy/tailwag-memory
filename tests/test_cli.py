@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -553,6 +554,199 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 0)
         self.assertIn("maximum person-episode pairs to score", stdout.getvalue())
+
+    def test_inspect_person_timeline_json_uses_inspect_report(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+        runner = FakeRunner(settings)
+        runner.results = [
+            [
+                {
+                    "person_id": "person_jamie",
+                    "display_name": "Jamie",
+                    "item_id": "episode_1",
+                    "item_type": "episode",
+                    "episode_id": "episode_1",
+                    "event_id": None,
+                    "text": "Jamie: I filed the update.",
+                    "transcript": "Jamie: I filed the update.",
+                    "speaker_labels": ["Jamie"],
+                    "start_time": "2026-07-07T14:00:00+00:00",
+                    "end_time": None,
+                    "building_code": "MAIN",
+                    "room_id": "101",
+                    "role": "speaker",
+                    "source": "caller",
+                }
+            ],
+            [],
+        ]
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                stdout = StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "inspect",
+                            "person-timeline",
+                            "--format",
+                            "json",
+                            "--output",
+                            "-",
+                            "--person-id",
+                            "person_jamie",
+                            "--limit",
+                            "5",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(runner.closed)
+        self.assertEqual(runner.queries[0][1], {"person_id": "person_jamie", "limit": 5})
+        self.assertEqual(runner.queries[1][1], {"person_id": "person_jamie", "limit": 5})
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["title"], "Tailwag Person Timeline")
+        self.assertEqual(output["filters"], {"limit": 5, "person_id": "person_jamie"})
+        self.assertEqual(output["metadata"]["utility"], "inspect person-timeline")
+        self.assertEqual(output["metadata"]["storage"], "read_only")
+        self.assertEqual(output["records"][0]["episode_id"], "episode_1")
+        self.assertEqual(output["records"][0]["text"], "I filed the update.")
+        self.assertEqual(output["records"][0]["transcript_snippets"][0]["speaker"], "Jamie")
+
+    def test_inspect_person_timeline_html_defaults_to_inspect_report_path(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+        runner = FakeRunner(settings)
+        runner.results = [[], []]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            original_cwd = Path.cwd()
+            os.chdir(tmp)
+            try:
+                with patch("tailwag_memory.cli.load_settings", return_value=settings):
+                    with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                        stdout = StringIO()
+                        with redirect_stdout(stdout):
+                            exit_code = main(["inspect", "person-timeline"])
+                output_path = Path(tmp) / "inspect" / "tailwag-person-timeline.html"
+                html = output_path.read_text()
+            finally:
+                os.chdir(original_cwd)
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("inspect/tailwag-person-timeline.html", stdout.getvalue())
+        self.assertIn("Tailwag Person Timeline", html)
+        self.assertIn("No person timeline items matched the selected filters.", html)
+        self.assertIn("tailwag-affect.html", html)
+        self.assertIn("tailwag-memory-items.html", html)
+
+    def test_inspect_memory_items_json_uses_inspect_report(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+        runner = FakeRunner(settings)
+        runner.results = [
+            [
+                {
+                    "memory_id": "mem_followup",
+                    "person_id": "person_jamie",
+                    "display_name": "Jamie",
+                    "kind": "followup",
+                    "key": "demo",
+                    "summary": "Ask Jamie about the demo.",
+                    "source": "extractor",
+                    "source_ref": "episode_1",
+                    "status": "active",
+                    "observed_at": "2026-07-01T10:00:00+00:00",
+                    "due_at": "2026-07-02T10:00:00+00:00",
+                    "expires_at": "2026-07-09T10:00:00+00:00",
+                    "metadata_json": '{"topic": "demo"}',
+                    "supported_episode_ids": ["episode_1"],
+                    "addressed_by": [],
+                    "superseded_by_memory_ids": [],
+                    "supersedes_memory_ids": [],
+                }
+            ]
+        ]
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                stdout = StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        [
+                            "inspect",
+                            "memory-items",
+                            "--format",
+                            "json",
+                            "--output",
+                            "-",
+                            "--person-id",
+                            "person_jamie",
+                            "--limit",
+                            "5",
+                        ]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(runner.closed)
+        self.assertEqual(runner.queries[0][1], {"person_id": "person_jamie", "limit": 5})
+        query = runner.queries[0][0].upper()
+        for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
+            self.assertNotIn(write_keyword, query)
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["title"], "Tailwag Memory Items")
+        self.assertEqual(output["filters"], {"limit": 5, "person_id": "person_jamie"})
+        self.assertEqual(output["metadata"]["utility"], "inspect memory-items")
+        self.assertEqual(output["metadata"]["storage"], "read_only")
+        self.assertEqual(output["metadata"]["distributions"]["kind"], {"followup": 1})
+        self.assertEqual(output["records"][0]["memory_id"], "mem_followup")
+        self.assertEqual(output["records"][0]["supported_episode_ids"], ["episode_1"])
+        self.assertEqual(output["records"][0]["followup_state"], "visible_now")
+
+    def test_inspect_memory_items_html_defaults_to_inspect_report_path(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+        runner = FakeRunner(settings)
+        runner.results = [[]]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            original_cwd = Path.cwd()
+            os.chdir(tmp)
+            try:
+                with patch("tailwag_memory.cli.load_settings", return_value=settings):
+                    with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                        stdout = StringIO()
+                        with redirect_stdout(stdout):
+                            exit_code = main(["inspect", "memory-items"])
+                output_path = Path(tmp) / "inspect" / "tailwag-memory-items.html"
+                html = output_path.read_text()
+            finally:
+                os.chdir(original_cwd)
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("inspect/tailwag-memory-items.html", stdout.getvalue())
+        self.assertIn("Tailwag Memory Items", html)
+        self.assertIn("No memory items matched the selected filters.", html)
+        self.assertIn("Follow-Up State", html)
+        self.assertIn("tailwag-affect.html", html)
+        self.assertIn("hashPerson()", html)
 
     def test_person_context_prints_unified_context(self) -> None:
         settings = Settings(

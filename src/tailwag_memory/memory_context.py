@@ -8,7 +8,7 @@ from .memory_item_helpers import _is_expired, _parse_iso
 from .memory_items import MemoryItemService, PINNED_MEMORY_KEYS, followup_is_visible
 from .models import MemoryItemResult
 from .retrieval import recent_episode_rows_for_person
-from .transcript_parsing import target_transcript_turns
+from .transcript_parsing import row_speaker_labels, target_transcript_turns
 
 
 class PersonMemoryContextService:
@@ -58,7 +58,7 @@ class PersonMemoryContextService:
                 transcript,
                 person_id=str(row.get("person_id") or person_id or ""),
                 display_name=str(row.get("display_name") or ""),
-                speaker_labels=_row_speaker_labels(row),
+                speaker_labels=row_speaker_labels(row),
             )
             if not speech_lines:
                 continue
@@ -131,14 +131,6 @@ def _target_speech_lines(
             speaker_labels=speaker_labels,
         )
     ]
-
-
-def _row_speaker_labels(row: dict[str, object]) -> list[str]:
-    """Return known episode speaker labels from a retrieval row."""
-    raw_labels = row.get("speaker_labels")
-    if not isinstance(raw_labels, list):
-        return []
-    return [str(label) for label in raw_labels if str(label or "").strip()]
 
 
 def _section_lines(

@@ -73,3 +73,11 @@ def speaker_turn_pattern(labels: list[str]) -> re.Pattern[str] | None:
         return None
     choices = "|".join(re.escape(label) for label in sorted(normalized.values(), key=len, reverse=True))
     return re.compile(_SPEAKER_TURN_RE_TEMPLATE.format(choices=choices))
+
+
+def row_speaker_labels(row: dict[str, object]) -> list[str]:
+    """Return known speaker labels from a Neo4j row."""
+    raw_labels = row.get("speaker_labels")
+    if not isinstance(raw_labels, list):
+        return []
+    return [str(label) for label in raw_labels if str(label or "").strip()]

@@ -164,6 +164,24 @@ Notes:
 - The operation returns false when the email does not match exactly one person, when the matched person is not the target or a Slack-owned temporary person, or when `new_person_id` is already used by a different `Person` node.
 - This endpoint does not generate OpenAI text embeddings and does not require `OPENAI_API_KEY`.
 
+### `canonical_person_id_by_email(email)`
+
+Returns one active caller-owned canonical person ID for an email address when the match is unambiguous.
+
+Parameters:
+
+| Name | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `email` | `str` | yes | Email address to normalize and match. |
+
+Returns: `str | None`.
+
+Notes:
+
+- This is a read-only identity resolver. It does not create, rekey, or merge people.
+- `SlackMemoryPoller` uses this method automatically when its `episode_recorder` exposes it and no explicit `person_id_resolver` is supplied.
+- The method returns `None` for blank email, no match, multiple matches, or a non-canonical match.
+
 ### `record_episode(episode, *, extract_memory=True)`
 
 Stores an episode, place, participants, participant relationships, and transcript embedding. By default it also runs transcript-derived memory extraction for the episode participants.
@@ -258,8 +276,9 @@ Returns: `dict[str, list[dict[str, object]]]` with `episodes` and `memory_items`
 Notes:
 
 - This is the public high-level API for consumers that need structured semantic hits across episode evidence and durable `MemoryItem` facts/preferences/follow-ups.
-- Episode results use `EpisodeRetrievalService.hybrid_search(...)` internally and include transcript, time/place metadata, and optional score.
-- Memory item results use `MemoryItemService.vector_search(...)` internally and return only active, unexpired memories; addressed and superseded memories are excluded.
+- The client embeds the query text once, then passes the vector to `EpisodeRetrievalService.hybrid_search_with_embedding(...)` and `MemoryItemService.vector_search_by_embedding(...)`.
+- Episode results include transcript, time/place metadata, and optional score.
+- Memory item results return only active, unexpired memories; addressed and superseded memories are excluded.
 - Blank `text` or `person_id` returns empty `episodes` and `memory_items` lists without initializing embeddings.
 
 ### `extract_memory_for_episode(episode_id, person_id=None)`

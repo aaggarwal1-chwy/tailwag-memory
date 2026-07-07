@@ -2,7 +2,6 @@ from __future__ import annotations
 
 MEMORY_ITEM_KINDS = {"preference", "boundary", "pet", "fact", "followup"}
 MEMORY_ITEM_SOURCES = {"caller", "calling-system", "live_chat", "slack", "argos"}
-MEMORY_ITEM_STATUSES = {"active", "addressed", "superseded"}
 PINNED_MEMORY_KEYS = {"preferred_name", "preferred_language", "nickname_for_robot", "birthday"}
 DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES = 4
 DEFAULT_CONSOLIDATION_SEED_LIMIT = 25

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import json
 import unittest
 
-from tailwag_memory.db import RecordingQueryRunner
+from tests.helpers import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider, OpenAIConfigurationError
 from tailwag_memory.memory_context import PersonMemoryContextService, format_person_memory_markdown
 from tailwag_memory.memory_items import (

@@ -16,11 +16,15 @@ Owns:
 Inputs:
 - implementation diffs
 - oversized files
+- files that grow past roughly 500 lines or gain more than roughly 250 lines in one feature pass
+- generated/static HTML, report rendering, prompt text, or long query bodies embedded in an unrelated service module
 - duplicated queries
+- repeated UI/report scaffolding or repeated Cypher/query scaffolding
 - unclear ownership boundaries
 
 Outputs:
 - smaller modules
+- explicit module splits for large renderers, report pages, prompts, or query groups
 - shared query helpers where useful
 - cleaner provider interfaces
 - reduced duplication
@@ -31,10 +35,12 @@ Non-goals:
 - changing behavior without tests
 
 Verification:
+- before finishing a non-trivial feature, inspect touched file sizes and trigger this agent when a file is becoming a catch-all
 - run tests before and after risky refactors when possible
 - PYTHONPATH=src python3 -m unittest discover -s tests
 
 Handoff:
+- Call this agent during implementation, not only after user review, when feature code starts accumulating multiple page renderers, command surfaces, query families, or domain responsibilities in one file.
 - Hand back to the owning implementation agent after structure is clean enough for feature work.
 - Bring in test before and after risky behavior-preserving changes.
 """

@@ -1,4 +1,4 @@
-from tailwag_memory.db import RecordingQueryRunner
+from tests.helpers import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
 from tailwag_memory.ingestion import (
     EpisodeIngestionService,

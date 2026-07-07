@@ -245,6 +245,35 @@ class PersonContextSource:
 
 
 @dataclass(frozen=True)
+class PersonTimelineTranscriptSnippet:
+    """Transcript snippet included in a person timeline item."""
+
+    timestamp: str
+    speaker: str
+    text: str
+
+
+@dataclass(frozen=True)
+class PersonTimelineItem:
+    """Read-only person timeline item for inspect reports."""
+
+    person_id: str
+    display_name: str | None
+    item_id: str
+    item_type: str
+    start_time: str
+    end_time: str | None = None
+    episode_id: str | None = None
+    event_id: str | None = None
+    text: str = ""
+    building_code: str | None = None
+    room_id: str | None = None
+    role: str | None = None
+    source: str | None = None
+    transcript_snippets: list[PersonTimelineTranscriptSnippet] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class MemoryItemInput:
     """Caller-supplied memory item creation payload."""
 

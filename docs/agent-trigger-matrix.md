@@ -49,7 +49,7 @@ Concrete repo-local custom agents and their usage log live in `.codex/agents/`, 
 | A change risks adding deferred concepts, confidence fields, `org_id`, secondary persistence, or external vector databases | Scope Guard Agent | Neo4j Schema Agent, Ingestion Agent, Memory Item Agent, Documentation Agent, Test Agent | Scope review and guardrails only unless scope is explicitly updated; approved `MemoryItem` work is limited to durable transcript-derived memory, not a broad ontology | Handoff to Documentation Agent when scope changes |
 | Broad work is ready for final handoff, merge, package-facing release, or tag | Release Quality Gate Agent | Test Agent, Documentation Agent, Integration Contract Agent | Final verification only; do not implement feature behavior | Handoff back to owning agent if verification fails |
 | Tests are missing, failing, flaky, or not covering changed behavior | Test Agent | Any implementation agent related to the failing area | Tests and fixtures only unless fixing a small test-discovered bug | Handoff to Code Refactor Agent if failures reveal design issues |
-| A file grows too large, Cypher is duplicated, logic crosses module boundaries, or future additions look hard | Code Refactor Agent | Test Agent, Documentation Agent | Structural cleanup only; no new product behavior unless needed to preserve current behavior | Handoff back to owning implementation agent |
+| A file grows too large, a touched file passes roughly 500 lines, a feature adds roughly 250+ lines to one file, generated/static HTML or report rendering accumulates in a service module, Cypher is duplicated, logic crosses module boundaries, or future additions look hard | Code Refactor Agent | Test Agent, Documentation Agent | Structural cleanup only; no new product behavior unless needed to preserve current behavior | Handoff back to owning implementation agent |
 | README, architecture docs, command examples, or scope notes are stale | Documentation Agent | Any owning implementation agent | Docs only; do not modify behavior | Handoff to Test Agent if docs expose missing verification |
 
 ## Subagent Definitions
@@ -422,12 +422,16 @@ Inputs:
 
 - implementation diffs
 - oversized files
+- files that grow past roughly 500 lines or gain more than roughly 250 lines in one feature pass
+- generated/static HTML, report rendering, prompt text, or long query bodies embedded in an unrelated service module
 - duplicated queries
+- repeated UI/report scaffolding or repeated Cypher/query scaffolding
 - unclear ownership boundaries
 
 Outputs:
 
 - smaller modules
+- explicit module splits for large renderers, report pages, prompts, or query groups
 - shared query helpers where useful
 - cleaner provider interfaces
 - reduced duplication
@@ -468,6 +472,7 @@ Non-goals:
 - If a change adds or changes memory item semantics, trigger the Memory Item Agent before handing off to schema, embeddings, or retrieval owners.
 - If a change targets `argos-agent` Tailwag memory provider compatibility, trigger the Argos Migration Agent.
 - If code starts mixing provider logic, Cypher, CLI parsing, and domain models in one file, trigger the Code Refactor Agent.
+- If a non-trivial feature leaves any touched implementation file near or above roughly 500 lines, adds roughly 250+ lines to one file, or places multiple full HTML/report/prompt renderers in one module, trigger the Code Refactor Agent before final verification.
 - If a feature is difficult to test, trigger the Test Agent before expanding the feature.
 - If a change touches external source polling or source-to-memory mapping, trigger the Source Adapter Agent.
 - If a change touches package-consumer usage, trigger the Integration Contract Agent.

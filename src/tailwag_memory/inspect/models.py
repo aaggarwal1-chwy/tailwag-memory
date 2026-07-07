@@ -50,3 +50,37 @@ class PersonEpisodeAffectPoint:
     valence: float
     arousal: float
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class InspectMemoryAddressedEpisode:
+    """Episode evidence that addressed a follow-up memory item."""
+
+    episode_id: str
+    addressed_at: str = ""
+
+
+@dataclass(frozen=True)
+class InspectMemoryItem:
+    """Memory item row shaped for read-only inspection reports."""
+
+    memory_id: str
+    person_id: str
+    display_name: str | None
+    kind: str
+    key: str
+    summary: str
+    source: str
+    source_ref: str = ""
+    status: str = "active"
+    observed_at: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    due_at: str = ""
+    expires_at: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+    supported_episode_ids: list[str] = field(default_factory=list)
+    addressed_by: list[InspectMemoryAddressedEpisode] = field(default_factory=list)
+    superseded_by_memory_ids: list[str] = field(default_factory=list)
+    supersedes_memory_ids: list[str] = field(default_factory=list)
+    followup_state: str = "not_followup"

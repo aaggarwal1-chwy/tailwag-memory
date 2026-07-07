@@ -13,6 +13,7 @@ from .models import (
     PersonRecognitionResult,
     SearchQuery,
 )
+from .person_episode_rows import person_episode_rows
 from .vector_queries import vector_search_clause as _vector_search_clause
 
 
@@ -26,31 +27,11 @@ _MAX_CONTEXT_LINE_CHARS = 500
 
 def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: int) -> list[dict[str, object]]:
     """Fetch recent episode rows linked to a person."""
-    return runner.run(
-        """
-            MATCH (person:Person {id: $person_id})-[r:PARTICIPATED_IN]->(e:Episode)
-            OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
-            OPTIONAL MATCH (speaker:Person)-[:PARTICIPATED_IN]->(e)
-            WITH e, r, person, place,
-                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels
-            RETURN e.id AS episode_id,
-                   e.id AS item_id,
-                   'episode' AS item_type,
-                   person.id AS person_id,
-                   person.display_name AS display_name,
-                   speaker_labels AS speaker_labels,
-                   e.transcript AS transcript,
-                   coalesce(e.transcript, '') AS text,
-                   e.start_time AS start_time,
-                   e.end_time AS end_time,
-                   place.building_code AS building_code,
-                   place.room_id AS room_id,
-                   r.role AS role,
-                   r.source AS source
-            ORDER BY e.start_time DESC
-            LIMIT $limit
-            """,
-        {"person_id": person_id, "limit": limit},
+    return person_episode_rows(
+        runner,
+        person_id=person_id,
+        limit=limit,
+        include_context_fields=True,
     )
 
 
@@ -480,8 +461,18 @@ class PersonContextRetrievalService:
         return lines
 
 
+def _sanitize_markdown_line(value: str | None) -> str:
+    """Normalize retrieved text for prompt-ready markdown output."""
+    rendered = _CONTROL_CHARS_RE.sub(" ", str(value or ""))
+    rendered = " ".join(rendered.split())
+    rendered = rendered.translate(_MARKDOWN_CONTROL_CHARS).lstrip("- ").strip()
+    if len(rendered) <= _MAX_CONTEXT_LINE_CHARS:
+        return rendered
+    return rendered[: _MAX_CONTEXT_LINE_CHARS - 3].rstrip() + "..."
+
+
 def _bounded_limit(limit: int) -> int:
-    """Return a non-negative rendering/retrieval limit."""
+    """Return a non-negative retrieval limit."""
     try:
         return max(0, int(limit))
     except (TypeError, ValueError):
@@ -494,13 +485,3 @@ def _normalize_optional_text(value: str | None) -> str | None:
         return None
     rendered = str(value).strip()
     return rendered or None
-
-
-def _sanitize_markdown_line(value: str | None) -> str:
-    """Normalize retrieved text for prompt-ready markdown output."""
-    rendered = _CONTROL_CHARS_RE.sub(" ", str(value or ""))
-    rendered = " ".join(rendered.split())
-    rendered = rendered.translate(_MARKDOWN_CONTROL_CHARS).lstrip("- ").strip()
-    if len(rendered) <= _MAX_CONTEXT_LINE_CHARS:
-        return rendered
-    return rendered[: _MAX_CONTEXT_LINE_CHARS - 3].rstrip() + "..."

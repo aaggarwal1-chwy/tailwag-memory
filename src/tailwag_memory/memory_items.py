@@ -12,7 +12,6 @@ from .memory_item_constants import (
     MEMORY_EXTRACTION_TEXT_FORMAT,
     MEMORY_ITEM_KINDS,
     MEMORY_ITEM_SOURCES,
-    MEMORY_ITEM_STATUSES,
     PINNED_MEMORY_KEYS,
 )
 from .memory_item_consolidation import MemoryConsolidationService
@@ -35,7 +34,6 @@ __all__ = [
     "MEMORY_EXTRACTION_TEXT_FORMAT",
     "MEMORY_ITEM_KINDS",
     "MEMORY_ITEM_SOURCES",
-    "MEMORY_ITEM_STATUSES",
     "MemoryConsolidationProvider",
     "MemoryConsolidationService",
     "MemoryExtractionProvider",

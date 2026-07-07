@@ -1,4 +1,4 @@
-from tailwag_memory.db import RecordingQueryRunner
+from tests.helpers import RecordingQueryRunner
 from tailwag_memory.schema import initialize_schema, schema_statements
 import unittest
 

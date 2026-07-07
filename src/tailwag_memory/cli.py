@@ -14,9 +14,15 @@ from .embeddings import OpenAIEmbeddingProvider
 from .inspect import (
     AffectScoringConfigurationError,
     FoldEnsembleAffectProvider,
+    MemoryItemInspectService,
     PersonEpisodeTranscriptService,
+    PersonTimelineRetrievalService,
     affect_report,
     affect_report_html,
+    memory_items_report,
+    memory_items_report_html,
+    person_timeline_report,
+    person_timeline_report_html,
     report_json,
     score_transcript_points,
 )
@@ -142,6 +148,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     affect_parser.add_argument("--output", help="output file path, or '-' for stdout")
     affect_parser.add_argument("--fold1-model", help="external XLM-RoBERTa-large fold1 model directory")
     affect_parser.add_argument("--fold2-model", help="external XLM-RoBERTa-large fold2 model directory")
+    person_timeline_parser = inspect_subparsers.add_parser(
+        "person-timeline",
+        help="export read-only person timeline inspection data",
+    )
+    person_timeline_parser.add_argument("--person-id", help="optional person filter")
+    person_timeline_parser.add_argument("--limit", type=int, default=100, help="maximum timeline items to export")
+    person_timeline_parser.add_argument("--format", choices=["html", "json"], default="html", help="export format")
+    person_timeline_parser.add_argument("--output", help="output file path, or '-' for stdout")
+    memory_items_parser = inspect_subparsers.add_parser(
+        "memory-items",
+        help="export read-only memory item inspection data",
+    )
+    memory_items_parser.add_argument("--person-id", help="optional person filter")
+    memory_items_parser.add_argument("--limit", type=int, default=1000, help="maximum memory items to export")
+    memory_items_parser.add_argument("--format", choices=["html", "json"], default="html", help="export format")
+    memory_items_parser.add_argument("--output", help="output file path, or '-' for stdout")
 
     slack_parser = subparsers.add_parser("slack")
     slack_subparsers = slack_parser.add_subparsers(dest="slack_command", required=True)
@@ -357,7 +379,57 @@ def main(argv: Sequence[str] | None = None) -> int:
                     rendered = affect_report_html(report)
                 output = args.output
                 if output is None and args.format == "html":
-                    output = "tailwag-affect.html"
+                    output = "inspect/tailwag-affect.html"
+                _write_or_print_report(rendered, None if output == "-" else output)
+                return 0
+            if args.inspect_command == "person-timeline":
+                items = PersonTimelineRetrievalService(runner).items(
+                    person_id=args.person_id,
+                    limit=args.limit,
+                )
+                report = person_timeline_report(
+                    items,
+                    filters={
+                        "person_id": args.person_id,
+                        "limit": args.limit,
+                    },
+                    metadata={
+                        "utility": "inspect person-timeline",
+                        "storage": "read_only",
+                        "canonical_reports": {
+                            "person_timeline": "tailwag-person-timeline.html",
+                            "affect": "tailwag-affect.html",
+                            "memory_items": "tailwag-memory-items.html",
+                        },
+                    },
+                    warnings=[] if items else ["No person timeline items matched the selected filters."],
+                )
+                if args.format == "json":
+                    rendered = report_json(report)
+                else:
+                    rendered = person_timeline_report_html(report)
+                output = args.output
+                if output is None and args.format == "html":
+                    output = "inspect/tailwag-person-timeline.html"
+                _write_or_print_report(rendered, None if output == "-" else output)
+                return 0
+            if args.inspect_command == "memory-items":
+                items = MemoryItemInspectService(runner).items(
+                    person_id=args.person_id,
+                    limit=args.limit,
+                )
+                report = memory_items_report(
+                    items,
+                    person_id=args.person_id,
+                    limit=args.limit,
+                )
+                if args.format == "json":
+                    rendered = report_json(report)
+                else:
+                    rendered = memory_items_report_html(report)
+                output = args.output
+                if output is None and args.format == "html":
+                    output = "inspect/tailwag-memory-items.html"
                 _write_or_print_report(rendered, None if output == "-" else output)
                 return 0
 

@@ -80,6 +80,13 @@ person to a caller-owned canonical ID. Rekeying changes the `Person.id` in place
 so existing episodes, events, mentions, and memory items stay attached to the
 same graph node.
 
+`TailwagMemoryClient.canonical_person_id_by_email(email)` is package-level
+resolver support for Slack polling and other adapters that need to map a
+normalized email to one active caller-owned canonical person. Argos does not
+call this method directly in the live runtime; package-level `SlackMemoryPoller`
+uses it automatically only when its `episode_recorder` exposes the method and no
+explicit resolver is supplied.
+
 `MemoryItem.id` values are opaque and are not renamed during person rekeying.
 Consumers should use person-scoped APIs and graph relationships after rekey
 rather than parsing memory IDs.
