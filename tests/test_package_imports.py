@@ -4,8 +4,6 @@ import unittest
 import tailwag_memory
 import tailwag_memory.memory_items as memory_items
 from tailwag_memory import (
-    AffectScore,
-    AffectScoringProvider,
     DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
     EmbeddingProvider,
     EpisodeIngestionService,
@@ -32,14 +30,10 @@ from tailwag_memory import (
     OpenAIMemoryConsolidationProvider,
     OpenAIConfigurationError,
     OpenAIEmbeddingProvider,
-    FoldEnsembleAffectProvider,
     PersonContextItem,
     PersonContextRetrievalService,
     PersonContextSource,
     PersonContextTranscriptLine,
-    PersonEpisodeAffectPoint,
-    PersonEpisodeTranscriptPoint,
-    PersonEpisodeTranscriptService,
     PersonIngestionService,
     PersonInput,
     PersonMemoryConsolidationResult,
@@ -60,8 +54,6 @@ from tailwag_memory import (
 class PackageImportTest(unittest.TestCase):
     def test_public_facade_exports_consumer_imports(self) -> None:
         expected_exports = {
-            "AffectScore",
-            "AffectScoringProvider",
             "DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES",
             "EmbeddingProvider",
             "EpisodeIngestionService",
@@ -88,14 +80,10 @@ class PackageImportTest(unittest.TestCase):
             "OpenAIMemoryConsolidationProvider",
             "OpenAIConfigurationError",
             "OpenAIEmbeddingProvider",
-            "FoldEnsembleAffectProvider",
             "PersonContextItem",
             "PersonContextRetrievalService",
             "PersonContextSource",
             "PersonContextTranscriptLine",
-            "PersonEpisodeAffectPoint",
-            "PersonEpisodeTranscriptPoint",
-            "PersonEpisodeTranscriptService",
             "PersonIngestionService",
             "PersonInput",
             "PersonMemoryConsolidationResult",
@@ -112,8 +100,6 @@ class PackageImportTest(unittest.TestCase):
             "load_settings",
         }
         imported = {
-            AffectScore,
-            AffectScoringProvider,
             DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
             EmbeddingProvider,
             EpisodeIngestionService,
@@ -140,14 +126,10 @@ class PackageImportTest(unittest.TestCase):
             OpenAIMemoryConsolidationProvider,
             OpenAIConfigurationError,
             OpenAIEmbeddingProvider,
-            FoldEnsembleAffectProvider,
             PersonContextItem,
             PersonContextRetrievalService,
             PersonContextSource,
             PersonContextTranscriptLine,
-            PersonEpisodeAffectPoint,
-            PersonEpisodeTranscriptPoint,
-            PersonEpisodeTranscriptService,
             PersonIngestionService,
             PersonInput,
             PersonMemoryConsolidationResult,
@@ -176,6 +158,8 @@ class PackageImportTest(unittest.TestCase):
         self.assertNotIn("address_item", memory_items.__all__)
         self.assertNotIn("stable_memory_id", tailwag_memory.__all__)
         self.assertNotIn("stable_memory_id", memory_items.__all__)
+        self.assertNotIn("AffectScore", tailwag_memory.__all__)
+        self.assertNotIn("PersonEpisodeTranscriptService", tailwag_memory.__all__)
 
     def test_client_exposes_email_rekey_contract(self) -> None:
         signature = inspect.signature(TailwagMemoryClient.rekey_person_by_email)

@@ -7,12 +7,19 @@ from pathlib import Path
 import time
 from typing import Sequence
 
-from .affect import AffectScoringConfigurationError, FoldEnsembleAffectProvider, score_transcript_points
 from .client import TailwagMemoryClient
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
-from .inspect_reports import affect_report, affect_report_html, report_json
+from .inspect import (
+    AffectScoringConfigurationError,
+    FoldEnsembleAffectProvider,
+    PersonEpisodeTranscriptService,
+    affect_report,
+    affect_report_html,
+    report_json,
+    score_transcript_points,
+)
 from .ingestion import EventIngestionService
 from .memory_items import (
     DEFAULT_CONSOLIDATION_CLUSTER_LIMIT,
@@ -25,7 +32,6 @@ from .models import EpisodeInput, EventInput, SearchQuery
 from .retrieval import (
     EpisodeRetrievalService,
     EventRetrievalService,
-    PersonEpisodeTranscriptService,
     PersonRecognitionService,
 )
 from .schema import initialize_schema
@@ -131,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     inspect_subparsers = inspect_parser.add_subparsers(dest="inspect_command", required=True)
     affect_parser = inspect_subparsers.add_parser("affect", help="export person-episode valence/arousal inspection data")
     affect_parser.add_argument("--person-id", help="optional person filter")
-    affect_parser.add_argument("--limit", type=int, default=100, help="maximum person-episode pairs to score")
+    affect_parser.add_argument("--limit", type=int, default=1000, help="maximum person-episode pairs to score")
     affect_parser.add_argument("--format", choices=["html", "json"], default="html", help="export format")
     affect_parser.add_argument("--output", help="output file path, or '-' for stdout")
     affect_parser.add_argument("--fold1-model", help="external XLM-RoBERTa-large fold1 model directory")

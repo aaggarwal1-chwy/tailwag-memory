@@ -35,6 +35,7 @@ Implemented now:
 - Slack channel polling into conversation episodes
 - episode mention relationships
 - source-provided event attendees
+- optional read-only valence/arousal inspection CLI for person-episode transcript text
 
 Deferred intentionally:
 
@@ -61,6 +62,7 @@ Deferred intentionally:
 - Per-person memory consolidation may use Neo4j episode vector indexes to reduce candidate evidence, but it writes only `MemoryItem` records and `SUPPORTED_BY`/`SUPERSEDED_BY` audit links.
 - Follow-up addressing writes `ADDRESSED_BY` audit links from resolved follow-up memories to the episode that resolved them.
 - Tailwag does not store confidence ratings, `org_id`, or secondary database records.
+- Inspection utilities are read-only developer/operator tools. The affect inspector scores person-episode transcript text on demand from external model folders and does not change the core package API, graph schema, or Neo4j records.
 
 ## Graph Model
 
@@ -280,6 +282,8 @@ Core runtime settings are loaded from environment variables or `.env`:
 | `TAILWAG_EMBEDDING_DIMENSION` | `64` | Vector dimension used by indexes, text embeddings, and biometric vectors. |
 | `TAILWAG_SYNTHESIS_MODEL` | `gpt-5.5` | OpenAI model used by memory extraction and consolidation providers. |
 | `SLACK_BOT_TOKEN` | unset | Required only when polling Slack. |
+| `TAILWAG_AFFECT_FOLD1_MODEL` | unset | Optional external XLM-RoBERTa-large fold 1 model directory for `tailwag inspect affect`. |
+| `TAILWAG_AFFECT_FOLD2_MODEL` | unset | Optional external XLM-RoBERTa-large fold 2 model directory for `tailwag inspect affect`. |
 
 ## Neo4j Browser IDs
 

@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from tailwag_memory.affect import AffectScoringConfigurationError, _hardsigmoid_values
+from tailwag_memory.inspect.affect import AffectScoringConfigurationError, _hardsigmoid_values
 
 
 class AffectScoringTest(unittest.TestCase):

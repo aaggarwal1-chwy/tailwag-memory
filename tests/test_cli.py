@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 from tailwag_memory.cli import main
 from tailwag_memory.config import Settings
+from tailwag_memory.inspect import AffectScore
 from tailwag_memory.models import (
-    AffectScore,
     EpisodeMemoryExtractionResult,
     EpisodeRecordResult,
     MemoryConsolidationResult,
@@ -500,6 +500,7 @@ class CliTest(unittest.TestCase):
             html = output_path.read_text()
 
         self.assertEqual(exit_code, 0)
+        self.assertEqual(runner.queries[0][1], {"limit": 1000})
         self.assertIn(str(output_path), stdout.getvalue())
         self.assertIn("Tailwag Affect Scatter", html)
         self.assertIn("report-data", html)
@@ -509,10 +510,27 @@ class CliTest(unittest.TestCase):
         self.assertIn("function centered(value)", html)
         self.assertIn(".grid::before", html)
         self.assertIn(".grid::after", html)
+        self.assertIn("id=\"resetZoom\"", html)
+        self.assertIn("id=\"selection\"", html)
+        self.assertIn("function applyZoom(start, end)", html)
+        self.assertIn("plot.addEventListener('pointerdown'", html)
         self.assertIn("<dt>Model scores</dt>", html)
         self.assertIn("<dt>Speaker</dt>", html)
+        self.assertIn("function formatDate(value)", html)
+        self.assertNotIn("<dt>Role</dt>", html)
+        self.assertNotIn("<dt>Source</dt>", html)
+        self.assertNotIn("JSON.stringify(record.metadata", html)
         self.assertNotIn("Colors group points by person.", html)
         self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
+
+    def test_inspect_affect_help_mentions_score_limit(self) -> None:
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as raised:
+                main(["inspect", "affect", "--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn("maximum person-episode pairs to score", stdout.getvalue())
 
     def test_person_context_prints_unified_context(self) -> None:
         settings = Settings(

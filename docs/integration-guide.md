@@ -28,6 +28,12 @@ For local development with test dependencies:
 python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[dev]"
 ```
 
+For local affect inspection with external XLM-RoBERTa-large fold model directories:
+
+```bash
+python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[affect]"
+```
+
 ## Runtime Configuration
 
 Set runtime configuration in the consuming process or its environment:
@@ -50,6 +56,7 @@ Configuration notes:
 - `TAILWAG_EMBEDDING_DIMENSION` must match Neo4j vector indexes and supplied biometric vectors for vector search compatibility.
 - `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by memory extraction and consolidation providers.
 - `SLACK_BOT_TOKEN` is only required when polling Slack.
+- `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are optional paths used only by `tailwag inspect affect`.
 
 ## Setup Sequence
 
@@ -95,6 +102,8 @@ from tailwag_memory import TailwagMemoryClient
 Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, or direct memory item operations. Their constructor and method details also live in the endpoint reference.
 
 Slack adapter classes are imported from `tailwag_memory.slack_ingestion`, not from the top-level package. See [Slack Ingestion Guide](slack-ingestion.md#package-api).
+
+Inspection helpers are imported from `tailwag_memory.inspect`, not from the top-level package. They are intended for local investigation and reporting, not for normal memory-service integration.
 
 ## Operational Notes
 

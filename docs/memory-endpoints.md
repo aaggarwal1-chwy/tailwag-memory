@@ -6,6 +6,8 @@ This document is the caller-facing reference for the Tailwag memory system. It d
 
 These are synchronous Python APIs, not HTTP endpoints. Normal callers should use `TailwagMemoryClient`; lower-level services are available when a caller needs dependency injection, custom providers, or tests without live OpenAI/Neo4j calls.
 
+Inspection utilities are imported from `tailwag_memory.inspect`, not from the top-level `tailwag_memory` package. They are optional local analysis/reporting helpers and are separate from the normal memory service API surface below.
+
 ## Runtime Setup
 
 Install the package from the consuming repo:
@@ -25,6 +27,8 @@ export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
+export TAILWAG_AFFECT_FOLD1_MODEL=/path/to/fold1
+export TAILWAG_AFFECT_FOLD2_MODEL=/path/to/fold2
 ```
 
 Initialize Neo4j schema once per database:
@@ -41,7 +45,7 @@ finally:
     runner.close()
 ```
 
-`OPENAI_API_KEY` is required when production code uses the OpenAI provider for embeddings, memory extraction, consolidation, or vector search. `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by extraction and consolidation providers. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
+`OPENAI_API_KEY` is required when production code uses the OpenAI provider for embeddings, memory extraction, consolidation, or vector search. `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by extraction and consolidation providers. `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are only needed for optional affect inspection with `tailwag-memory[affect]`. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
 
 ## Quick Start
 

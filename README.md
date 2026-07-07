@@ -42,6 +42,7 @@ Implemented now:
 - graph and vector retrieval services
 - Slack channel polling into conversation episodes
 - source-provided event attendees
+- optional read-only valence/arousal inspection CLI for person-episode transcript text
 
 Delayed intentionally:
 
@@ -118,6 +119,8 @@ Optional valence/arousal inspection uses external XLM-RoBERTa-large fold model d
 python3 -m pip install -e ".[affect]"
 tailwag inspect affect --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
 ```
+
+The inspection command writes a static HTML scatter plot by default. It scores on demand, displays centered `-1..1` valence/arousal axes, supports drag-to-zoom for dense regions, and does not write affect values back to Neo4j.
 
 For the current graph model and scope boundaries, see the [architecture](docs/architecture.md). For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package setup and integration ownership, see the [Python package integration guide](docs/integration-guide.md). For local commands, see the [CLI reference](docs/cli-reference.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md). For the current Argos integration boundary, see the [Argos compatibility note](docs/argos-migration.md).
 
