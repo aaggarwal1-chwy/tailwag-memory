@@ -95,6 +95,9 @@ def affect_report_html(report: InspectReport) -> str:
     .plot-wrap {{
       padding: 20px 24px 28px;
       min-width: 0;
+      min-height: calc(100vh - 78px);
+      display: flex;
+      flex-direction: column;
     }}
     .toolbar {{
       display: flex;
@@ -107,8 +110,9 @@ def affect_report_html(report: InspectReport) -> str:
     }}
     .plot {{
       position: relative;
-      width: min(100%, 820px);
-      aspect-ratio: 1 / 1;
+      width: 100%;
+      flex: 1 1 auto;
+      min-height: 420px;
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -212,6 +216,7 @@ def affect_report_html(report: InspectReport) -> str:
     .warnings {{ margin-bottom: 14px; color: #8a3a22; }}
     @media (max-width: 860px) {{
       main {{ grid-template-columns: 1fr; }}
+      .plot-wrap {{ min-height: 70vh; }}
       aside {{ border-left: 0; border-top: 1px solid var(--line); }}
     }}
   </style>
@@ -224,7 +229,7 @@ def affect_report_html(report: InspectReport) -> str:
   <main>
     <section class="plot-wrap">
       <div class="toolbar">
-        <span>Valence and arousal are normalized from 0 to 1.</span>
+        <span>Valence and arousal are displayed from -1 to 1, centered from the model's native 0 to 1 scores.</span>
         <span id="filterSummary"></span>
       </div>
       <div class="plot" id="plot" role="img" aria-label="Valence arousal scatter plot">
@@ -245,7 +250,6 @@ def affect_report_html(report: InspectReport) -> str:
     const records = report.records || [];
     const pointColor = '#1f7a8c';
     const plot = document.getElementById('plot');
-    const grid = document.getElementById('grid');
     const detail = document.getElementById('detail');
     const detailTitle = document.getElementById('detailTitle');
     document.getElementById('count').textContent = records.length;
@@ -267,49 +271,44 @@ def affect_report_html(report: InspectReport) -> str:
       empty.textContent = 'No scored transcript points matched this export.';
       plot.appendChild(empty);
     }}
-    addTicks();
+    renderTicks();
+    renderPoints();
     records.forEach((record, index) => {{
-      const transcript = record.transcript || {{}};
-      const point = document.createElement('button');
-      point.className = 'point';
-      point.style.background = pointColor;
-      point.style.left = `${{58 + clamp(record.valence) * (plot.clientWidth - 102)}}px`;
-      point.style.top = `${{48 + (1 - clamp(record.arousal)) * (plot.clientHeight - 92)}}px`;
-      point.title = `${{transcript.display_name || transcript.person_id}} - valence ${{format(record.valence)}} - arousal ${{format(record.arousal)}}`;
-      point.setAttribute('aria-label', point.title);
-      point.addEventListener('click', () => renderDetail(record));
-      point.addEventListener('keydown', (event) => {{
-        if (event.key === 'Enter' || event.key === ' ') {{
-          event.preventDefault();
-          renderDetail(record);
-        }}
-      }});
-      plot.appendChild(point);
       if (index === 0) renderDetail(record);
     }});
     window.addEventListener('resize', () => {{
+      renderTicks();
+      renderPoints();
+    }});
+    function renderPoints() {{
       document.querySelectorAll('.point').forEach((node) => node.remove());
       records.forEach((record) => {{
         const transcript = record.transcript || {{}};
         const point = document.createElement('button');
         point.className = 'point';
         point.style.background = pointColor;
-        point.style.left = `${{58 + clamp(record.valence) * (plot.clientWidth - 102)}}px`;
-        point.style.top = `${{48 + (1 - clamp(record.arousal)) * (plot.clientHeight - 92)}}px`;
-        point.title = `${{transcript.display_name || transcript.person_id}} - valence ${{format(record.valence)}} - arousal ${{format(record.arousal)}}`;
+        point.style.left = `${{58 + normalizeForPlot(centered(record.valence)) * (plot.clientWidth - 102)}}px`;
+        point.style.top = `${{48 + (1 - normalizeForPlot(centered(record.arousal))) * (plot.clientHeight - 92)}}px`;
+        point.title = `${{transcript.display_name || transcript.person_id}} - valence ${{format(centered(record.valence))}} - arousal ${{format(centered(record.arousal))}}`;
         point.setAttribute('aria-label', point.title);
         point.addEventListener('click', () => renderDetail(record));
+        point.addEventListener('keydown', (event) => {{
+          if (event.key === 'Enter' || event.key === ' ') {{
+            event.preventDefault();
+            renderDetail(record);
+          }}
+        }});
         plot.appendChild(point);
       }});
-    }});
+    }}
     function renderDetail(record) {{
       const transcript = record.transcript || {{}};
       detailTitle.textContent = transcript.display_name || transcript.person_id || 'Unknown person';
       detail.className = '';
       detail.innerHTML = `
         <div class="score-row">
-          <div class="score">Valence<strong>${{format(record.valence)}}</strong></div>
-          <div class="score">Arousal<strong>${{format(record.arousal)}}</strong></div>
+          <div class="score">Valence<strong>${{format(centered(record.valence))}}</strong></div>
+          <div class="score">Arousal<strong>${{format(centered(record.arousal))}}</strong></div>
         </div>
         <dl>
           <dt>Person</dt><dd>${{escapeHtml(transcript.person_id || '')}}</dd>
@@ -320,23 +319,25 @@ def affect_report_html(report: InspectReport) -> str:
           <dt>Role</dt><dd>${{escapeHtml(transcript.role || '')}}</dd>
           <dt>Source</dt><dd>${{escapeHtml(transcript.source || '')}}</dd>
           <dt>Lines</dt><dd>${{escapeHtml(String(transcript.line_count || 0))}}</dd>
+          <dt>Model scores</dt><dd>valence ${{format(record.valence)}} / arousal ${{format(record.arousal)}}</dd>
         </dl>
         <pre>${{escapeHtml(transcript.text || '')}}</pre>
         <pre>${{escapeHtml(JSON.stringify(record.metadata || {{}}, null, 2))}}</pre>
       `;
     }}
-    function addTicks() {{
-      [[0, '0'], [0.5, '0.5'], [1, '1']].forEach(([value, label]) => {{
+    function renderTicks() {{
+      document.querySelectorAll('.tick').forEach((node) => node.remove());
+      [[-1, '-1'], [0, '0'], [1, '1']].forEach(([value, label]) => {{
         const x = document.createElement('div');
         x.className = 'tick';
-        x.style.left = `${{58 + value * (plot.clientWidth - 102)}}px`;
+        x.style.left = `${{58 + normalizeForPlot(value) * (plot.clientWidth - 102)}}px`;
         x.style.bottom = '28px';
         x.textContent = label;
         plot.appendChild(x);
         const y = document.createElement('div');
         y.className = 'tick';
         y.style.left = '28px';
-        y.style.top = `${{48 + (1 - value) * (plot.clientHeight - 92)}}px`;
+        y.style.top = `${{48 + (1 - normalizeForPlot(value)) * (plot.clientHeight - 92)}}px`;
         y.textContent = label;
         plot.appendChild(y);
       }});
@@ -350,8 +351,14 @@ def affect_report_html(report: InspectReport) -> str:
       }});
       return names.length ? names : [transcript.display_name || transcript.person_id || ''];
     }}
-    function clamp(value) {{
-      return Math.max(0, Math.min(1, Number(value) || 0));
+    function centered(value) {{
+      return clamp(Number(value) * 2 - 1, -1, 1);
+    }}
+    function normalizeForPlot(value) {{
+      return (clamp(value, -1, 1) + 1) / 2;
+    }}
+    function clamp(value, min, max) {{
+      return Math.max(min, Math.min(max, Number(value) || 0));
     }}
     function format(value) {{
       return Number(value).toFixed(3);
