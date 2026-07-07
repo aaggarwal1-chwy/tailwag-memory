@@ -107,13 +107,22 @@ def memory_items_report_html(report: InspectReport) -> str:
       margin: 0;
     }}
     .dist-row {{
+      appearance: none;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      padding: 0;
+      width: 100%;
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 8px;
       align-items: center;
       color: var(--muted);
       font-size: 13px;
+      text-align: left;
     }}
+    .dist-row.active strong {{ color: var(--accent); }}
     .dist-row strong {{
       color: var(--ink);
       font-weight: 650;
@@ -224,7 +233,10 @@ def memory_items_report_html(report: InspectReport) -> str:
       background: #fbfcf8;
       color: var(--ink);
       white-space: nowrap;
+      text-decoration: none;
+      font: inherit;
     }}
+    .pill[href] {{ cursor: pointer; }}
     .pill.followup {{ border-color: rgba(168,85,28,.45); color: var(--accent-2); }}
     .pill.addressed {{ border-color: rgba(60,111,159,.45); color: var(--accent-3); }}
     .pill.expired, .pill.superseded {{ border-color: rgba(163,58,53,.45); color: var(--danger); }}
@@ -313,25 +325,29 @@ def memory_items_report_html(report: InspectReport) -> str:
     render();
     function render() {{
       const filters = hashFilters();
-      const personVisible = filters.person ? records.filter((record) => record.person_id === filters.person) : records;
-      const visible = filters.followup_state
-        ? personVisible.filter((record) => record.kind === 'followup' && record.followup_state === filters.followup_state)
-        : personVisible;
+      const visible = applyFilters(records, filters);
       document.getElementById('count').textContent = visible.length;
       document.getElementById('filterSummary').textContent = filterSummary(filters) || filterText(report.filters || {{}});
-      clearFilters.disabled = !filters.person && !filters.followup_state;
-      renderSummary(visible);
-      renderFollowupBoard(personVisible, filters.followup_state);
+      clearFilters.disabled = !hasFilters(filters);
+      renderSummary(visible, filters);
+      renderFollowupBoard(applyFilters(records, filters, new Set(['followup_state'])), filters.followup_state);
       renderTable(visible);
     }}
-    function renderSummary(visible) {{
+    function renderSummary(visible, filters) {{
       const summary = document.getElementById('summary');
       summary.innerHTML = distributionKeys.map(([key, label]) => {{
         const rows = key === 'person'
-          ? personDistributionRows(visible)
-          : distributionRows(countBy(visible, key), key);
+          ? personDistributionRows(visible, filters.person)
+          : distributionRows(countBy(visible, key), key, filters[key] || '');
         return `<section class="panel"><h2>${{label}}</h2><div class="dist-list">${{rows.join('') || '<div class="empty">No records</div>'}}</div></section>`;
       }}).join('');
+      document.querySelectorAll('[data-filter-key][data-filter-value]').forEach((button) => {{
+        button.addEventListener('click', () => {{
+          const key = button.dataset.filterKey || '';
+          const value = button.dataset.filterValue || '';
+          setHashFilter(key, hashFilters()[key] === value ? '' : value);
+        }});
+      }});
     }}
     function renderFollowupBoard(visible, activeState) {{
       const distribution = countBy(visible.filter((record) => record.kind === 'followup'), 'followup_state');
@@ -379,9 +395,9 @@ def memory_items_report_html(report: InspectReport) -> str:
       return `
         <tr id="${{escapeAttr(record.memory_id || '')}}">
           <td data-label="Person"><a href="#${{hashWith({{ person: record.person_id || '' }})}}">${{escapeHtml(person)}}</a><br><code>${{escapeHtml(record.person_id || '')}}</code></td>
-          <td data-label="Kind">${{pill(record.kind || 'unknown', record.kind)}}<br><code>${{escapeHtml(record.key || '')}}</code></td>
-          <td data-label="Status">${{pill(displayStatus(record), displayStatus(record))}}${{record.kind === 'followup' ? pill(record.followup_state || 'unknown', record.followup_state) : ''}}</td>
-          <td data-label="Summary" class="summary-cell">${{escapeHtml(record.summary || '')}}<br><span class="meta">${{escapeHtml(record.source || '')}}${{record.source_ref ? ' / ' + escapeHtml(record.source_ref) : ''}}</span></td>
+          <td data-label="Kind">${{filterPill(record.kind || 'unknown', record.kind, 'kind', record.kind || 'unknown')}}<br><code>${{escapeHtml(record.key || '')}}</code></td>
+          <td data-label="Status">${{filterPill(displayStatus(record), displayStatus(record), 'status', displayStatus(record))}}${{record.kind === 'followup' ? filterPill(record.followup_state || 'unknown', record.followup_state, 'followup_state', record.followup_state || 'unknown') : ''}}</td>
+          <td data-label="Summary" class="summary-cell">${{escapeHtml(record.summary || '')}}<br><span class="meta">${{filterPill(record.source || 'unknown', record.source, 'source', record.source || 'unknown')}}${{record.source_ref ? ' / ' + escapeHtml(record.source_ref) : ''}}</span></td>
           <td data-label="Evidence">${{evidenceHtml(supported, addressed, supersededBy, supersedes)}}</td>
           <td data-label="Timing">${{timeHtml(record)}}</td>
           <td data-label="ID"><code>${{escapeHtml(record.memory_id || '')}}</code></td>
@@ -404,15 +420,16 @@ def memory_items_report_html(report: InspectReport) -> str:
       if (record.updated_at) parts.push(`Updated ${{escapeHtml(formatDate(record.updated_at))}}`);
       return parts.length ? parts.join('<br>') : '<span class="meta">No timing</span>';
     }}
-    function distributionRows(distribution, key) {{
+    function distributionRows(distribution, key, activeValue) {{
       const entries = Object.entries(distribution).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
       const max = Math.max(1, ...entries.map(([, count]) => count));
       return entries.slice(0, 8).map(([value, count]) => {{
         const label = escapeHtml(value);
-        return `<div class="dist-row"><strong>${{label}}</strong><span>${{count}}</span><div class="bar"><span style="width:${{Math.round(count / max * 100)}}%"></span></div></div>`;
+        const active = value === activeValue ? ' active' : '';
+        return `<button type="button" class="dist-row${{active}}" data-filter-key="${{escapeHtml(key)}}" data-filter-value="${{escapeHtml(value)}}"><strong>${{label}}</strong><span>${{count}}</span><div class="bar"><span style="width:${{Math.round(count / max * 100)}}%"></span></div></button>`;
       }});
     }}
-    function personDistributionRows(values) {{
+    function personDistributionRows(values, activePerson) {{
       const people = new Map();
       values.forEach((record) => {{
         const id = String(record.person_id || 'unknown');
@@ -428,8 +445,20 @@ def memory_items_report_html(report: InspectReport) -> str:
       const entries = Array.from(people.values()).sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
       const max = Math.max(1, ...entries.map((entry) => entry.count));
       return entries.slice(0, 8).map((entry) => {{
-        const label = `<a href="#${{hashWith({{ person: entry.person_id }})}}">${{escapeHtml(entry.label)}}</a>`;
-        return `<div class="dist-row"><strong>${{label}}</strong><span>${{entry.count}}</span><div class="bar"><span style="width:${{Math.round(entry.count / max * 100)}}%"></span></div></div>`;
+        const active = entry.person_id === activePerson ? ' active' : '';
+        return `<button type="button" class="dist-row${{active}}" data-filter-key="person" data-filter-value="${{escapeHtml(entry.person_id)}}"><strong>${{escapeHtml(entry.label)}}</strong><span>${{entry.count}}</span><div class="bar"><span style="width:${{Math.round(entry.count / max * 100)}}%"></span></div></button>`;
+      }});
+    }}
+    function applyFilters(values, filters, omitted = new Set()) {{
+      return values.filter((record) => {{
+        if (!omitted.has('person') && filters.person && record.person_id !== filters.person) return false;
+        if (!omitted.has('kind') && filters.kind && String(record.kind || 'unknown') !== filters.kind) return false;
+        if (!omitted.has('status') && filters.status && displayStatus(record) !== filters.status) return false;
+        if (!omitted.has('source') && filters.source && String(record.source || 'unknown') !== filters.source) return false;
+        if (!omitted.has('followup_state') && filters.followup_state) {{
+          return record.kind === 'followup' && String(record.followup_state || 'unknown') === filters.followup_state;
+        }}
+        return true;
       }});
     }}
     function countBy(values, key) {{
@@ -449,6 +478,9 @@ def memory_items_report_html(report: InspectReport) -> str:
       const params = new URLSearchParams(hash);
       return {{
         person: params.get('person') || '',
+        kind: params.get('kind') || '',
+        status: params.get('status') || '',
+        source: params.get('source') || '',
         followup_state: params.get('followup_state') || ''
       }};
     }}
@@ -468,14 +500,23 @@ def memory_items_report_html(report: InspectReport) -> str:
       const merged = {{ ...current, ...next }};
       const params = new URLSearchParams();
       if (merged.person) params.set('person', merged.person);
+      if (merged.kind) params.set('kind', merged.kind);
+      if (merged.status) params.set('status', merged.status);
+      if (merged.source) params.set('source', merged.source);
       if (merged.followup_state) params.set('followup_state', merged.followup_state);
       return params.toString();
     }}
     function filterSummary(filters) {{
       const parts = [];
       if (filters.person) parts.push(`person=${{filters.person}}`);
+      if (filters.kind) parts.push(`kind=${{filters.kind}}`);
+      if (filters.status) parts.push(`status=${{filters.status}}`);
+      if (filters.source) parts.push(`source=${{filters.source}}`);
       if (filters.followup_state) parts.push(`followup_state=${{filters.followup_state}}`);
       return parts.join(' - ');
+    }}
+    function hasFilters(filters) {{
+      return Boolean(filters.person || filters.kind || filters.status || filters.source || filters.followup_state);
     }}
     function filterText(filters) {{
       return Object.entries(filters)
@@ -497,6 +538,9 @@ def memory_items_report_html(report: InspectReport) -> str:
     }}
     function pill(value, className) {{
       return `<span class="pill ${{escapeAttr(className || '')}}">${{escapeHtml(value || '')}}</span>`;
+    }}
+    function filterPill(value, className, key, filterValue) {{
+      return `<a class="pill ${{escapeAttr(className || '')}}" href="#${{hashWith({{ [key]: filterValue || '' }})}}">${{escapeHtml(value || '')}}</a>`;
     }}
     function code(value) {{
       return `<code>${{escapeHtml(value || '')}}</code>`;

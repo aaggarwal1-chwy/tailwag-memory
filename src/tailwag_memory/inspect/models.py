@@ -14,6 +14,16 @@ class InspectTranscriptLine:
 
 
 @dataclass(frozen=True)
+class InspectRelatedMemoryItem:
+    """Memory item summary linked to an inspection transcript point."""
+
+    memory_id: str
+    kind: str
+    status: str
+    summary: str
+
+
+@dataclass(frozen=True)
 class PersonEpisodeTranscriptPoint:
     """Person-specific transcript text extracted from one episode."""
 
@@ -31,6 +41,7 @@ class PersonEpisodeTranscriptPoint:
     has_memory_items: bool = False
     memory_item_count: int = 0
     transcript_lines: list[InspectTranscriptLine] = field(default_factory=list)
+    related_memory_items: list[InspectRelatedMemoryItem] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

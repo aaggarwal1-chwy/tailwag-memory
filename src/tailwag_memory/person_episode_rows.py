@@ -9,15 +9,33 @@ def person_episode_rows(
     person_id: str | None = None,
     limit: int,
     include_memory_count: bool = False,
+    include_memory_items: bool = False,
     include_context_fields: bool = False,
     include_event_placeholder: bool = False,
     always_include_person_filter: bool = False,
 ) -> list[dict[str, object]]:
     """Fetch read-only person/episode participation rows."""
     rendered_person_id = str(person_id or "").strip()
-    memory_match = "OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)" if include_memory_count else ""
-    memory_with = ",\n                 count(DISTINCT memory) AS memory_item_count" if include_memory_count else ""
-    memory_return = ",\n                   memory_item_count AS memory_item_count" if include_memory_count else ""
+    with_memory = include_memory_count or include_memory_items
+    memory_match = "OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)" if with_memory else ""
+    memory_with_parts = []
+    memory_return_parts = []
+    if with_memory:
+        memory_with_parts.append("count(DISTINCT memory) AS memory_item_count")
+        memory_return_parts.append("memory_item_count AS memory_item_count")
+    if include_memory_items:
+        memory_with_parts.append(
+            """
+                 [item IN collect(DISTINCT CASE WHEN memory IS NULL THEN null ELSE {
+                     memory_id: memory.id,
+                     kind: coalesce(memory.kind, ''),
+                     status: coalesce(memory.status, ''),
+                     summary: coalesce(memory.summary, '')
+                 } END) WHERE item IS NOT NULL] AS related_memory_items""".strip()
+        )
+        memory_return_parts.append("related_memory_items AS related_memory_items")
+    memory_with = ",\n                 " + ",\n                 ".join(memory_with_parts) if memory_with_parts else ""
+    memory_return = ",\n                   " + ",\n                   ".join(memory_return_parts) if memory_return_parts else ""
     context_return = (
         """
                    e.id AS item_id,

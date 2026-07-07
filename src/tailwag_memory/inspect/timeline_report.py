@@ -443,27 +443,25 @@ def person_timeline_report_html(report: InspectReport) -> str:
     }}
     function renderLane(group, domain) {{
       const sorted = [...group.records].sort((left, right) => timeValue(left.start_time) - timeValue(right.start_time));
-      const laneHeight = Math.max(132, 76 + Math.min(4, sorted.length) * 44);
       return `
         <section class="person-lane" data-person-id="${{escapeAttr(group.person_id)}}">
           <div class="lane-label">
             <strong>${{escapeHtml(group.display_name)}}</strong>
             <span>${{group.records.length}} item${{group.records.length === 1 ? '' : 's'}}</span>
           </div>
-          <div class="timeline-lane" style="min-height:${{laneHeight}}px">
-            ${{sorted.map((record, index) => renderMarker(record, domain, index)).join('')}}
+          <div class="timeline-lane">
+            ${{sorted.map((record) => renderMarker(record, domain)).join('')}}
           </div>
         </section>
       `;
     }}
-    function renderMarker(record, domain, index) {{
+    function renderMarker(record, domain) {{
       const type = record.item_type || '';
       const memoryClass = hasLinkedMemory(record) ? 'with-memory' : '';
-      const top = 16 + (index % 4) * 44;
       const left = timePercent(timeValue(record.start_time), domain);
       const memoryLabel = hasLinkedMemory(record) ? `Linked memories ${{linkedMemoryCount(record)}}` : 'No linked memory';
       return `
-        <article class="timeline-marker ${{escapeAttr(type)}} ${{memoryClass}}" id="${{escapeAttr(record.item_id || '')}}" tabindex="0" onclick="bringMarkerToFront(this)" onfocus="bringMarkerToFront(this)" style="left:${{left}}%; top:${{top}}px">
+        <article class="timeline-marker ${{escapeAttr(type)}} ${{memoryClass}}" id="${{escapeAttr(record.item_id || '')}}" tabindex="0" onclick="bringMarkerToFront(this)" onfocus="bringMarkerToFront(this)" style="left:${{left}}%; top:16px">
           <div class="marker-head">
             <strong>${{escapeHtml(formatDate(record.start_time))}}</strong>
             <span class="kind">${{escapeHtml(type)}}</span>

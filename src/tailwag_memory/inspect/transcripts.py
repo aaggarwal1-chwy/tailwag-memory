@@ -3,12 +3,12 @@ from __future__ import annotations
 from ..db import QueryRunner
 from ..person_episode_rows import person_episode_rows
 from ..transcript_parsing import row_speaker_labels, target_transcript_turns
-from .models import InspectTranscriptLine, PersonEpisodeTranscriptPoint
+from .models import InspectRelatedMemoryItem, InspectTranscriptLine, PersonEpisodeTranscriptPoint
 
 
 def recent_person_episode_rows(runner: QueryRunner, limit: int) -> list[dict[str, object]]:
     """Fetch recent episode rows for person/episode participation pairs."""
-    return person_episode_rows(runner, limit=limit, include_memory_count=True)
+    return person_episode_rows(runner, limit=limit, include_memory_count=True, include_memory_items=True)
 
 
 class PersonEpisodeTranscriptService:
@@ -64,6 +64,7 @@ class PersonEpisodeTranscriptService:
         ]
 
         memory_item_count = _row_memory_item_count(row)
+        related_memory_items = _row_related_memory_items(row)
         return PersonEpisodeTranscriptPoint(
             person_id=person_id,
             display_name=display_name,
@@ -79,12 +80,19 @@ class PersonEpisodeTranscriptService:
             has_memory_items=memory_item_count > 0,
             memory_item_count=memory_item_count,
             transcript_lines=lines,
+            related_memory_items=related_memory_items,
         )
 
 
 def _recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: int) -> list[dict[str, object]]:
     """Fetch recent episode rows linked to a person for inspection."""
-    return person_episode_rows(runner, person_id=person_id, limit=limit, include_memory_count=True)
+    return person_episode_rows(
+        runner,
+        person_id=person_id,
+        limit=limit,
+        include_memory_count=True,
+        include_memory_items=True,
+    )
 
 
 def _bounded_positive_limit(limit: int, *, default: int) -> int:
@@ -101,3 +109,34 @@ def _row_memory_item_count(row: dict[str, object]) -> int:
         return max(0, int(row.get("memory_item_count") or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _row_related_memory_items(row: dict[str, object]) -> list[InspectRelatedMemoryItem]:
+    """Return related memory item summaries for an inspection row."""
+    items: list[InspectRelatedMemoryItem] = []
+    seen: set[str] = set()
+    for raw in _row_list(row.get("related_memory_items")):
+        if not isinstance(raw, dict):
+            continue
+        memory_id = str(raw.get("memory_id") or "").strip()
+        if not memory_id or memory_id in seen:
+            continue
+        seen.add(memory_id)
+        items.append(
+            InspectRelatedMemoryItem(
+                memory_id=memory_id,
+                kind=str(raw.get("kind") or "").strip(),
+                status=str(raw.get("status") or "").strip(),
+                summary=str(raw.get("summary") or "").strip(),
+            )
+        )
+    return items
+
+
+def _row_list(value: object) -> list[object]:
+    """Return a Neo4j list-ish value as a plain list."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []

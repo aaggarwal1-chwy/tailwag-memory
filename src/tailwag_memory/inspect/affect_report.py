@@ -239,6 +239,31 @@ def affect_report_html(report: InspectReport) -> str:
       line-height: 1;
       margin-top: 5px;
     }}
+    .memory-list {{
+      display: grid;
+      gap: 8px;
+      margin: 12px 0;
+    }}
+    .memory-item {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 10px;
+      font-size: 13px;
+      line-height: 1.4;
+    }}
+    .memory-item-title {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }}
+    .memory-item strong {{
+      color: var(--ink);
+      font-weight: 650;
+    }}
     dl {{
       display: grid;
       grid-template-columns: 105px 1fr;
@@ -429,7 +454,26 @@ def affect_report_html(report: InspectReport) -> str:
           <dt>Linked memories</dt><dd>${{escapeHtml(String(linkedMemoryCount(record)))}}</dd>
           <dt>Model scores</dt><dd>valence ${{format(record.valence)}} / arousal ${{format(record.arousal)}}</dd>
         </dl>
+        ${{relatedMemoryHtml(transcript)}}
         <pre>${{escapeHtml(transcript.text || '')}}</pre>
+      `;
+    }}
+    function relatedMemoryHtml(transcript) {{
+      const items = transcript.related_memory_items || [];
+      if (!items.length) return '';
+      return `
+        <section class="memory-list" aria-label="Related memory items">
+          ${{items.map((item) => `
+            <article class="memory-item">
+              <div class="memory-item-title">
+                <strong>${{escapeHtml(item.kind || 'memory')}}</strong>
+                <span>${{escapeHtml(item.status || '')}}</span>
+              </div>
+              <div>${{escapeHtml(item.summary || '')}}</div>
+              <code>${{escapeHtml(item.memory_id || '')}}</code>
+            </article>
+          `).join('')}}
+        </section>
       `;
     }}
     function renderTicks() {{
@@ -597,4 +641,3 @@ def affect_report_html(report: InspectReport) -> str:
 </body>
 </html>
 """
-

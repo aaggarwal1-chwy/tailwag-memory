@@ -394,6 +394,14 @@ class CliTest(unittest.TestCase):
                     "role": "speaker",
                     "source": "caller",
                     "memory_item_count": 1,
+                    "related_memory_items": [
+                        {
+                            "memory_id": "mem_demo",
+                            "kind": "preference",
+                            "status": "active",
+                            "summary": "Jamie likes concise demos.",
+                        }
+                    ],
                 }
             ]
         ]
@@ -451,6 +459,10 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output["records"][0]["transcript"]["text"], "I felt good about the demo.")
         self.assertTrue(output["records"][0]["transcript"]["has_memory_items"])
         self.assertEqual(output["records"][0]["transcript"]["memory_item_count"], 1)
+        self.assertEqual(
+            output["records"][0]["transcript"]["related_memory_items"][0]["summary"],
+            "Jamie likes concise demos.",
+        )
 
     def test_inspect_affect_html_writes_self_contained_report(self) -> None:
         settings = Settings(
@@ -470,6 +482,14 @@ class CliTest(unittest.TestCase):
                     "transcript": "<Jamie>: <script>alert(1)</script>",
                     "start_time": "2026-06-16T14:00:00+00:00",
                     "memory_item_count": 2,
+                    "related_memory_items": [
+                        {
+                            "memory_id": "mem_script",
+                            "kind": "fact",
+                            "status": "active",
+                            "summary": "<script>memory</script>",
+                        }
+                    ],
                 }
             ]
         ]
@@ -516,9 +536,12 @@ class CliTest(unittest.TestCase):
         self.assertIn("point.style.background = hasLinkedMemory(record) ? memoryPointColor : pointColor", html)
         self.assertIn("function hasLinkedMemory(record)", html)
         self.assertIn("function linkedMemoryCount(record)", html)
+        self.assertIn("function relatedMemoryHtml(transcript)", html)
+        self.assertIn("Related memory items", html)
         self.assertIn("<dt>Linked memories</dt>", html)
         self.assertIn('"has_memory_items": true', html)
         self.assertIn('"memory_item_count": 2', html)
+        self.assertIn("\\u003cscript>memory\\u003c/script>", html)
         self.assertIn("flex: 1 1 auto", html)
         self.assertIn("window.addEventListener('resize'", html)
         self.assertIn("function centered(value)", html)
@@ -658,6 +681,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("overflow: visible", html)
         self.assertIn("function bringMarkerToFront(marker)", html)
         self.assertIn(".timeline-marker.active", html)
+        self.assertIn("style=\"left:${left}%; top:16px\"", html)
+        self.assertNotIn("index % 4", html)
         self.assertIn("function hasLinkedMemory(record)", html)
         self.assertIn("memory-marker", html)
 
@@ -759,6 +784,10 @@ class CliTest(unittest.TestCase):
         self.assertIn("Follow-Up State", html)
         self.assertIn("tailwag-affect.html", html)
         self.assertIn("function hashFilters()", html)
+        self.assertIn("function applyFilters(values, filters, omitted = new Set())", html)
+        self.assertIn("data-filter-key", html)
+        self.assertIn("function filterPill(value, className, key, filterValue)", html)
+        self.assertIn("params.set('kind'", html)
         self.assertIn("followup_state", html)
 
     def test_person_context_prints_unified_context(self) -> None:

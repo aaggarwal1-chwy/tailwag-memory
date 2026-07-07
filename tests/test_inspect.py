@@ -7,8 +7,11 @@ import tailwag_memory.inspect as inspect_tools
 from tailwag_memory.inspect import (
     AffectScore,
     FoldEnsembleAffectProvider,
+    InspectRelatedMemoryItem,
     MemoryItemInspectService,
+    PersonEpisodeAffectPoint,
     PersonEpisodeTranscriptService,
+    PersonEpisodeTranscriptPoint,
     PersonTimelineRetrievalService,
     affect_report,
     affect_report_html,
@@ -42,6 +45,7 @@ class InspectPackageImportTest(unittest.TestCase):
             "HuggingFaceXLMRobertaLargeAffectProvider",
             "InspectMemoryAddressedEpisode",
             "InspectMemoryItem",
+            "InspectRelatedMemoryItem",
             "InspectReport",
             "InspectTranscriptLine",
             "MemoryItemInspectService",
@@ -80,6 +84,7 @@ class InspectTranscriptRowsTest(unittest.TestCase):
         self.assertIn("OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)", runner.queries[0].query)
         self.assertIn("count(DISTINCT memory) AS memory_item_count", runner.queries[0].query)
         self.assertIn("memory_item_count AS memory_item_count", runner.queries[0].query)
+        self.assertIn("related_memory_items AS related_memory_items", runner.queries[0].query)
         self.assertIn("person.id AS person_id", runner.queries[0].query)
         self.assertIn("e.id AS episode_id", runner.queries[0].query)
         self.assertIn("LIMIT $limit", runner.queries[0].query)
@@ -93,6 +98,40 @@ class InspectNavigationTest(unittest.TestCase):
         html = affect_report_html(affect_report([]))
 
         _assert_canonical_nav(self, html, "tailwag-affect.html")
+
+    def test_affect_report_detail_includes_related_memory_item_summaries(self) -> None:
+        report = affect_report(
+            [
+                PersonEpisodeAffectPoint(
+                    transcript=PersonEpisodeTranscriptPoint(
+                        person_id="person_jamie",
+                        display_name="Jamie",
+                        episode_id="episode_1",
+                        text="I like concise demos.",
+                        line_count=1,
+                        has_memory_items=True,
+                        memory_item_count=1,
+                        related_memory_items=[
+                            InspectRelatedMemoryItem(
+                                memory_id="mem_demo",
+                                kind="preference",
+                                status="active",
+                                summary="<Jamie likes concise demos>",
+                            )
+                        ],
+                    ),
+                    valence=0.75,
+                    arousal=0.35,
+                )
+            ]
+        )
+
+        html = affect_report_html(report)
+
+        self.assertIn("function relatedMemoryHtml(transcript)", html)
+        self.assertIn("Related memory items", html)
+        self.assertIn("transcript.related_memory_items", html)
+        self.assertIn("\\u003cJamie likes concise demos>", html)
 
 
 class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
@@ -113,6 +152,14 @@ class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
                         "role": "speaker",
                         "source": "caller",
                         "memory_item_count": 2,
+                        "related_memory_items": [
+                            {
+                                "memory_id": "mem_demo",
+                                "kind": "preference",
+                                "status": "active",
+                                "summary": "Jamie likes concise demos.",
+                            }
+                        ],
                     }
                 ]
             ]
@@ -133,6 +180,7 @@ class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
         self.assertEqual(points[0].source, "caller")
         self.assertTrue(points[0].has_memory_items)
         self.assertEqual(points[0].memory_item_count, 2)
+        self.assertEqual(points[0].related_memory_items[0].summary, "Jamie likes concise demos.")
         self.assertIn("MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)", runner.queries[0].query)
 
     def test_points_with_person_filter_uses_person_episode_query(self) -> None:
@@ -166,6 +214,7 @@ class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 3})
         self.assertIn("WHERE person.id = $person_id", runner.queries[0].query)
         self.assertIn("OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)", runner.queries[0].query)
+        self.assertIn("related_memory_items AS related_memory_items", runner.queries[0].query)
         self.assertEqual(points[0].text, "I already reviewed it.")
         self.assertEqual(
             [(line.timestamp, line.speaker, line.text) for line in points[0].transcript_lines],
@@ -379,8 +428,15 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
         self.assertIn("return 'superseded'", html)
         self.assertIn('data-followup-state="${escapeAttr(state)}"', html)
         self.assertIn("function hashFilters()", html)
+        self.assertIn("function applyFilters(values, filters, omitted = new Set())", html)
+        self.assertIn("data-filter-key", html)
+        self.assertIn("data-filter-value", html)
+        self.assertIn("function filterPill(value, className, key, filterValue)", html)
+        self.assertIn("params.set('kind'", html)
+        self.assertIn("params.set('status'", html)
+        self.assertIn("params.set('source'", html)
         self.assertIn("followup_state", html)
-        self.assertIn("function personDistributionRows(values)", html)
+        self.assertIn("function personDistributionRows(values, activePerson)", html)
         self.assertIn("\\u003cJamie>", html)
         self.assertIn("tailwag-memory-items.html", html)
         self.assertIn("tailwag-person-timeline.html", html)
@@ -528,6 +584,9 @@ class PersonTimelineReportTest(unittest.TestCase):
         self.assertIn("function bringMarkerToFront(marker)", html)
         self.assertIn('onclick="bringMarkerToFront(this)"', html)
         self.assertIn('tabindex="0"', html)
+        self.assertIn("style=\"left:${left}%; top:16px\"", html)
+        self.assertNotIn("index % 4", html)
+        self.assertNotIn("const laneHeight", html)
         self.assertIn("class=\"memory-marker", html)
         self.assertIn("function hasLinkedMemory(record)", html)
         self.assertIn("Linked memories", html)
