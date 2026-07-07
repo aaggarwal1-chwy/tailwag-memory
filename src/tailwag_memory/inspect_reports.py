@@ -243,8 +243,7 @@ def affect_report_html(report: InspectReport) -> str:
   <script>
     const report = JSON.parse(document.getElementById('report-data').textContent);
     const records = report.records || [];
-    const colors = ['#1f7a8c', '#d94f30', '#5a7d2b', '#7a4e9d', '#9b6b1f', '#25735f'];
-    const colorByPerson = new Map();
+    const pointColor = '#1f7a8c';
     const plot = document.getElementById('plot');
     const grid = document.getElementById('grid');
     const detail = document.getElementById('detail');
@@ -271,13 +270,9 @@ def affect_report_html(report: InspectReport) -> str:
     addTicks();
     records.forEach((record, index) => {{
       const transcript = record.transcript || {{}};
-      const person = transcript.person_id || 'unknown';
-      if (!colorByPerson.has(person)) {{
-        colorByPerson.set(person, colors[colorByPerson.size % colors.length]);
-      }}
       const point = document.createElement('button');
       point.className = 'point';
-      point.style.background = colorByPerson.get(person);
+      point.style.background = pointColor;
       point.style.left = `${{58 + clamp(record.valence) * (plot.clientWidth - 102)}}px`;
       point.style.top = `${{48 + (1 - clamp(record.arousal)) * (plot.clientHeight - 92)}}px`;
       point.title = `${{transcript.display_name || transcript.person_id}} - valence ${{format(record.valence)}} - arousal ${{format(record.arousal)}}`;
@@ -296,10 +291,9 @@ def affect_report_html(report: InspectReport) -> str:
       document.querySelectorAll('.point').forEach((node) => node.remove());
       records.forEach((record) => {{
         const transcript = record.transcript || {{}};
-        const person = transcript.person_id || 'unknown';
         const point = document.createElement('button');
         point.className = 'point';
-        point.style.background = colorByPerson.get(person);
+        point.style.background = pointColor;
         point.style.left = `${{58 + clamp(record.valence) * (plot.clientWidth - 102)}}px`;
         point.style.top = `${{48 + (1 - clamp(record.arousal)) * (plot.clientHeight - 92)}}px`;
         point.title = `${{transcript.display_name || transcript.person_id}} - valence ${{format(record.valence)}} - arousal ${{format(record.arousal)}}`;
@@ -319,6 +313,7 @@ def affect_report_html(report: InspectReport) -> str:
         </div>
         <dl>
           <dt>Person</dt><dd>${{escapeHtml(transcript.person_id || '')}}</dd>
+          <dt>Speaker</dt><dd>${{escapeHtml(speakerNames(transcript).join(', '))}}</dd>
           <dt>Episode</dt><dd>${{escapeHtml(transcript.episode_id || '')}}</dd>
           <dt>Time</dt><dd>${{escapeHtml([transcript.start_time, transcript.end_time].filter(Boolean).join(' to '))}}</dd>
           <dt>Place</dt><dd>${{escapeHtml([transcript.building_code, transcript.room_id].filter(Boolean).join(' / '))}}</dd>
@@ -345,6 +340,15 @@ def affect_report_html(report: InspectReport) -> str:
         y.textContent = label;
         plot.appendChild(y);
       }});
+    }}
+    function speakerNames(transcript) {{
+      const lines = transcript.transcript_lines || [];
+      const names = [];
+      lines.forEach((line) => {{
+        const speaker = String(line.speaker || '').trim();
+        if (speaker && !names.includes(speaker)) names.push(speaker);
+      }});
+      return names.length ? names : [transcript.display_name || transcript.person_id || ''];
     }}
     function clamp(value) {{
       return Math.max(0, Math.min(1, Number(value) || 0));

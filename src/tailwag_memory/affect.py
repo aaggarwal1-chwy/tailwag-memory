@@ -52,7 +52,8 @@ class HuggingFaceXLMRobertaLargeAffectProvider:
         inputs = self._tokenizer(str(text), max_length=200, truncation=True, return_tensors="pt")
         with self._torch.no_grad():
             output = self._model(**inputs)
-        values = output.logits.detach().cpu().flatten().tolist()
+        raw_values = output.logits.detach().cpu().flatten().tolist()
+        values = _hardsigmoid_values(raw_values)
         if len(values) < 2:
             raise AffectScoringConfigurationError("affect model must return at least two labels: valence and arousal")
         valence = _finite_score(values[0], "valence")
@@ -64,6 +65,8 @@ class HuggingFaceXLMRobertaLargeAffectProvider:
                 "model_dir": str(self.model_dir),
                 "tokenizer": self._tokenizer_source,
                 "architecture": "xlm-roberta-large",
+                "output_transform": "hardsigmoid",
+                "raw_logits": raw_values[:2],
             },
         )
 
@@ -126,3 +129,12 @@ def _finite_score(value: float, label: str) -> float:
     if not math.isfinite(rendered):
         raise AffectScoringConfigurationError(f"{label} score must be finite")
     return rendered
+
+
+def _hardsigmoid_values(values: list[float]) -> list[float]:
+    """Apply the upstream XLM-R bounded output transform."""
+    transformed: list[float] = []
+    for value in values:
+        rendered = _finite_score(value, "raw affect")
+        transformed.append(min(1.0, max(0.0, (rendered + 3.0) / 6.0)))
+    return transformed

@@ -503,6 +503,9 @@ class CliTest(unittest.TestCase):
         self.assertIn(str(output_path), stdout.getvalue())
         self.assertIn("Tailwag Affect Scatter", html)
         self.assertIn("report-data", html)
+        self.assertIn("Valence and arousal are normalized from 0 to 1.", html)
+        self.assertIn("<dt>Speaker</dt>", html)
+        self.assertNotIn("Colors group points by person.", html)
         self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
 
     def test_person_context_prints_unified_context(self) -> None:
