@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from .html_utils import _html_escape, _safe_json
+from .html_utils import _html_escape, _safe_json, inspect_nav
 from .reports import InspectReport
 
 
@@ -40,6 +40,9 @@ def memory_items_report_html(report: InspectReport) -> str:
       padding: 20px 28px 16px;
       border-bottom: 1px solid var(--line);
       background: #fffef9;
+      position: sticky;
+      top: 0;
+      z-index: 20;
     }}
     .topline {{
       display: flex;
@@ -60,6 +63,7 @@ def memory_items_report_html(report: InspectReport) -> str:
       gap: 8px;
       flex-wrap: wrap;
       font-size: 13px;
+      margin-bottom: 12px;
     }}
     nav a {{
       color: var(--accent);
@@ -81,7 +85,7 @@ def memory_items_report_html(report: InspectReport) -> str:
     }}
     .summary {{
       display: grid;
-      grid-template-columns: repeat(5, minmax(160px, 1fr));
+      grid-template-columns: repeat(4, minmax(160px, 1fr));
       gap: 12px;
     }}
     .panel {{
@@ -133,15 +137,25 @@ def memory_items_report_html(report: InspectReport) -> str:
     }}
     .board {{
       display: grid;
-      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
       gap: 10px;
     }}
     .state {{
+      appearance: none;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fbfcf8;
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
       padding: 10px;
       min-height: 72px;
+      text-align: left;
+      width: 100%;
+    }}
+    .state.active {{
+      border-color: var(--accent);
+      box-shadow: inset 0 -3px 0 var(--accent);
     }}
     .state strong {{
       display: block;
@@ -167,6 +181,11 @@ def memory_items_report_html(report: InspectReport) -> str:
       font: inherit;
       padding: 6px 10px;
       cursor: pointer;
+    }}
+    .controls button:disabled {{
+      color: var(--muted);
+      cursor: default;
+      opacity: .55;
     }}
     table {{
       width: 100%;
@@ -249,16 +268,12 @@ def memory_items_report_html(report: InspectReport) -> str:
 </head>
 <body>
   <header>
+    {inspect_nav("memory-items")}
     <div class="topline">
       <div>
         <h1>{_html_escape(report.title)}</h1>
         <div class="meta">Generated {_html_escape(report.generated_at)} - <span id="count">0</span> memory items</div>
       </div>
-      <nav aria-label="Inspect reports">
-        <a href="tailwag-memory-items.html" aria-current="page">Memory Items</a>
-        <a href="tailwag-person-timeline.html">Person Timeline</a>
-        <a href="tailwag-affect.html">Affect Scatter</a>
-      </nav>
     </div>
   </header>
   <main>
@@ -270,7 +285,7 @@ def memory_items_report_html(report: InspectReport) -> str:
     </section>
     <section class="controls">
       <span id="filterSummary"></span>
-      <button type="button" id="clearPerson">Clear Person Filter</button>
+      <button type="button" id="clearFilters">Clear Filters</button>
     </section>
     <section id="tableWrap"></section>
   </main>
@@ -282,12 +297,11 @@ def memory_items_report_html(report: InspectReport) -> str:
       ['kind', 'Kind'],
       ['status', 'Status'],
       ['source', 'Source'],
-      ['person', 'Person'],
-      ['followup_state', 'Follow-Up']
+      ['person', 'Person']
     ];
-    const followupStates = ['visible_now', 'not_yet_due', 'expired_active', 'addressed', 'superseded', 'invalid'];
-    const clearPerson = document.getElementById('clearPerson');
-    clearPerson.addEventListener('click', () => {{
+    const followupStates = ['visible_now', 'not_yet_due', 'expired_active', 'addressed', 'invalid'];
+    const clearFilters = document.getElementById('clearFilters');
+    clearFilters.addEventListener('click', () => {{
       history.pushState('', document.title, window.location.pathname + window.location.search);
       render();
     }});
@@ -298,32 +312,38 @@ def memory_items_report_html(report: InspectReport) -> str:
     }}
     render();
     function render() {{
-      const personFilter = hashPerson();
-      const visible = personFilter ? records.filter((record) => record.person_id === personFilter) : records;
+      const filters = hashFilters();
+      const personVisible = filters.person ? records.filter((record) => record.person_id === filters.person) : records;
+      const visible = filters.followup_state
+        ? personVisible.filter((record) => record.kind === 'followup' && record.followup_state === filters.followup_state)
+        : personVisible;
       document.getElementById('count').textContent = visible.length;
-      document.getElementById('filterSummary').textContent = personFilter
-        ? `Showing person=${{personFilter}} from #person filter`
-        : filterText(report.filters || {{}});
-      clearPerson.disabled = !personFilter;
+      document.getElementById('filterSummary').textContent = filterSummary(filters) || filterText(report.filters || {{}});
+      clearFilters.disabled = !filters.person && !filters.followup_state;
       renderSummary(visible);
-      renderFollowupBoard(visible);
+      renderFollowupBoard(personVisible, filters.followup_state);
       renderTable(visible);
     }}
     function renderSummary(visible) {{
       const summary = document.getElementById('summary');
       summary.innerHTML = distributionKeys.map(([key, label]) => {{
-        const distribution = countBy(visible, key === 'person' ? 'person_id' : key);
-        return `<section class="panel"><h2>${{label}}</h2><div class="dist-list">${{distributionRows(distribution, key).join('') || '<div class="empty">No records</div>'}}</div></section>`;
+        const rows = key === 'person'
+          ? personDistributionRows(visible)
+          : distributionRows(countBy(visible, key), key);
+        return `<section class="panel"><h2>${{label}}</h2><div class="dist-list">${{rows.join('') || '<div class="empty">No records</div>'}}</div></section>`;
       }}).join('');
     }}
-    function renderFollowupBoard(visible) {{
+    function renderFollowupBoard(visible, activeState) {{
       const distribution = countBy(visible.filter((record) => record.kind === 'followup'), 'followup_state');
       document.getElementById('followupBoard').innerHTML = followupStates.map((state) => `
-        <div class="state">
+        <button type="button" class="state ${{state === activeState ? 'active' : ''}}" data-followup-state="${{escapeAttr(state)}}">
           <span>${{titleCase(state)}}</span>
           <strong>${{distribution[state] || 0}}</strong>
-        </div>
+        </button>
       `).join('');
+      document.querySelectorAll('[data-followup-state]').forEach((button) => {{
+        button.addEventListener('click', () => setHashFilter('followup_state', button.dataset.followupState === activeState ? '' : button.dataset.followupState));
+      }});
     }}
     function renderTable(visible) {{
       const tableWrap = document.getElementById('tableWrap');
@@ -358,7 +378,7 @@ def memory_items_report_html(report: InspectReport) -> str:
       const supersedes = record.supersedes_memory_ids || [];
       return `
         <tr id="${{escapeAttr(record.memory_id || '')}}">
-          <td data-label="Person"><a href="#person=${{encodeURIComponent(record.person_id || '')}}">${{escapeHtml(person)}}</a><br><code>${{escapeHtml(record.person_id || '')}}</code></td>
+          <td data-label="Person"><a href="#${{hashWith({{ person: record.person_id || '' }})}}">${{escapeHtml(person)}}</a><br><code>${{escapeHtml(record.person_id || '')}}</code></td>
           <td data-label="Kind">${{pill(record.kind || 'unknown', record.kind)}}<br><code>${{escapeHtml(record.key || '')}}</code></td>
           <td data-label="Status">${{pill(record.status || 'unknown', record.followup_state)}}${{record.kind === 'followup' ? pill(record.followup_state || 'unknown', record.followup_state) : ''}}</td>
           <td data-label="Summary" class="summary-cell">${{escapeHtml(record.summary || '')}}<br><span class="meta">${{escapeHtml(record.source || '')}}${{record.source_ref ? ' / ' + escapeHtml(record.source_ref) : ''}}</span></td>
@@ -388,10 +408,28 @@ def memory_items_report_html(report: InspectReport) -> str:
       const entries = Object.entries(distribution).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
       const max = Math.max(1, ...entries.map(([, count]) => count));
       return entries.slice(0, 8).map(([value, count]) => {{
-        const label = key === 'person'
-          ? `<a href="#person=${{encodeURIComponent(value)}}">${{escapeHtml(value)}}</a>`
-          : escapeHtml(value);
+        const label = escapeHtml(value);
         return `<div class="dist-row"><strong>${{label}}</strong><span>${{count}}</span><div class="bar"><span style="width:${{Math.round(count / max * 100)}}%"></span></div></div>`;
+      }});
+    }}
+    function personDistributionRows(values) {{
+      const people = new Map();
+      values.forEach((record) => {{
+        const id = String(record.person_id || 'unknown');
+        const existing = people.get(id) || {{
+          person_id: id,
+          label: record.display_name || id,
+          count: 0
+        }};
+        if (!existing.label || existing.label === existing.person_id) existing.label = record.display_name || id;
+        existing.count += 1;
+        people.set(id, existing);
+      }});
+      const entries = Array.from(people.values()).sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+      const max = Math.max(1, ...entries.map((entry) => entry.count));
+      return entries.slice(0, 8).map((entry) => {{
+        const label = `<a href="#${{hashWith({{ person: entry.person_id }})}}">${{escapeHtml(entry.label)}}</a>`;
+        return `<div class="dist-row"><strong>${{label}}</strong><span>${{entry.count}}</span><div class="bar"><span style="width:${{Math.round(entry.count / max * 100)}}%"></span></div></div>`;
       }});
     }}
     function countBy(values, key) {{
@@ -401,10 +439,38 @@ def memory_items_report_html(report: InspectReport) -> str:
         return counts;
       }}, {{}});
     }}
-    function hashPerson() {{
+    function hashFilters() {{
       const hash = String(window.location.hash || '').replace(/^#/, '');
       const params = new URLSearchParams(hash);
-      return params.get('person') || '';
+      return {{
+        person: params.get('person') || '',
+        followup_state: params.get('followup_state') || ''
+      }};
+    }}
+    function setHashFilter(key, value) {{
+      const next = hashFilters();
+      next[key] = value || '';
+      const hash = hashWith(next);
+      if (hash) {{
+        location.hash = hash;
+      }} else {{
+        history.pushState('', document.title, window.location.pathname + window.location.search);
+        render();
+      }}
+    }}
+    function hashWith(next) {{
+      const current = hashFilters();
+      const merged = {{ ...current, ...next }};
+      const params = new URLSearchParams();
+      if (merged.person) params.set('person', merged.person);
+      if (merged.followup_state) params.set('followup_state', merged.followup_state);
+      return params.toString();
+    }}
+    function filterSummary(filters) {{
+      const parts = [];
+      if (filters.person) parts.push(`person=${{filters.person}}`);
+      if (filters.followup_state) parts.push(`followup_state=${{filters.followup_state}}`);
+      return parts.join(' - ');
     }}
     function filterText(filters) {{
       return Object.entries(filters)
@@ -449,4 +515,3 @@ def memory_items_report_html(report: InspectReport) -> str:
 </body>
 </html>
 """
-

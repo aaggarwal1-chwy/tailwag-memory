@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from .html_utils import _html_escape, _safe_json
+from .html_utils import _html_escape, _safe_json, inspect_nav
 from .reports import InspectReport
 
 
@@ -40,12 +40,16 @@ def affect_report_html(report: InspectReport) -> str:
       padding: 22px 28px 14px;
       border-bottom: 1px solid var(--line);
       background: #fffdf8;
+      position: sticky;
+      top: 0;
+      z-index: 20;
     }}
     nav {{
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
       margin-bottom: 12px;
+      font-size: 13px;
     }}
     nav a {{
       color: var(--accent);
@@ -54,7 +58,6 @@ def affect_report_html(report: InspectReport) -> str:
       background: var(--panel);
       border-radius: 6px;
       padding: 6px 9px;
-      font-size: 13px;
     }}
     nav a[aria-current="page"] {{
       border-color: var(--accent);
@@ -273,11 +276,7 @@ def affect_report_html(report: InspectReport) -> str:
 </head>
 <body>
   <header>
-    <nav aria-label="Inspect reports">
-      <a href="tailwag-affect.html" aria-current="page">Affect Scatter</a>
-      <a href="tailwag-person-timeline.html">Person Timeline</a>
-      <a href="tailwag-memory-items.html">Memory Items</a>
-    </nav>
+    {inspect_nav("affect")}
     <h1>{_html_escape(report.title)}</h1>
     <div class="meta">Generated {_html_escape(report.generated_at)} - <span id="count">0</span> scored points</div>
   </header>
@@ -598,5 +597,4 @@ def affect_report_html(report: InspectReport) -> str:
 </body>
 </html>
 """
-
 

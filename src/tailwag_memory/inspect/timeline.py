@@ -38,6 +38,7 @@ class PersonTimelineRetrievalService:
             limit=int(parameters["limit"]),
             include_context_fields=True,
             include_event_placeholder=True,
+            include_memory_count=True,
             always_include_person_filter=True,
         )
 
@@ -63,7 +64,8 @@ class PersonTimelineRetrievalService:
                    place.building_code AS building_code,
                    place.room_id AS room_id,
                    r.response AS role,
-                   r.source AS source
+                   r.source AS source,
+                   0 AS memory_item_count
             ORDER BY e.start_time DESC, person.id ASC
             LIMIT $limit
             """,
@@ -91,6 +93,8 @@ class PersonTimelineRetrievalService:
             room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
             role=str(row["role"]) if row.get("role") is not None else None,
             source=str(row["source"]) if row.get("source") is not None else None,
+            has_memory_items=_row_memory_item_count(row) > 0,
+            memory_item_count=_row_memory_item_count(row),
             transcript_snippets=snippets,
         )
 
@@ -141,3 +145,11 @@ def _timeline_text(value: object) -> str:
     if len(rendered) <= 360:
         return rendered
     return rendered[:357].rstrip() + "..."
+
+
+def _row_memory_item_count(row: dict[str, object]) -> int:
+    """Return the memory item count for a timeline row."""
+    try:
+        return max(0, int(row.get("memory_item_count") or 0))
+    except (TypeError, ValueError):
+        return 0

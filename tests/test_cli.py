@@ -581,6 +581,7 @@ class CliTest(unittest.TestCase):
                     "room_id": "101",
                     "role": "speaker",
                     "source": "caller",
+                    "memory_item_count": 2,
                 }
             ],
             [],
@@ -617,6 +618,8 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output["records"][0]["episode_id"], "episode_1")
         self.assertEqual(output["records"][0]["text"], "I filed the update.")
         self.assertEqual(output["records"][0]["transcript_snippets"][0]["speaker"], "Jamie")
+        self.assertTrue(output["records"][0]["has_memory_items"])
+        self.assertEqual(output["records"][0]["memory_item_count"], 2)
 
     def test_inspect_person_timeline_html_defaults_to_inspect_report_path(self) -> None:
         settings = Settings(
@@ -648,6 +651,10 @@ class CliTest(unittest.TestCase):
         self.assertIn("No person timeline items matched the selected filters.", html)
         self.assertIn("tailwag-affect.html", html)
         self.assertIn("tailwag-memory-items.html", html)
+        self.assertIn("function renderLanes(visible)", html)
+        self.assertIn("class=\"timeline-canvas\"", html)
+        self.assertIn("function hasLinkedMemory(record)", html)
+        self.assertIn("memory-marker", html)
 
     def test_inspect_memory_items_json_uses_inspect_report(self) -> None:
         settings = Settings(
@@ -746,7 +753,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("No memory items matched the selected filters.", html)
         self.assertIn("Follow-Up State", html)
         self.assertIn("tailwag-affect.html", html)
-        self.assertIn("hashPerson()", html)
+        self.assertIn("function hashFilters()", html)
+        self.assertIn("followup_state", html)
 
     def test_person_context_prints_unified_context(self) -> None:
         settings = Settings(

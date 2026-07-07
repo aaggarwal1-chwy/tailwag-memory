@@ -10,6 +10,8 @@ from tailwag_memory.inspect import (
     MemoryItemInspectService,
     PersonEpisodeTranscriptService,
     PersonTimelineRetrievalService,
+    affect_report,
+    affect_report_html,
     memory_items_report,
     memory_items_report_html,
     person_timeline_report,
@@ -17,6 +19,17 @@ from tailwag_memory.inspect import (
     recent_person_episode_rows,
 )
 from tailwag_memory.models import PersonTimelineItem, PersonTimelineTranscriptSnippet
+
+
+def _assert_canonical_nav(testcase: unittest.TestCase, html: str, current_href: str | None = None) -> None:
+    """Assert inspect reports render the canonical nav order."""
+    affect_index = html.index('href="tailwag-affect.html"')
+    timeline_index = html.index('href="tailwag-person-timeline.html"')
+    memory_index = html.index('href="tailwag-memory-items.html"')
+    testcase.assertLess(affect_index, timeline_index)
+    testcase.assertLess(timeline_index, memory_index)
+    if current_href is not None:
+        testcase.assertIn(f'href="{current_href}" aria-current="page"', html)
 
 
 class InspectPackageImportTest(unittest.TestCase):
@@ -73,6 +86,13 @@ class InspectTranscriptRowsTest(unittest.TestCase):
         upper_query = runner.queries[0].query.upper()
         for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
             self.assertNotIn(write_keyword, upper_query)
+
+
+class InspectNavigationTest(unittest.TestCase):
+    def test_affect_report_uses_canonical_nav_order(self) -> None:
+        html = affect_report_html(affect_report([]))
+
+        _assert_canonical_nav(self, html, "tailwag-affect.html")
 
 
 class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
@@ -335,13 +355,20 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
         self.assertEqual(report.metadata["distributions"]["kind"], {"preference": 1, "followup": 1})
         self.assertEqual(report.metadata["distributions"]["person"], {"person_jamie": 2})
         self.assertEqual(report.metadata["distributions"]["followup_state"]["visible_now"], 1)
+        _assert_canonical_nav(self, html, "tailwag-memory-items.html")
         self.assertIn("Follow-Up State", html)
+        self.assertNotIn("['followup_state', 'Follow-Up']", html)
+        self.assertIn("const followupStates = ['visible_now', 'not_yet_due', 'expired_active', 'addressed', 'invalid'];", html)
+        self.assertIn('data-followup-state="${escapeAttr(state)}"', html)
+        self.assertIn("function hashFilters()", html)
+        self.assertIn("followup_state", html)
+        self.assertIn("function personDistributionRows(values)", html)
+        self.assertIn("\\u003cJamie>", html)
         self.assertIn("tailwag-memory-items.html", html)
         self.assertIn("tailwag-person-timeline.html", html)
         self.assertIn("tailwag-affect.html", html)
-        self.assertIn("hashPerson()", html)
         self.assertIn("window.addEventListener('hashchange', render)", html)
-        self.assertIn("#person=", html)
+        self.assertIn("params.set('person'", html)
         self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
 
 
@@ -366,6 +393,7 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
                         "room_id": "101",
                         "role": "speaker",
                         "source": "caller",
+                        "memory_item_count": 2,
                     }
                 ],
                 [
@@ -398,6 +426,8 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(episode.episode_id, "episode_1")
         self.assertIsNone(episode.event_id)
         self.assertEqual(episode.text, "I shipped the patch.")
+        self.assertTrue(episode.has_memory_items)
+        self.assertEqual(episode.memory_item_count, 2)
         self.assertEqual(
             [(line.timestamp, line.speaker, line.text) for line in episode.transcript_snippets],
             [("", "Jamie", "I shipped the patch.")],
@@ -405,11 +435,15 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
         event = items[0]
         self.assertEqual(event.event_id, "event_1")
         self.assertEqual(event.text, "Design review")
+        self.assertFalse(event.has_memory_items)
+        self.assertEqual(event.memory_item_count, 0)
         self.assertEqual(runner.queries[0].parameters, {"person_id": None, "limit": 5})
         self.assertEqual(runner.queries[1].parameters, {"person_id": None, "limit": 5})
         self.assertIn("MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)", runner.queries[0].query)
         self.assertIn("WHERE ($person_id IS NULL OR person.id = $person_id)", runner.queries[0].query)
+        self.assertIn("count(DISTINCT memory) AS memory_item_count", runner.queries[0].query)
         self.assertIn("type(r) = 'ATTENDED'", runner.queries[1].query)
+        self.assertIn("0 AS memory_item_count", runner.queries[1].query)
         for query in runner.queries:
             upper_query = query.query.upper()
             for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
@@ -439,6 +473,8 @@ class PersonTimelineReportTest(unittest.TestCase):
                     episode_id="episode_1",
                     start_time="2026-07-07T14:00:00+00:00",
                     text="<script>alert(1)</script>",
+                    has_memory_items=True,
+                    memory_item_count=2,
                     transcript_snippets=[
                         PersonTimelineTranscriptSnippet(
                             timestamp="2026-07-07T14:00:00+00:00",
@@ -455,13 +491,22 @@ class PersonTimelineReportTest(unittest.TestCase):
         html = person_timeline_report_html(report)
 
         self.assertIn("Tailwag Person Timeline", html)
+        _assert_canonical_nav(self, html, "tailwag-person-timeline.html")
         self.assertIn("tailwag-person-timeline.html", html)
         self.assertIn("tailwag-affect.html", html)
         self.assertIn("tailwag-memory-items.html", html)
         self.assertIn("new URLSearchParams(location.hash.slice(1))", html)
         self.assertIn("params.get('person')", html)
         self.assertIn("location.hash = `person=${encodeURIComponent(personId)}`", html)
+        self.assertIn("function renderLanes(visible)", html)
+        self.assertIn("class=\"person-lane\"", html)
+        self.assertIn("class=\"timeline-lane\"", html)
+        self.assertIn("class=\"memory-marker", html)
+        self.assertIn("function hasLinkedMemory(record)", html)
+        self.assertIn("Linked memories", html)
         self.assertIn('"person_id": "person_jamie"', html)
+        self.assertIn('"has_memory_items": true', html)
+        self.assertIn('"memory_item_count": 2', html)
         self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
 
 
@@ -478,9 +523,9 @@ class InspectPlaceholderFilesTest(unittest.TestCase):
 
         for filename in expected:
             html = (inspect_dir / filename).read_text()
-            self.assertIn("tailwag-affect.html", html)
-            self.assertIn("tailwag-person-timeline.html", html)
-            self.assertIn("tailwag-memory-items.html", html)
+            current = None if filename == "index.html" else filename
+            _assert_canonical_nav(self, html, current)
+            self.assertIn("position: sticky", html)
             if filename != "index.html":
                 self.assertIn("No Generated Data Yet", html)
 
