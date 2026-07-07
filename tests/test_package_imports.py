@@ -1,5 +1,8 @@
 import inspect
+import sys
+from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock, patch
 
 import tailwag_memory
 import tailwag_memory.memory_items as memory_items
@@ -168,6 +171,28 @@ class PackageImportTest(unittest.TestCase):
         self.assertEqual(signature.parameters["email"].annotation, "str")
         self.assertEqual(signature.parameters["new_person_id"].annotation, "str")
         self.assertEqual(signature.return_annotation, "bool")
+
+    def test_neo4j_runner_disables_unrecognized_notification_category(self) -> None:
+        graph_database = Mock()
+        driver = Mock()
+        graph_database.driver.return_value = driver
+        neo4j_module = SimpleNamespace(GraphDatabase=graph_database)
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="secret",
+            embedding_dimension=64,
+        )
+
+        with patch.dict(sys.modules, {"neo4j": neo4j_module}):
+            runner = Neo4jQueryRunner(settings)
+
+        graph_database.driver.assert_called_once_with(
+            "bolt://example.test:7687",
+            auth=("neo4j", "secret"),
+            notifications_disabled_categories=["UNRECOGNIZED"],
+        )
+        self.assertIs(runner._driver, driver)
 
 
 if __name__ == "__main__":
