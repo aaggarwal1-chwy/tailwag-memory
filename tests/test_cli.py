@@ -419,7 +419,7 @@ class CliTest(unittest.TestCase):
             with patch("tailwag_memory.cli.load_settings", return_value=settings):
                 with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
                     with patch(
-                        "tailwag_memory.cli.FoldEnsembleAffectProvider.from_model_dirs",
+                        "tailwag_memory.inspect.cli_handlers.FoldEnsembleAffectProvider.from_model_dirs",
                         return_value=FakeProvider(),
                     ) as provider_factory:
                         stdout = StringIO()
@@ -451,7 +451,7 @@ class CliTest(unittest.TestCase):
         provider_factory.assert_called_once_with(fold1_text, fold2_text)
         self.assertEqual(runner.queries[0][1], {"person_id": "person_jamie", "limit": 5})
         output = json.loads(stdout.getvalue())
-        self.assertEqual(output["title"], "Tailwag Affect Scatter")
+        self.assertEqual(output["title"], "Affect Scatter")
         self.assertEqual(output["filters"], {"limit": 5, "person_id": "person_jamie"})
         self.assertEqual(output["metadata"]["storage"], "on_demand")
         self.assertEqual(output["records"][0]["valence"], 0.25)
@@ -506,7 +506,7 @@ class CliTest(unittest.TestCase):
             fold2.mkdir()
             with patch("tailwag_memory.cli.load_settings", return_value=settings):
                 with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                    with patch("tailwag_memory.cli.FoldEnsembleAffectProvider.from_model_dirs", return_value=FakeProvider()):
+                    with patch("tailwag_memory.inspect.cli_handlers.FoldEnsembleAffectProvider.from_model_dirs", return_value=FakeProvider()):
                         stdout = StringIO()
                         with redirect_stdout(stdout):
                             exit_code = main(
@@ -527,12 +527,12 @@ class CliTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(runner.queries[0][1], {"limit": 1000})
         self.assertIn(str(output_path), stdout.getvalue())
-        self.assertIn("Tailwag Affect Scatter", html)
+        self.assertIn("Affect Scatter", html)
         self.assertIn("report-data", html)
         self.assertIn("Valence and arousal are displayed from -1 to 1", html)
         self.assertIn("Linked memory item", html)
         self.assertIn("No linked memory", html)
-        self.assertIn("const memoryPointColor = '#c2410c'", html)
+        self.assertIn("const memoryPointColor = '#f4a51c'", html)
         self.assertIn("point.style.background = hasLinkedMemory(record) ? memoryPointColor : pointColor", html)
         self.assertIn("function hasLinkedMemory(record)", html)
         self.assertIn("function linkedMemoryCount(record)", html)
@@ -562,7 +562,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("plot.addEventListener('pointerdown'", html)
         self.assertIn("<dt>Model scores</dt>", html)
         self.assertIn("<dt>Speaker</dt>", html)
-        self.assertIn("function formatDate(value)", html)
+        self.assertIn("formatDateTime(start)", html)
         self.assertNotIn("<dt>Role</dt>", html)
         self.assertNotIn("<dt>Source</dt>", html)
         self.assertNotIn("JSON.stringify(record.metadata", html)
@@ -577,6 +577,79 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 0)
         self.assertIn("maximum person-episode pairs to score", stdout.getvalue())
+
+    def test_inspect_followup_validity_json_uses_inspect_report(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+        runner = FakeRunner(settings)
+        runner.results = [
+            [
+                {
+                    "memory_id": "mem_followup",
+                    "person_id": "person_jamie",
+                    "display_name": "Jamie",
+                    "summary": "Ask Jamie about the demo.",
+                    "status": "active",
+                    "observed_at": "2026-07-01T10:00:00+00:00",
+                    "due_at": "2026-07-08T10:00:00+00:00",
+                    "expires_at": "2026-07-15T10:00:00+00:00",
+                    "addressed_count": 0,
+                    "superseded_count": 0,
+                }
+            ]
+        ]
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                stdout = StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(
+                        ["inspect", "followup-validity", "--format", "json", "--output", "-", "--limit", "5"]
+                    )
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(runner.closed)
+        self.assertEqual(runner.queries[0][1], {"limit": 5})
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["title"], "Follow-Up Validity")
+        self.assertEqual(output["filters"], {"limit": 5})
+        self.assertEqual(output["metadata"]["utility"], "inspect followup-validity")
+        self.assertEqual(output["records"][0]["validity_bucket"], "4_to_7_days")
+        self.assertIn("WHERE memory.kind = 'followup'", runner.queries[0][0])
+
+    def test_inspect_followup_validity_html_defaults_to_inspect_report_path(self) -> None:
+        settings = Settings(
+            neo4j_uri="bolt://example.test:7687",
+            neo4j_user="neo4j",
+            neo4j_password="password",
+            embedding_dimension=64,
+        )
+        runner = FakeRunner(settings)
+        runner.results = [[]]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            original_cwd = Path.cwd()
+            os.chdir(tmp)
+            try:
+                with patch("tailwag_memory.cli.load_settings", return_value=settings):
+                    with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                        stdout = StringIO()
+                        with redirect_stdout(stdout):
+                            exit_code = main(["inspect", "followup-validity"])
+                output_path = Path(tmp) / "inspect" / "tailwag-followup-validity.html"
+                html = output_path.read_text()
+            finally:
+                os.chdir(original_cwd)
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("inspect/tailwag-followup-validity.html", stdout.getvalue())
+        self.assertIn("Follow-Up Validity", html)
+        self.assertIn("No follow-up memory items matched this export.", html)
+        self.assertIn("tailwag-memory-items.html", html)
 
     def test_inspect_person_timeline_json_uses_inspect_report(self) -> None:
         settings = Settings(
@@ -634,7 +707,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(runner.queries[0][1], {"person_id": "person_jamie", "limit": 5})
         self.assertEqual(runner.queries[1][1], {"person_id": "person_jamie", "limit": 5})
         output = json.loads(stdout.getvalue())
-        self.assertEqual(output["title"], "Tailwag Person Timeline")
+        self.assertEqual(output["title"], "Person Timeline")
         self.assertEqual(output["filters"], {"limit": 5, "person_id": "person_jamie"})
         self.assertEqual(output["metadata"]["utility"], "inspect person-timeline")
         self.assertEqual(output["metadata"]["storage"], "read_only")
@@ -670,7 +743,7 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("inspect/tailwag-person-timeline.html", stdout.getvalue())
-        self.assertIn("Tailwag Person Timeline", html)
+        self.assertIn("Person Timeline", html)
         self.assertIn("No person timeline items matched the selected filters.", html)
         self.assertIn("tailwag-affect.html", html)
         self.assertIn("tailwag-memory-items.html", html)
@@ -715,6 +788,13 @@ class CliTest(unittest.TestCase):
                     "superseded_by_memory_ids": [],
                     "supersedes_memory_ids": [],
                 }
+            ],
+            [
+                {
+                    "episode_count": 4,
+                    "memory_episode_count": 2,
+                    "memory_count": 1,
+                }
             ]
         ]
 
@@ -740,15 +820,19 @@ class CliTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(runner.closed)
         self.assertEqual(runner.queries[0][1], {"person_id": "person_jamie", "limit": 5})
-        query = runner.queries[0][0].upper()
-        for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
-            self.assertNotIn(write_keyword, query)
+        self.assertEqual(runner.queries[1][1], {})
+        for query, _parameters in runner.queries:
+            upper_query = query.upper()
+            for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
+                self.assertNotIn(write_keyword, upper_query)
         output = json.loads(stdout.getvalue())
-        self.assertEqual(output["title"], "Tailwag Memory Items")
+        self.assertEqual(output["title"], "Memory Items")
         self.assertEqual(output["filters"], {"limit": 5, "person_id": "person_jamie"})
         self.assertEqual(output["metadata"]["utility"], "inspect memory-items")
         self.assertEqual(output["metadata"]["storage"], "read_only")
         self.assertEqual(output["metadata"]["distributions"]["kind"], {"followup": 1})
+        self.assertEqual(output["metadata"]["episode_counts"]["Episodes With Memories"], 2)
+        self.assertEqual(output["metadata"]["overview_links"][0], {"count": 2, "source": "All Episodes", "target": "Episodes With Memories"})
         self.assertEqual(output["records"][0]["memory_id"], "mem_followup")
         self.assertEqual(output["records"][0]["supported_episode_ids"], ["episode_1"])
         self.assertEqual(output["records"][0]["followup_state"], "visible_now")
@@ -761,7 +845,7 @@ class CliTest(unittest.TestCase):
             embedding_dimension=64,
         )
         runner = FakeRunner(settings)
-        runner.results = [[]]
+        runner.results = [[], []]
 
         with tempfile.TemporaryDirectory() as tmp:
             original_cwd = Path.cwd()
@@ -773,14 +857,24 @@ class CliTest(unittest.TestCase):
                         with redirect_stdout(stdout):
                             exit_code = main(["inspect", "memory-items"])
                 output_path = Path(tmp) / "inspect" / "tailwag-memory-items.html"
+                css_path = Path(tmp) / "inspect" / "tailwag-inspect.css"
+                js_path = Path(tmp) / "inspect" / "tailwag-inspect.js"
                 html = output_path.read_text()
+                css = css_path.read_text()
+                js = js_path.read_text()
             finally:
                 os.chdir(original_cwd)
 
         self.assertEqual(exit_code, 0)
         self.assertIn("inspect/tailwag-memory-items.html", stdout.getvalue())
-        self.assertIn("Tailwag Memory Items", html)
+        self.assertIn("Memory Items", html)
+        self.assertIn('href="tailwag-inspect.css"', html)
+        self.assertIn('src="tailwag-inspect.js"', html)
+        self.assertIn("position: sticky", css)
+        self.assertIn(".pill", css)
+        self.assertIn("window.inspectFilters", js)
         self.assertIn("No memory items matched the selected filters.", html)
+        self.assertIn("Memory Overview", html)
         self.assertIn("Follow-Up State", html)
         self.assertIn("tailwag-affect.html", html)
         self.assertIn("function hashFilters()", html)

@@ -22,7 +22,9 @@ def person_episode_rows(
     memory_return_parts = []
     if with_memory:
         memory_with_parts.append("count(DISTINCT memory) AS memory_item_count")
+        memory_with_parts.append("[id IN collect(DISTINCT memory.id) WHERE id IS NOT NULL] AS memory_item_ids")
         memory_return_parts.append("memory_item_count AS memory_item_count")
+        memory_return_parts.append("memory_item_ids AS memory_item_ids")
     if include_memory_items:
         memory_with_parts.append(
             """

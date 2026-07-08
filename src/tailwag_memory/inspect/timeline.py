@@ -65,7 +65,8 @@ class PersonTimelineRetrievalService:
                    place.room_id AS room_id,
                    r.response AS role,
                    r.source AS source,
-                   0 AS memory_item_count
+                   0 AS memory_item_count,
+                   [] AS memory_item_ids
             ORDER BY e.start_time DESC, person.id ASC
             LIMIT $limit
             """,
@@ -95,6 +96,7 @@ class PersonTimelineRetrievalService:
             source=str(row["source"]) if row.get("source") is not None else None,
             has_memory_items=_row_memory_item_count(row) > 0,
             memory_item_count=_row_memory_item_count(row),
+            memory_item_ids=_row_memory_item_ids(row),
             transcript_snippets=snippets,
         )
 
@@ -153,3 +155,18 @@ def _row_memory_item_count(row: dict[str, object]) -> int:
         return max(0, int(row.get("memory_item_count") or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _row_memory_item_ids(row: dict[str, object]) -> list[str]:
+    """Return linked memory item IDs for a timeline row."""
+    raw = row.get("memory_item_ids")
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    rendered: list[str] = []
+    for value in raw:
+        item_id = str(value or "").strip()
+        if item_id and item_id not in seen:
+            seen.add(item_id)
+            rendered.append(item_id)
+    return rendered

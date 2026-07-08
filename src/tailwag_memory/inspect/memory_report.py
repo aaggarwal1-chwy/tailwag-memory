@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from .html_utils import _html_escape, _safe_json, inspect_nav
+from .html_utils import _html_escape, _safe_json, inspect_nav, inspect_script_tag, inspect_style_link
+from .memory_overview_report import memory_overview_css, memory_overview_script, memory_overview_section
 from .reports import InspectReport
 
 
@@ -16,67 +17,14 @@ def memory_items_report_html(report: InspectReport) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{_html_escape(report.title)}</title>
+  {inspect_style_link()}
   <style>
-    :root {{
-      color-scheme: light;
-      --bg: #f6f7f2;
-      --ink: #20242a;
-      --muted: #66707a;
-      --line: #d7dccf;
-      --panel: #ffffff;
-      --accent: #176b5f;
-      --accent-2: #a8551c;
-      --accent-3: #3c6f9f;
-      --danger: #a33a35;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--ink);
-    }}
-    header {{
-      padding: 20px 28px 16px;
-      border-bottom: 1px solid var(--line);
-      background: #fffef9;
-      position: sticky;
-      top: 0;
-      z-index: 20;
-    }}
     .topline {{
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
       gap: 18px;
       flex-wrap: wrap;
-    }}
-    h1 {{
-      margin: 0;
-      font-size: 24px;
-      line-height: 1.2;
-      letter-spacing: 0;
-    }}
-    nav {{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      font-size: 13px;
-      margin-bottom: 12px;
-    }}
-    nav a {{
-      color: var(--accent);
-      text-decoration: none;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 6px;
-      padding: 6px 9px;
-    }}
-    .meta {{
-      margin-top: 7px;
-      color: var(--muted);
-      font-size: 13px;
     }}
     main {{
       padding: 20px 28px 30px;
@@ -88,19 +36,7 @@ def memory_items_report_html(report: InspectReport) -> str:
       grid-template-columns: repeat(4, minmax(160px, 1fr));
       gap: 12px;
     }}
-    .panel {{
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-      padding: 13px;
-      min-width: 0;
-    }}
-    h2 {{
-      margin: 0 0 9px;
-      font-size: 16px;
-      line-height: 1.25;
-      letter-spacing: 0;
-    }}
+{memory_overview_css().strip()}
     .dist-list {{
       display: grid;
       gap: 7px;
@@ -132,18 +68,7 @@ def memory_items_report_html(report: InspectReport) -> str:
       color: var(--accent);
       text-decoration: none;
     }}
-    .bar {{
-      grid-column: 1 / -1;
-      height: 5px;
-      border-radius: 999px;
-      background: #e5e9df;
-      overflow: hidden;
-    }}
-    .bar span {{
-      display: block;
-      height: 100%;
-      background: var(--accent);
-    }}
+    .bar {{ grid-column: 1 / -1; height: 5px; }}
     .board {{
       display: grid;
       grid-template-columns: repeat(5, minmax(120px, 1fr));
@@ -153,7 +78,7 @@ def memory_items_report_html(report: InspectReport) -> str:
       appearance: none;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fbfcf8;
+      background: var(--panel-soft);
       color: var(--ink);
       cursor: pointer;
       font: inherit;
@@ -181,21 +106,6 @@ def memory_items_report_html(report: InspectReport) -> str:
       color: var(--muted);
       font-size: 13px;
     }}
-    .controls button {{
-      appearance: none;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--panel);
-      color: var(--ink);
-      font: inherit;
-      padding: 6px 10px;
-      cursor: pointer;
-    }}
-    .controls button:disabled {{
-      color: var(--muted);
-      cursor: default;
-      opacity: .55;
-    }}
     table {{
       width: 100%;
       border-collapse: collapse;
@@ -214,7 +124,7 @@ def memory_items_report_html(report: InspectReport) -> str:
     }}
     th {{
       color: var(--muted);
-      background: #fbfcf8;
+      background: var(--panel-soft);
       font-weight: 650;
       white-space: nowrap;
     }}
@@ -223,37 +133,15 @@ def memory_items_report_html(report: InspectReport) -> str:
       min-width: 280px;
       max-width: 520px;
     }}
-    .pill {{
-      display: inline-flex;
-      align-items: center;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      padding: 2px 7px;
-      margin: 0 4px 4px 0;
-      background: #fbfcf8;
-      color: var(--ink);
-      white-space: nowrap;
+    .pill {{ margin: 0 4px 4px 0; }}
+    td a {{
+      color: var(--accent);
       text-decoration: none;
-      font: inherit;
     }}
-    .pill[href] {{ cursor: pointer; }}
-    .pill.followup {{ border-color: rgba(168,85,28,.45); color: var(--accent-2); }}
-    .pill.addressed {{ border-color: rgba(60,111,159,.45); color: var(--accent-3); }}
-    .pill.expired, .pill.superseded {{ border-color: rgba(163,58,53,.45); color: var(--danger); }}
-    code {{
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }}
-    .empty, .warnings {{
-      color: var(--muted);
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 8px;
-      padding: 12px;
-      font-size: 13px;
-    }}
-    .warnings {{ color: var(--danger); }}
+    td a:hover {{ text-decoration: underline; }}
+    .pill.followup {{ border-color: rgba(244,165,28,.45); color: #875200; }}
+    .pill.addressed {{ border-color: rgba(0,115,207,.45); color: var(--accent-3); }}
+    .pill.expired, .pill.superseded {{ border-color: rgba(180,35,24,.45); color: var(--danger); }}
     @media (max-width: 1100px) {{
       .summary {{ grid-template-columns: repeat(2, minmax(160px, 1fr)); }}
       .board {{ grid-template-columns: repeat(2, minmax(120px, 1fr)); }}
@@ -290,6 +178,11 @@ def memory_items_report_html(report: InspectReport) -> str:
   </header>
   <main>
     <div id="warnings"></div>
+    <section class="panel command-panel" id="emptyCommand">
+      <h2>Generate This Report</h2>
+      <p><code>tailwag inspect memory-items</code></p>
+    </section>
+{memory_overview_section().strip()}
     <section class="summary" id="summary" aria-label="Memory item distributions"></section>
     <section class="panel">
       <h2>Follow-Up State</h2>
@@ -302,9 +195,11 @@ def memory_items_report_html(report: InspectReport) -> str:
     <section id="tableWrap"></section>
   </main>
   <script id="report-data" type="application/json">{payload}</script>
+  {inspect_script_tag()}
   <script>
     const report = JSON.parse(document.getElementById('report-data').textContent);
     const records = report.records || [];
+    const overviewLinks = (report.metadata && report.metadata.overview_links) || [];
     const distributionKeys = [
       ['kind', 'Kind'],
       ['status', 'Status'],
@@ -313,6 +208,7 @@ def memory_items_report_html(report: InspectReport) -> str:
     ];
     const followupStates = ['visible_now', 'not_yet_due', 'expired_active', 'addressed', 'invalid'];
     const clearFilters = document.getElementById('clearFilters');
+    document.getElementById('emptyCommand').hidden = records.length > 0;
     clearFilters.addEventListener('click', () => {{
       history.pushState('', document.title, window.location.pathname + window.location.search);
       render();
@@ -330,9 +226,11 @@ def memory_items_report_html(report: InspectReport) -> str:
       document.getElementById('filterSummary').textContent = filterSummary(filters) || filterText(report.filters || {{}});
       clearFilters.disabled = !hasFilters(filters);
       renderSummary(visible, filters);
+      renderOverviewSankey();
       renderFollowupBoard(applyFilters(records, filters, new Set(['followup_state'])), filters.followup_state);
       renderTable(visible);
     }}
+{memory_overview_script().strip()}
     function renderSummary(visible, filters) {{
       const summary = document.getElementById('summary');
       summary.innerHTML = distributionKeys.map(([key, label]) => {{
@@ -394,30 +292,30 @@ def memory_items_report_html(report: InspectReport) -> str:
       const supersedes = record.supersedes_memory_ids || [];
       return `
         <tr id="${{escapeAttr(record.memory_id || '')}}">
-          <td data-label="Person"><a href="#${{hashWith({{ person: record.person_id || '' }})}}">${{escapeHtml(person)}}</a><br><code>${{escapeHtml(record.person_id || '')}}</code></td>
+          <td data-label="Person"><a href="${{escapeHtml(timelineHref({{ person: record.person_id || '' }}))}}">${{escapeHtml(person)}}</a><br><code>${{escapeHtml(record.person_id || '')}}</code></td>
           <td data-label="Kind">${{filterPill(record.kind || 'unknown', record.kind, 'kind', record.kind || 'unknown')}}<br><code>${{escapeHtml(record.key || '')}}</code></td>
           <td data-label="Status">${{filterPill(displayStatus(record), displayStatus(record), 'status', displayStatus(record))}}${{record.kind === 'followup' ? filterPill(record.followup_state || 'unknown', record.followup_state, 'followup_state', record.followup_state || 'unknown') : ''}}</td>
           <td data-label="Summary" class="summary-cell">${{escapeHtml(record.summary || '')}}<br><span class="meta">${{filterPill(record.source || 'unknown', record.source, 'source', record.source || 'unknown')}}${{record.source_ref ? ' / ' + escapeHtml(record.source_ref) : ''}}</span></td>
           <td data-label="Evidence">${{evidenceHtml(supported, addressed, supersededBy, supersedes)}}</td>
           <td data-label="Timing">${{timeHtml(record)}}</td>
-          <td data-label="ID"><code>${{escapeHtml(record.memory_id || '')}}</code></td>
+          <td data-label="ID"><a href="#${{hashWith({{ memory: record.memory_id || '' }})}}"><code>${{escapeHtml(record.memory_id || '')}}</code></a></td>
         </tr>
       `;
     }}
     function evidenceHtml(supported, addressed, supersededBy, supersedes) {{
       const lines = [];
-      if (supported.length) lines.push(`Supported by ${{supported.map(code).join(', ')}}`);
-      if (addressed.length) lines.push(`Addressed by ${{addressed.map((entry) => code(entry.episode_id)).join(', ')}}`);
-      if (supersededBy.length) lines.push(`Superseded by ${{supersededBy.map(code).join(', ')}}`);
-      if (supersedes.length) lines.push(`Supersedes ${{supersedes.map(code).join(', ')}}`);
+      if (supported.length) lines.push(`Supported by ${{supported.map(timelineItemLink).join(', ')}}`);
+      if (addressed.length) lines.push(`Addressed by ${{addressed.map((entry) => timelineItemLink(entry.episode_id)).join(', ')}}`);
+      if (supersededBy.length) lines.push(`Superseded by ${{supersededBy.map(memoryLink).join(', ')}}`);
+      if (supersedes.length) lines.push(`Supersedes ${{supersedes.map(memoryLink).join(', ')}}`);
       return lines.length ? lines.join('<br>') : '<span class="meta">No linked evidence</span>';
     }}
     function timeHtml(record) {{
       const parts = [];
-      if (record.observed_at) parts.push(`Observed ${{escapeHtml(formatDate(record.observed_at))}}`);
-      if (record.due_at) parts.push(`Due ${{escapeHtml(formatDate(record.due_at))}}`);
-      if (record.expires_at) parts.push(`Expires ${{escapeHtml(formatDate(record.expires_at))}}`);
-      if (record.updated_at) parts.push(`Updated ${{escapeHtml(formatDate(record.updated_at))}}`);
+      if (record.observed_at) parts.push(`Observed ${{escapeHtml(formatDateTime(record.observed_at))}}`);
+      if (record.due_at) parts.push(`Due ${{escapeHtml(formatDateTime(record.due_at))}}`);
+      if (record.expires_at) parts.push(`Expires ${{escapeHtml(formatDateTime(record.expires_at))}}`);
+      if (record.updated_at) parts.push(`Updated ${{escapeHtml(formatDateTime(record.updated_at))}}`);
       return parts.length ? parts.join('<br>') : '<span class="meta">No timing</span>';
     }}
     function distributionRows(distribution, key, activeValue) {{
@@ -451,15 +349,25 @@ def memory_items_report_html(report: InspectReport) -> str:
     }}
     function applyFilters(values, filters, omitted = new Set()) {{
       return values.filter((record) => {{
+        if (!omitted.has('memory') && filters.memory && record.memory_id !== filters.memory) return false;
+        if (!omitted.has('episode') && filters.episode && !recordMatchesEpisode(record, filters.episode)) return false;
         if (!omitted.has('person') && filters.person && record.person_id !== filters.person) return false;
         if (!omitted.has('kind') && filters.kind && String(record.kind || 'unknown') !== filters.kind) return false;
         if (!omitted.has('status') && filters.status && displayStatus(record) !== filters.status) return false;
         if (!omitted.has('source') && filters.source && String(record.source || 'unknown') !== filters.source) return false;
+        if (!omitted.has('validity_bucket') && filters.validity_bucket && validityBucket(record) !== filters.validity_bucket) return false;
         if (!omitted.has('followup_state') && filters.followup_state) {{
           return record.kind === 'followup' && String(record.followup_state || 'unknown') === filters.followup_state;
         }}
         return true;
       }});
+    }}
+    function recordMatchesEpisode(record, episodeId) {{
+      const supported = record.supported_episode_ids || [];
+      const addressed = record.addressed_by || [];
+      return supported.includes(episodeId)
+        || addressed.some((entry) => entry && entry.episode_id === episodeId)
+        || String(record.source_ref || '') === episodeId;
     }}
     function countBy(values, key) {{
       return values.reduce((counts, record) => {{
@@ -473,15 +381,35 @@ def memory_items_report_html(report: InspectReport) -> str:
       if (record.status === 'superseded' || supersededBy.length) return 'superseded';
       return record.status || 'unknown';
     }}
+    function validityBucket(record) {{
+      if (record.kind !== 'followup') return 'not_followup';
+      const start = timeValue(record.due_at || record.observed_at || record.created_at || record.updated_at);
+      const end = timeValue(record.expires_at);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 'invalid';
+      const days = (end - start) / 86400000;
+      if (days < 1) return 'under_1_day';
+      if (days <= 3) return '1_to_3_days';
+      if (days <= 7) return '4_to_7_days';
+      if (days <= 14) return '8_to_14_days';
+      if (days <= 30) return '15_to_30_days';
+      return 'over_30_days';
+    }}
+    function timeValue(value) {{
+      const date = new Date(value || '');
+      return date.getTime();
+    }}
     function hashFilters() {{
       const hash = String(window.location.hash || '').replace(/^#/, '');
       const params = new URLSearchParams(hash);
       return {{
+        memory: params.get('memory') || '',
+        episode: params.get('episode') || '',
         person: params.get('person') || '',
         kind: params.get('kind') || '',
         status: params.get('status') || '',
         source: params.get('source') || '',
-        followup_state: params.get('followup_state') || ''
+        followup_state: params.get('followup_state') || '',
+        validity_bucket: params.get('validity_bucket') || ''
       }};
     }}
     function setHashFilter(key, value) {{
@@ -500,41 +428,35 @@ def memory_items_report_html(report: InspectReport) -> str:
       const merged = {{ ...current, ...next }};
       const params = new URLSearchParams();
       if (merged.person) params.set('person', merged.person);
+      if (merged.memory) params.set('memory', merged.memory);
+      if (merged.episode) params.set('episode', merged.episode);
       if (merged.kind) params.set('kind', merged.kind);
       if (merged.status) params.set('status', merged.status);
       if (merged.source) params.set('source', merged.source);
       if (merged.followup_state) params.set('followup_state', merged.followup_state);
+      if (merged.validity_bucket) params.set('validity_bucket', merged.validity_bucket);
       return params.toString();
     }}
     function filterSummary(filters) {{
       const parts = [];
+      if (filters.memory) parts.push(`memory=${{filters.memory}}`);
+      if (filters.episode) parts.push(`episode=${{filters.episode}}`);
       if (filters.person) parts.push(`person=${{filters.person}}`);
       if (filters.kind) parts.push(`kind=${{filters.kind}}`);
       if (filters.status) parts.push(`status=${{filters.status}}`);
       if (filters.source) parts.push(`source=${{filters.source}}`);
       if (filters.followup_state) parts.push(`followup_state=${{filters.followup_state}}`);
+      if (filters.validity_bucket) parts.push(`validity_bucket=${{filters.validity_bucket}}`);
       return parts.join(' - ');
     }}
     function hasFilters(filters) {{
-      return Boolean(filters.person || filters.kind || filters.status || filters.source || filters.followup_state);
+      return Boolean(filters.memory || filters.episode || filters.person || filters.kind || filters.status || filters.source || filters.followup_state || filters.validity_bucket);
     }}
     function filterText(filters) {{
       return Object.entries(filters)
         .filter(([, value]) => value !== null && value !== undefined && value !== '')
         .map(([key, value]) => `${{key}}=${{value}}`)
         .join(' - ');
-    }}
-    function formatDate(value) {{
-      if (!value) return '';
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return String(value);
-      return new Intl.DateTimeFormat('en-US', {{
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
-      }}).format(date);
     }}
     function pill(value, className) {{
       return `<span class="pill ${{escapeAttr(className || '')}}">${{escapeHtml(value || '')}}</span>`;
@@ -545,20 +467,14 @@ def memory_items_report_html(report: InspectReport) -> str:
     function code(value) {{
       return `<code>${{escapeHtml(value || '')}}</code>`;
     }}
-    function titleCase(value) {{
-      return String(value || '').replace(/_/g, ' ').replace(/\\b\\w/g, (char) => char.toUpperCase());
+    function memoryLink(memoryId) {{
+      return `<a href="#${{hashWith({{ memory: memoryId || '' }})}}">${{code(memoryId)}}</a>`;
     }}
-    function escapeHtml(value) {{
-      return String(value).replace(/[&<>"']/g, (char) => ({{
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;'
-      }}[char]));
+    function timelineItemLink(itemId) {{
+      return `<a href="${{escapeHtml(timelineHref({{ item: itemId || '' }}))}}">${{code(itemId)}}</a>`;
     }}
-    function escapeAttr(value) {{
-      return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '-');
+    function timelineHref(filters) {{
+      return inspectFilters.href('tailwag-person-timeline.html', filters || {{}});
     }}
   </script>
 </body>

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Follow-Up Validity</title>
+  <link rel="stylesheet" href="tailwag-inspect.css">
+  <style>
+    main { padding: 20px 28px 32px; display: grid; gap: 16px; }
+    .groups { display: grid; gap: 14px; }
+    .group {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px;
+    }
+    .group-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .group h2 { margin: 0; }
+    .group h2 a, .item a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .group h2 a:hover, .item a:hover { text-decoration: underline; }
+    .bar { height: 8px; margin-bottom: 10px; }
+    .items { display: grid; gap: 8px; }
+    .item {
+      border-top: 1px solid var(--line);
+      padding-top: 8px;
+      display: grid;
+      grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      font-size: 13px;
+    }
+    .item strong { display: block; overflow-wrap: anywhere; }
+    .summary { overflow-wrap: anywhere; }
+    .pill { color: var(--muted); }
+    .pill.expired_active { color: var(--danger); border-color: rgba(180,35,24,.45); }
+    .pill.visible_now { color: var(--accent); border-color: rgba(11,77,179,.45); }
+    .pill.not_yet_due { color: var(--warning-color); border-color: rgba(244,165,28,.55); }
+    .warnings { color: var(--danger); }
+    @media (max-width: 820px) {
+      header, main { padding-left: 16px; padding-right: 16px; }
+      .item { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav aria-label="Inspect reports"><a href="tailwag-followup-validity.html" aria-current="page">Follow-Up Validity</a><a href="tailwag-affect.html">Affect Scatter</a><a href="tailwag-person-timeline.html">Person Timeline</a><a href="tailwag-memory-items.html">Memory Items</a></nav>
+    <h1>Follow-Up Validity</h1>
+    <div class="meta">Generated 2026-07-08T19:38:39.282896+00:00 - <span id="count">0</span> follow-ups</div>
+  </header>
+  <main>
+    <div id="warnings"></div>
+    <section class="panel command-panel" id="emptyCommand">
+      <h2>Generate This Report</h2>
+      <p><code>tailwag inspect followup-validity</code></p>
+    </section>
+    <section id="groups" class="groups" aria-label="Follow-ups grouped by validity duration"></section>
+  </main>
+  <script id="report-data" type="application/json">{"filters": {"limit": 1000}, "generated_at": "2026-07-08T19:38:39.282896+00:00", "metadata": {"bucket_order": ["invalid", "under_1_day", "1_to_3_days", "4_to_7_days", "8_to_14_days", "15_to_30_days", "over_30_days"], "canonical_reports": {"affect": "tailwag-affect.html", "followup_validity": "tailwag-followup-validity.html", "memory_items": "tailwag-memory-items.html", "person_timeline": "tailwag-person-timeline.html"}, "distributions": {"followup_state": {"expired_active": 2, "visible_now": 5}, "validity_bucket": {"1_to_3_days": 1, "4_to_7_days": 6}}, "storage": "read_only", "utility": "inspect followup-validity"}, "records": [{"display_name": "Anthony Fortunato", "due_at": "2026-07-02T15:00:00+00:00", "expires_at": "2026-07-08T00:00:00+00:00", "followup_state": "expired_active", "memory_id": "mem_e7863608aa8a4b9ea8d1e065100dcefd", "person_id": "slack:U089ZEF3MBR", "status": "active", "summary": "Anthony expected to arrive late after a family breakfast for his oldest child's birthday; ask how the birthday breakfast went if chatting soon after.", "validity_bucket": "4_to_7_days", "validity_seconds": 464400}, {"display_name": "Cameron Fulton", "due_at": "2026-07-02T14:00:00+00:00", "expires_at": "2026-07-08T14:00:00+00:00", "followup_state": "expired_active", "memory_id": "mem_667696bbea5545ffa241975ae6bd52d1", "person_id": "slack:U0ALQPGV0UW", "status": "active", "summary": "Ask Cameron whether Rhys's daycare reopened after the pipe leak closure and whether the rest of the day went okay.", "validity_bucket": "4_to_7_days", "validity_seconds": 518400}, {"display_name": "Anthony Fortunato", "due_at": "2026-07-06T09:00:00+00:00", "expires_at": "2026-07-08T23:59:00+00:00", "followup_state": "visible_now", "memory_id": "mem_4fd4a2b8b3144c589a8b1cb4c18dde69", "person_id": "slack:U089ZEF3MBR", "status": "active", "summary": "Anthony planned to work from home on July 6 for an HVAC company visit at an unspecified time, and on July 7 when he expected to be offline for about an hour around 3:30 PM because his kids had double-booked doctors appointments.", "validity_bucket": "1_to_3_days", "validity_seconds": 226740}, {"display_name": "Karl Berntorp", "due_at": "2026-07-03T13:00:00+00:00", "expires_at": "2026-07-09T13:00:00+00:00", "followup_state": "visible_now", "memory_id": "mem_4bcb48b769d7484cbd9aeb9b2926dacf", "person_id": "slack:U095N072JE6", "status": "active", "summary": "Karl had to take two of his kids to urgent care for strep testing; a brief check-in on how they are feeling may be welcome.", "validity_bucket": "4_to_7_days", "validity_seconds": 518400}, {"display_name": "Olivia Ordonez", "due_at": "2026-07-06T09:00:00+00:00", "expires_at": "2026-07-10T23:59:59+00:00", "followup_state": "visible_now", "memory_id": "mem_7f65a4da5abc4ad0a09ed7d6821f4691", "person_id": "slack:U02CGPXTX8W", "status": "active", "summary": "Olivia worked from home on 2026-06-30 because her husband had a fever and she wanted to avoid getting coworkers sick before the long weekend; after the long weekend, it may be appropriate to ask if he is feeling better.", "validity_bucket": "4_to_7_days", "validity_seconds": 399599}, {"display_name": "Sakshee Patil", "due_at": "2026-07-07T09:00:00+00:00", "expires_at": "2026-07-13T09:00:00+00:00", "followup_state": "visible_now", "memory_id": "mem_d833bea7b3bf4cde81910b7d61ede07d", "person_id": "slack:U08TP1TAT8Q", "status": "active", "summary": "Sakshee woke up with a really sore throat and is working from home today; check in soon on how she\u2019s feeling.", "validity_bucket": "4_to_7_days", "validity_seconds": 518400}, {"display_name": "Brian Waite", "due_at": "2026-07-08T13:00:00+00:00", "expires_at": "2026-07-14T20:27:56.922659+00:00", "followup_state": "visible_now", "memory_id": "mem_e6b1a319313045b683b3f83df03d2977", "person_id": "slack:U0B1ZSSLW6N", "status": "active", "summary": "Brian chipped a tooth and has a dentist appointment tomorrow afternoon; check in afterward on how he is doing.", "validity_bucket": "4_to_7_days", "validity_seconds": 545276}], "title": "Follow-Up Validity", "warnings": []}</script>
+  <script src="tailwag-inspect.js"></script>
+  <script>
+    const report = JSON.parse(document.getElementById('report-data').textContent);
+    const records = report.records || [];
+    const bucketOrder = (report.metadata && report.metadata.bucket_order) || [];
+    const labels = {
+      invalid: 'Invalid or Unknown Duration',
+      under_1_day: 'Under 1 Day',
+      '1_to_3_days': '1-3 Days',
+      '4_to_7_days': '4-7 Days',
+      '8_to_14_days': '8-14 Days',
+      '15_to_30_days': '15-30 Days',
+      over_30_days: 'Over 30 Days'
+    };
+    document.getElementById('count').textContent = records.length;
+    document.getElementById('emptyCommand').hidden = records.length > 0;
+    const warnings = report.warnings || [];
+    if (warnings.length) {
+      document.getElementById('warnings').innerHTML = `<div class="warnings">${warnings.map(escapeHtml).join('<br>')}</div>`;
+    }
+    renderGroups();
+    function renderGroups() {
+      const node = document.getElementById('groups');
+      if (!records.length) {
+        node.innerHTML = '<div class="empty">No follow-up memory items matched this export.</div>';
+        return;
+      }
+      const grouped = groupBy(records, 'validity_bucket');
+      const max = Math.max(1, ...Object.values(grouped).map((items) => items.length));
+      node.innerHTML = bucketOrder
+        .filter((bucket) => grouped[bucket] && grouped[bucket].length)
+        .map((bucket) => groupHtml(bucket, grouped[bucket], max))
+        .join('');
+    }
+    function groupHtml(bucket, items, max) {
+      return `
+        <section class="group">
+          <div class="group-head">
+            <h2><a href="${escapeHtml(memoryItemsHref({ kind: 'followup', validity_bucket: bucket }))}">${escapeHtml(labels[bucket] || bucket)}</a></h2>
+            <strong>${items.length}</strong>
+          </div>
+          <div class="bar" aria-hidden="true"><span style="width:${Math.round(items.length / max * 100)}%"></span></div>
+          <div class="items">${items.map(itemHtml).join('')}</div>
+        </section>
+      `;
+    }
+    function itemHtml(record) {
+      const person = record.display_name || record.person_id || '';
+      return `
+        <article class="item">
+          <div>
+            <strong><a href="${escapeHtml(timelineHref(record))}">${escapeHtml(person)}</a></strong>
+            <a href="${escapeHtml(memoryItemsHref({ memory: record.memory_id || '' }))}"><code>${escapeHtml(record.memory_id || '')}</code></a>
+          </div>
+          <div class="summary">
+            ${escapeHtml(record.summary || '')}
+            <div class="meta">${escapeHtml(timeRange(record))}</div>
+          </div>
+          <a class="pill ${escapeAttr(record.followup_state || '')}" href="${escapeHtml(memoryItemsHref({ kind: 'followup', followup_state: record.followup_state || 'unknown' }))}">${escapeHtml(titleCase(record.followup_state || 'unknown'))}</a>
+        </article>
+      `;
+    }
+    function memoryItemsHref(filters) {
+      return inspectFilters.href('tailwag-memory-items.html', filters || {});
+    }
+    function timelineHref(record) {
+      return inspectFilters.href('tailwag-person-timeline.html', { person: record.person_id || '' });
+    }
+    function groupBy(values, key) {
+      return values.reduce((groups, record) => {
+        const value = record[key] || 'unknown';
+        groups[value] = groups[value] || [];
+        groups[value].push(record);
+        return groups;
+      }, {});
+    }
+    function timeRange(record) {
+      const parts = [];
+      if (record.due_at) parts.push(`due ${formatDateTime(record.due_at)}`);
+      if (record.expires_at) parts.push(`expires ${formatDateTime(record.expires_at)}`);
+      return parts.join(' / ');
+    }
+  </script>
+</body>
+</html>

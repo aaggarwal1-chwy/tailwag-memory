@@ -28,7 +28,7 @@ def affect_report(
 ) -> InspectReport:
     """Build a report envelope for affect scatter exports."""
     return InspectReport(
-        title="Tailwag Affect Scatter",
+        title="Affect Scatter",
         generated_at=utc_now_iso(),
         filters=filters or {},
         records=[asdict(point) for point in points],
@@ -46,7 +46,7 @@ def person_timeline_report(
 ) -> InspectReport:
     """Build a report envelope for person timeline exports."""
     return InspectReport(
-        title="Tailwag Person Timeline",
+        title="Person Timeline",
         generated_at=utc_now_iso(),
         filters=filters or {},
         records=[asdict(item) for item in items],
@@ -63,6 +63,13 @@ def report_json(report: InspectReport) -> str:
 def affect_report_html(report: InspectReport) -> str:
     """Render a self-contained affect scatter HTML report."""
     from .affect_report import affect_report_html as render
+
+    return render(report)
+
+
+def followup_validity_report_html(report: InspectReport) -> str:
+    """Render a self-contained follow-up validity HTML report."""
+    from .followup_report import followup_validity_report_html as render
 
     return render(report)
 

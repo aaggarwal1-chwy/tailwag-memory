@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from .html_utils import _html_escape, _safe_json, inspect_nav
+from .html_utils import _html_escape, _safe_json, inspect_nav, inspect_script_tag, inspect_style_link
 from .reports import InspectReport
 
 
@@ -15,63 +15,11 @@ def person_timeline_report_html(report: InspectReport) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{_html_escape(report.title)}</title>
+  {inspect_style_link()}
   <style>
     :root {{
-      color-scheme: light;
-      --bg: #f6f7f4;
-      --ink: #172026;
-      --muted: #64707a;
-      --line: #d4d9d2;
-      --panel: #ffffff;
-      --accent: #256f6c;
-      --event: #8a5a00;
-      --episode: #245f93;
-      --memory: #c2410c;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--ink);
-    }}
-    header {{
-      padding: 22px 28px 14px;
-      border-bottom: 1px solid var(--line);
-      background: #fbfcfa;
-      position: sticky;
-      top: 0;
-      z-index: 20;
-    }}
-    h1 {{
-      margin: 0;
-      font-size: 24px;
-      line-height: 1.2;
-      letter-spacing: 0;
-    }}
-    nav {{
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 12px;
-      font-size: 13px;
-    }}
-    nav a {{
-      color: var(--accent);
-      text-decoration: none;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 6px;
-      padding: 6px 9px;
-    }}
-    nav a[aria-current="page"] {{
-      border-color: var(--accent);
-      font-weight: 650;
-    }}
-    .meta {{
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 13px;
+      --event: #875200;
+      --memory: #f4a51c;
     }}
     main {{
       display: grid;
@@ -81,7 +29,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
     aside {{
       border-right: 1px solid var(--line);
       padding: 18px;
-      background: #fbfcfa;
+      background: var(--panel-soft);
       overflow: auto;
     }}
     .people {{
@@ -174,6 +122,11 @@ def person_timeline_report_html(report: InspectReport) -> str:
       display: block;
       overflow-wrap: anywhere;
     }}
+    .lane-label a, .timeline-marker a {{
+      color: var(--accent);
+      text-decoration: none;
+    }}
+    .lane-label a:hover, .timeline-marker a:hover {{ text-decoration: underline; }}
     .lane-label span {{
       color: var(--muted);
       display: block;
@@ -190,7 +143,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
       left: 0;
       right: 0;
       top: 38px;
-      border-top: 1px dashed #c3cbc1;
+      border-top: 1px dashed var(--line);
     }}
     .timeline-marker {{
       position: absolute;
@@ -206,19 +159,19 @@ def person_timeline_report_html(report: InspectReport) -> str:
       padding: 8px 9px;
       font-size: 12px;
       line-height: 1.35;
-      box-shadow: 0 5px 16px rgba(31, 41, 51, .08);
+      box-shadow: 0 5px 16px rgba(7, 53, 124, .08);
     }}
     .timeline-marker.active {{
       z-index: 30;
-      box-shadow: 0 10px 28px rgba(31, 41, 51, .22);
+      box-shadow: 0 10px 28px rgba(7, 53, 124, .22);
     }}
     .timeline-marker.active .marker-text {{
       max-height: none;
     }}
     .timeline-marker.event {{ border-top-color: var(--event); }}
     .timeline-marker.with-memory {{
-      border-color: rgba(194,65,12,.55);
-      box-shadow: 0 5px 16px rgba(194, 65, 12, .13);
+      border-color: rgba(244,165,28,.65);
+      box-shadow: 0 5px 16px rgba(244, 165, 28, .16);
     }}
     .marker-head {{
       display: flex;
@@ -240,6 +193,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
       gap: 5px;
       color: var(--muted);
       margin-top: 6px;
+      text-decoration: none;
     }}
     .memory-marker::before {{
       content: "";
@@ -247,7 +201,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
       height: 8px;
       border-radius: 999px;
       border: 1px solid var(--line);
-      background: #eef1ed;
+      background: var(--panel-soft);
     }}
     .memory-marker.linked {{
       color: var(--memory);
@@ -271,15 +225,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
     }}
     dt {{ color: var(--muted); }}
     dd {{ margin: 0; overflow-wrap: anywhere; }}
-    .empty, .warnings {{
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-      color: var(--muted);
-      padding: 12px;
-      font-size: 13px;
-    }}
-    .warnings {{ margin-bottom: 12px; color: #8a3a22; }}
+    .warnings {{ margin-bottom: 12px; color: var(--danger); }}
     @media (max-width: 760px) {{
       main {{ grid-template-columns: 1fr; }}
       aside {{ border-right: 0; border-bottom: 1px solid var(--line); }}
@@ -301,6 +247,10 @@ def person_timeline_report_html(report: InspectReport) -> str:
     </aside>
     <section class="timeline" aria-live="polite">
       <div id="warnings"></div>
+      <section class="panel command-panel" id="emptyCommand">
+        <h2>Generate This Report</h2>
+        <p><code>tailwag inspect person-timeline</code></p>
+      </section>
       <div class="toolbar">
         <strong id="activePerson">All people</strong>
         <span id="filterSummary"></span>
@@ -309,6 +259,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
     </section>
   </main>
   <script id="report-data" type="application/json">{payload}</script>
+  {inspect_script_tag()}
   <script>
     const report = JSON.parse(document.getElementById('report-data').textContent);
     const records = report.records || [];
@@ -316,6 +267,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
     const itemsNode = document.getElementById('items');
     const activePersonNode = document.getElementById('activePerson');
     document.getElementById('recordCount').textContent = records.length;
+    document.getElementById('emptyCommand').hidden = records.length > 0;
     document.getElementById('filterSummary').textContent = Object.entries(report.filters || {{}})
       .filter(([, value]) => value !== null && value !== undefined && value !== '')
       .map(([key, value]) => `${{key}}=${{value}}`)
@@ -325,13 +277,21 @@ def person_timeline_report_html(report: InspectReport) -> str:
       document.getElementById('warnings').innerHTML = `<div class="warnings">${{warnings.map(escapeHtml).join('<br>')}}</div>`;
     }}
     renderPeople();
-    renderTimeline(selectedPeopleFromHash());
-    window.addEventListener('hashchange', () => renderTimeline(selectedPeopleFromHash()));
+    renderTimeline(filtersFromHash());
+    window.addEventListener('hashchange', () => renderTimeline(filtersFromHash()));
 
     function selectedPeopleFromHash() {{
       const params = new URLSearchParams(location.hash.slice(1));
       const ids = params.getAll('person').flatMap((value) => String(value || '').split(','));
       return [...new Set(ids.map((value) => value.trim()).filter(Boolean))];
+    }}
+    function filtersFromHash() {{
+      const filters = inspectFilters.read();
+      return {{
+        people: selectedPeopleFromHash(),
+        item: filters.item || filters.episode || '',
+        has_memory: filters.has_memory || ''
+      }};
     }}
     function setPeople(personIds) {{
       const selected = [...new Set((personIds || []).filter(Boolean))];
@@ -341,7 +301,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
         location.hash = params.toString();
       }} else {{
         history.pushState('', document.title, location.pathname + location.search);
-        renderTimeline([]);
+        renderTimeline(filtersFromHash());
       }}
     }}
     function togglePerson(personId) {{
@@ -392,23 +352,35 @@ def person_timeline_report_html(report: InspectReport) -> str:
       button.addEventListener('click', () => togglePerson(personId));
       return button;
     }}
-    function renderTimeline(personIds) {{
-      const selected = new Set(personIds || []);
+    function renderTimeline(filters) {{
+      const personIds = (filters && filters.people) || [];
+      const selected = new Set(personIds);
+      const selectedItem = (filters && filters.item) || '';
+      const selectedHasMemory = (filters && filters.has_memory) || '';
       document.querySelectorAll('.person-button').forEach((button) => {{
         const active = button.dataset.personId ? selected.has(button.dataset.personId) : selected.size === 0;
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', active ? 'true' : 'false');
       }});
-      const visible = selected.size ? records.filter((record) => selected.has(record.person_id || '')) : records;
+      const visible = records.filter((record) => {{
+        if (selected.size && !selected.has(record.person_id || '')) return false;
+        if (selectedItem && !recordMatchesItem(record, selectedItem)) return false;
+        if (selectedHasMemory === 'true' && !hasLinkedMemory(record)) return false;
+        if (selectedHasMemory === 'false' && hasLinkedMemory(record)) return false;
+        return true;
+      }});
       document.getElementById('recordCount').textContent = visible.length;
-      activePersonNode.textContent = activePeopleLabel([...selected], visible);
+      activePersonNode.textContent = activePeopleLabel([...selected], visible, selectedItem, selectedHasMemory);
       if (!visible.length) {{
         itemsNode.innerHTML = '<div class="empty">No timeline items matched this selection.</div>';
         return;
       }}
       itemsNode.innerHTML = renderLanes(visible);
     }}
-    function activePeopleLabel(personIds, visible) {{
+    function activePeopleLabel(personIds, visible, selectedItem, selectedHasMemory) {{
+      if (selectedItem) return `Item ${{selectedItem}}`;
+      if (selectedHasMemory === 'true') return 'Items with linked memory';
+      if (selectedHasMemory === 'false') return 'Items without linked memory';
       if (!personIds.length) return 'All people';
       if (personIds.length === 1) {{
         const first = visible[0];
@@ -438,7 +410,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
     function renderAxis(domain) {{
       const ticks = axisTicks(domain);
       return `<div class="timeline-axis">${{ticks.map((tick) => `
-        <span class="axis-tick" style="left:${{timePercent(tick.value, domain)}}%">${{escapeHtml(formatDate(tick.value))}}</span>
+        <span class="axis-tick" style="left:${{timePercent(tick.value, domain)}}%">${{escapeHtml(formatDateTime(tick.value))}}</span>
       `).join('')}}</div>`;
     }}
     function renderLane(group, domain) {{
@@ -446,7 +418,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
       return `
         <section class="person-lane" data-person-id="${{escapeAttr(group.person_id)}}">
           <div class="lane-label">
-            <strong>${{escapeHtml(group.display_name)}}</strong>
+            <strong><a href="${{escapeHtml(memoryItemsHref({{ person: group.person_id }}))}}">${{escapeHtml(group.display_name)}}</a></strong>
             <span>${{group.records.length}} item${{group.records.length === 1 ? '' : 's'}}</span>
           </div>
           <div class="timeline-lane">
@@ -460,14 +432,15 @@ def person_timeline_report_html(report: InspectReport) -> str:
       const memoryClass = hasLinkedMemory(record) ? 'with-memory' : '';
       const left = timePercent(timeValue(record.start_time), domain);
       const memoryLabel = hasLinkedMemory(record) ? `Linked memories ${{linkedMemoryCount(record)}}` : 'No linked memory';
+      const memoryHref = memoryItemsHrefForRecord(record);
       return `
         <article class="timeline-marker ${{escapeAttr(type)}} ${{memoryClass}}" id="${{escapeAttr(record.item_id || '')}}" tabindex="0" onclick="bringMarkerToFront(this)" onfocus="bringMarkerToFront(this)" style="left:${{left}}%; top:16px">
           <div class="marker-head">
-            <strong>${{escapeHtml(formatDate(record.start_time))}}</strong>
+            <strong>${{escapeHtml(formatDateTime(record.start_time))}}</strong>
             <span class="kind">${{escapeHtml(type)}}</span>
           </div>
           <p class="marker-text">${{escapeHtml(record.text || '')}}</p>
-          <span class="memory-marker ${{hasLinkedMemory(record) ? 'linked' : ''}}">${{escapeHtml(memoryLabel)}}</span>
+          <a class="memory-marker ${{hasLinkedMemory(record) ? 'linked' : ''}}" href="${{escapeHtml(memoryHref)}}">${{escapeHtml(memoryLabel)}}</a>
           <dl>
             <dt>Item</dt><dd>${{escapeHtml(record.item_id || '')}}</dd>
             <dt>Place</dt><dd>${{escapeHtml([record.building_code, record.room_id].filter(Boolean).join(' / '))}}</dd>
@@ -511,6 +484,9 @@ def person_timeline_report_html(report: InspectReport) -> str:
       const date = new Date(value || '');
       return date.getTime();
     }}
+    function recordMatchesItem(record, itemId) {{
+      return record.item_id === itemId || record.episode_id === itemId || record.event_id === itemId;
+    }}
     function hasLinkedMemory(record) {{
       return linkedMemoryCount(record) > 0 || Boolean(record.has_memory_items);
     }}
@@ -518,28 +494,17 @@ def person_timeline_report_html(report: InspectReport) -> str:
       const count = Number(record.memory_item_count || 0);
       return Number.isFinite(count) ? Math.max(0, count) : 0;
     }}
-    function formatDate(value) {{
-      if (!value) return '';
-      const date = value instanceof Date ? value : new Date(value);
-      if (Number.isNaN(date.getTime())) return String(value);
-      return new Intl.DateTimeFormat('en-US', {{
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
-      }}).format(date);
+    function memoryItemIds(record) {{
+      return Array.isArray(record.memory_item_ids) ? record.memory_item_ids.filter(Boolean) : [];
     }}
-    function escapeHtml(value) {{
-      return String(value).replace(/[&<>"']/g, (char) => ({{
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;'
-      }}[char]));
+    function memoryItemsHrefForRecord(record) {{
+      const ids = memoryItemIds(record);
+      if (ids.length === 1) return memoryItemsHref({{ memory: ids[0] }});
+      if (record.episode_id) return memoryItemsHref({{ person: record.person_id || '', episode: record.episode_id }});
+      return memoryItemsHref({{ person: record.person_id || '' }});
     }}
-    function escapeAttr(value) {{
-      return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '-');
+    function memoryItemsHref(filters) {{
+      return inspectFilters.href('tailwag-memory-items.html', filters || {{}});
     }}
   </script>
 </body>

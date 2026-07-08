@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from .html_utils import _html_escape, _safe_json, inspect_nav
+from .html_utils import _html_escape, _safe_json, inspect_nav, inspect_script_tag, inspect_style_link
 from .reports import InspectReport
 
 
@@ -15,65 +15,8 @@ def affect_report_html(report: InspectReport) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{_html_escape(report.title)}</title>
+  {inspect_style_link()}
   <style>
-    :root {{
-      color-scheme: light;
-      --bg: #f7f5ef;
-      --ink: #1f2933;
-      --muted: #65717f;
-      --line: #d9d4c7;
-      --panel: #ffffff;
-      --accent: #1f7a8c;
-      --accent-2: #d94f30;
-      --accent-3: #5a7d2b;
-      --accent-4: #7a4e9d;
-      --memory: #c2410c;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--ink);
-    }}
-    header {{
-      padding: 22px 28px 14px;
-      border-bottom: 1px solid var(--line);
-      background: #fffdf8;
-      position: sticky;
-      top: 0;
-      z-index: 20;
-    }}
-    nav {{
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 12px;
-      font-size: 13px;
-    }}
-    nav a {{
-      color: var(--accent);
-      text-decoration: none;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 6px;
-      padding: 6px 9px;
-    }}
-    nav a[aria-current="page"] {{
-      border-color: var(--accent);
-      font-weight: 650;
-    }}
-    h1 {{
-      margin: 0;
-      font-size: 24px;
-      line-height: 1.2;
-      letter-spacing: 0;
-    }}
-    .meta {{
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 13px;
-    }}
     main {{
       display: grid;
       grid-template-columns: minmax(360px, 1fr) minmax(320px, 430px);
@@ -94,21 +37,6 @@ def affect_report_html(report: InspectReport) -> str:
       margin-bottom: 14px;
       color: var(--muted);
       font-size: 13px;
-    }}
-    .toolbar button {{
-      appearance: none;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--panel);
-      color: var(--ink);
-      font: inherit;
-      padding: 6px 10px;
-      cursor: pointer;
-    }}
-    .toolbar button:disabled {{
-      color: var(--muted);
-      cursor: default;
-      opacity: .55;
     }}
     .toolbar-actions {{
       display: flex;
@@ -135,9 +63,9 @@ def affect_report_html(report: InspectReport) -> str:
       border-radius: 50%;
       background: var(--accent);
       border: 1px solid #ffffff;
-      box-shadow: 0 1px 3px rgba(31,41,51,.22);
+      box-shadow: 0 1px 3px rgba(7,53,124,.22);
     }}
-    .swatch-memory {{ background: var(--memory); }}
+    .swatch-memory {{ background: var(--accent-2); }}
     .plot {{
       position: relative;
       width: 100%;
@@ -147,14 +75,14 @@ def affect_report_html(report: InspectReport) -> str:
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
-      box-shadow: 0 8px 22px rgba(31, 41, 51, 0.08);
+      box-shadow: 0 8px 22px rgba(7, 53, 124, 0.08);
     }}
     .grid {{
       position: absolute;
       inset: 48px 44px 44px 58px;
       background-image:
-        linear-gradient(to right, rgba(101,113,127,.18) 1px, transparent 1px),
-        linear-gradient(to top, rgba(101,113,127,.18) 1px, transparent 1px);
+        linear-gradient(to right, rgba(11,77,179,.12) 1px, transparent 1px),
+        linear-gradient(to top, rgba(11,77,179,.12) 1px, transparent 1px);
       background-size: 25% 100%, 100% 25%;
     }}
     .axis-line {{
@@ -194,24 +122,24 @@ def affect_report_html(report: InspectReport) -> str:
       height: 14px;
       border-radius: 50%;
       border: 2px solid #ffffff;
-      box-shadow: 0 2px 7px rgba(31,41,51,.26);
+      box-shadow: 0 2px 7px rgba(7,53,124,.26);
       cursor: pointer;
       transform: translate(-50%, -50%);
     }}
     .point:focus {{
-      outline: 3px solid rgba(31,122,140,.35);
+      outline: 3px solid rgba(11,77,179,.34);
       outline-offset: 2px;
     }}
     .selection {{
       position: absolute;
       border: 1px solid var(--accent-2);
-      background: rgba(217, 79, 48, .12);
+      background: rgba(244,165,28,.16);
       pointer-events: none;
       display: none;
     }}
     aside {{
       border-left: 1px solid var(--line);
-      background: #fffdf8;
+      background: var(--panel-soft);
       padding: 20px 22px;
       overflow: auto;
     }}
@@ -264,6 +192,11 @@ def affect_report_html(report: InspectReport) -> str:
       color: var(--ink);
       font-weight: 650;
     }}
+    aside a {{
+      color: var(--accent);
+      text-decoration: none;
+    }}
+    aside a:hover {{ text-decoration: underline; }}
     dl {{
       display: grid;
       grid-template-columns: 105px 1fr;
@@ -283,15 +216,7 @@ def affect_report_html(report: InspectReport) -> str:
       font-size: 13px;
       line-height: 1.45;
     }}
-    .empty, .warnings {{
-      color: var(--muted);
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 8px;
-      padding: 12px;
-      font-size: 13px;
-    }}
-    .warnings {{ margin-bottom: 14px; color: #8a3a22; }}
+    .warnings {{ margin-bottom: 14px; color: var(--danger); }}
     @media (max-width: 860px) {{
       main {{ grid-template-columns: 1fr; }}
       .plot-wrap {{ min-height: 70vh; }}
@@ -329,16 +254,21 @@ def affect_report_html(report: InspectReport) -> str:
     </section>
     <aside>
       <div id="warnings"></div>
+      <section class="panel command-panel" id="emptyCommand">
+        <h2>Generate This Report</h2>
+        <p><code>tailwag inspect affect</code></p>
+      </section>
       <h2 id="detailTitle">Select a point</h2>
       <div id="detail" class="empty">Click a point to inspect the evaluated text and metadata.</div>
     </aside>
   </main>
   <script id="report-data" type="application/json">{payload}</script>
+  {inspect_script_tag()}
   <script>
     const report = JSON.parse(document.getElementById('report-data').textContent);
     const records = report.records || [];
-    const pointColor = '#1f7a8c';
-    const memoryPointColor = '#c2410c';
+    const pointColor = '#0b4db3';
+    const memoryPointColor = '#f4a51c';
     const plot = document.getElementById('plot');
     const axisX = document.getElementById('axisX');
     const axisY = document.getElementById('axisY');
@@ -350,6 +280,7 @@ def affect_report_html(report: InspectReport) -> str:
     let domain = {{ ...fullDomain }};
     let dragStart = null;
     document.getElementById('count').textContent = records.length;
+    document.getElementById('emptyCommand').hidden = records.length > 0;
     document.getElementById('filterSummary').textContent = Object.entries(report.filters || {{}})
       .filter(([, value]) => value !== null && value !== undefined && value !== '')
       .map(([key, value]) => `${{key}}=${{value}}`)
@@ -445,13 +376,13 @@ def affect_report_html(report: InspectReport) -> str:
           <div class="score">Arousal<strong>${{format(centered(record.arousal))}}</strong></div>
         </div>
         <dl>
-          <dt>Person</dt><dd>${{escapeHtml(transcript.person_id || '')}}</dd>
+          <dt>Person</dt><dd><a href="${{escapeHtml(timelineHref({{ person: transcript.person_id || '' }}))}}">${{escapeHtml(transcript.person_id || '')}}</a></dd>
           <dt>Speaker</dt><dd>${{escapeHtml(speakerNames(transcript).join(', '))}}</dd>
-          <dt>Episode</dt><dd>${{escapeHtml(transcript.episode_id || '')}}</dd>
+          <dt>Episode</dt><dd><a href="${{escapeHtml(timelineHref({{ item: transcript.episode_id || '' }}))}}">${{escapeHtml(transcript.episode_id || '')}}</a></dd>
           <dt>Time</dt><dd>${{escapeHtml(formatTimeRange(transcript.start_time, transcript.end_time))}}</dd>
           <dt>Place</dt><dd>${{escapeHtml([transcript.building_code, transcript.room_id].filter(Boolean).join(' / '))}}</dd>
           <dt>Lines</dt><dd>${{escapeHtml(String(transcript.line_count || 0))}}</dd>
-          <dt>Linked memories</dt><dd>${{escapeHtml(String(linkedMemoryCount(record)))}}</dd>
+          <dt>Linked memories</dt><dd><a href="${{escapeHtml(memoryItemsHref({{ person: transcript.person_id || '', episode: transcript.episode_id || '' }}))}}">${{escapeHtml(String(linkedMemoryCount(record)))}}</a></dd>
           <dt>Model scores</dt><dd>valence ${{format(record.valence)}} / arousal ${{format(record.arousal)}}</dd>
         </dl>
         ${{relatedMemoryHtml(transcript)}}
@@ -470,11 +401,17 @@ def affect_report_html(report: InspectReport) -> str:
                 <span>${{escapeHtml(item.status || '')}}</span>
               </div>
               <div>${{escapeHtml(item.summary || '')}}</div>
-              <code>${{escapeHtml(item.memory_id || '')}}</code>
+              <a href="${{escapeHtml(memoryItemsHref({{ memory: item.memory_id || '' }}))}}"><code>${{escapeHtml(item.memory_id || '')}}</code></a>
             </article>
           `).join('')}}
         </section>
       `;
+    }}
+    function timelineHref(filters) {{
+      return inspectFilters.href('tailwag-person-timeline.html', filters || {{}});
+    }}
+    function memoryItemsHref(filters) {{
+      return inspectFilters.href('tailwag-memory-items.html', filters || {{}});
     }}
     function renderTicks() {{
       renderAxes();
@@ -520,24 +457,10 @@ def affect_report_html(report: InspectReport) -> str:
       return names.length ? names : [transcript.display_name || transcript.person_id || ''];
     }}
     function formatTimeRange(start, end) {{
-      const formattedStart = formatDate(start);
-      const formattedEnd = formatDate(end);
+      const formattedStart = formatDateTime(start);
+      const formattedEnd = formatDateTime(end);
       if (formattedStart && formattedEnd && formattedStart !== formattedEnd) return `${{formattedStart}} to ${{formattedEnd}}`;
       return formattedStart || formattedEnd || '';
-    }}
-    function formatDate(value) {{
-      if (!value) return '';
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return String(value);
-      const parts = new Intl.DateTimeFormat('en-US', {{
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }}).formatToParts(date);
-      const month = (parts.find((part) => part.type === 'month') || {{ value: '' }}).value;
-      const day = (parts.find((part) => part.type === 'day') || {{ value: '' }}).value;
-      const year = (parts.find((part) => part.type === 'year') || {{ value: '' }}).value;
-      return `${{month}}. ${{day}}, ${{year}}`;
     }}
     function centered(value) {{
       return clamp(Number(value) * 2 - 1, -1, 1);
@@ -627,15 +550,6 @@ def affect_report_html(report: InspectReport) -> str:
     }}
     function format(value) {{
       return Number(value).toFixed(3);
-    }}
-    function escapeHtml(value) {{
-      return String(value).replace(/[&<>"']/g, (char) => ({{
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;'
-      }}[char]));
     }}
   </script>
 </body>
