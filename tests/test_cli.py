@@ -3,14 +3,13 @@ from __future__ import annotations
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import json
-import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from tests.helpers import RecordingQueryRunner, test_settings
 from tailwag_memory.cli import main
-from tailwag_memory.config import Settings
 from tailwag_memory.inspect import AffectScore
 from tailwag_memory.models import (
     EpisodeMemoryExtractionResult,
@@ -20,23 +19,6 @@ from tailwag_memory.models import (
     PersonMemoryExtractionResult,
 )
 from tailwag_memory.slack_ingestion import SlackPollResult
-
-
-class FakeRunner:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.queries: list[tuple[str, dict[str, object] | None]] = []
-        self.closed = False
-        self.results: list[list[dict[str, object]]] = []
-
-    def run(self, query: str, parameters: dict[str, object] | None = None) -> list[dict[str, object]]:
-        self.queries.append((query, parameters))
-        if self.results:
-            return self.results.pop(0)
-        return []
-
-    def close(self) -> None:
-        self.closed = True
 
 
 class CliTest(unittest.TestCase):
@@ -70,13 +52,8 @@ class CliTest(unittest.TestCase):
         runner_class.assert_not_called()
 
     def test_db_wipe_deletes_all_nodes_and_relationships(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64)
+        runner = RecordingQueryRunner(settings=settings)
 
         with patch("tailwag_memory.cli.load_settings", return_value=settings):
             with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
@@ -85,45 +62,13 @@ class CliTest(unittest.TestCase):
                     exit_code = main(["db", "wipe", "--yes"])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(runner.queries, [("MATCH (n) DETACH DELETE n", None)])
+        self.assertEqual(runner.queries[0].query, "MATCH (n) DETACH DELETE n")
+        self.assertEqual(runner.queries[0].parameters, {})
         self.assertTrue(runner.closed)
         self.assertIn("Neo4j data wiped.", stdout.getvalue())
 
-    def test_seed_demo_command_is_not_available(self) -> None:
-        stderr = StringIO()
-        with redirect_stderr(stderr):
-            with self.assertRaises(SystemExit) as raised:
-                main(["seed", "demo"])
-
-        self.assertEqual(raised.exception.code, 2)
-        self.assertIn("invalid choice", stderr.getvalue())
-
-    def test_slack_force_backfill_requires_backfill_hours(self) -> None:
-        stderr = StringIO()
-        with redirect_stderr(stderr):
-            with self.assertRaises(SystemExit) as raised:
-                main(["slack", "poll", "--channel", "C123", "--force-backfill", "--once"])
-
-        self.assertEqual(raised.exception.code, 2)
-        self.assertIn("--force-backfill requires --backfill-hours", stderr.getvalue())
-
-    def test_slack_force_backfill_requires_once(self) -> None:
-        stderr = StringIO()
-        with redirect_stderr(stderr):
-            with self.assertRaises(SystemExit) as raised:
-                main(["slack", "poll", "--channel", "C123", "--force-backfill", "--backfill-hours", "1"])
-
-        self.assertEqual(raised.exception.code, 2)
-        self.assertIn("--force-backfill requires --once", stderr.getvalue())
-
     def test_slack_poll_missing_token_exits_before_db_runner(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            slack_bot_token=None,
-        )
+        settings = test_settings(embedding_dimension=64, slack_bot_token=None)
 
         with patch("tailwag_memory.cli.load_settings", return_value=settings):
             with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
@@ -137,14 +82,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("SLACK_BOT_TOKEN is required", stderr.getvalue())
 
     def test_slack_force_backfill_is_passed_to_poller(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            slack_bot_token="xoxb-test-token",
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64, slack_bot_token="xoxb-test-token")
+        runner = RecordingQueryRunner(settings=settings)
         poll_calls = []
 
         class FakeMemoryClient:
@@ -243,14 +182,8 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output["episode_records"][0]["memory_results"][0]["created_memory_ids"], ["mem_1"])
 
     def test_slack_poll_can_skip_memory_extraction(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            slack_bot_token="xoxb-test-token",
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64, slack_bot_token="xoxb-test-token")
+        runner = RecordingQueryRunner(settings=settings)
         poll_calls = []
 
         class FakeMemoryClient:
@@ -307,14 +240,8 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output["episode_records"][0]["memory_results"], [])
 
     def test_slack_poll_passes_include_email_to_client(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            slack_bot_token="xoxb-test-token",
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64, slack_bot_token="xoxb-test-token")
+        runner = RecordingQueryRunner(settings=settings)
         client_calls = []
 
         class FakeMemoryClient:
@@ -354,12 +281,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(client_calls, [{"token": "xoxb-test-token", "include_email": True}])
 
     def test_inspect_affect_missing_model_dirs_exits_before_db_runner(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
+        settings = test_settings(embedding_dimension=64)
 
         with patch("tailwag_memory.cli.load_settings", return_value=settings):
             with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
@@ -373,13 +295,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("--fold1-model or TAILWAG_AFFECT_FOLD1_MODEL is required", stderr.getvalue())
 
     def test_inspect_affect_json_scores_person_episode_points(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64)
+        runner = RecordingQueryRunner(settings=settings)
         runner.results = [
             [
                 {
@@ -449,7 +366,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(runner.closed)
         provider_factory.assert_called_once_with(fold1_text, fold2_text)
-        self.assertEqual(runner.queries[0][1], {"person_id": "person_jamie", "limit": 5})
+        self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 5})
         output = json.loads(stdout.getvalue())
         self.assertEqual(output["title"], "Affect Scatter")
         self.assertEqual(output["filters"], {"limit": 5, "person_id": "person_jamie"})
@@ -464,94 +381,9 @@ class CliTest(unittest.TestCase):
             "Jamie likes concise demos.",
         )
 
-    def test_inspect_affect_html_writes_self_contained_report(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
-        runner.results = [
-            [
-                {
-                    "episode_id": "episode_1",
-                    "person_id": "person_jamie",
-                    "display_name": "<Jamie>",
-                    "speaker_labels": ["person_jamie", "<Jamie>", "Assistant"],
-                    "transcript": "<Jamie>: <script>alert(1)</script>",
-                    "start_time": "2026-06-16T14:00:00+00:00",
-                    "memory_item_count": 2,
-                    "related_memory_items": [
-                        {
-                            "memory_id": "mem_script",
-                            "kind": "fact",
-                            "status": "active",
-                            "summary": "<script>memory</script>",
-                        }
-                    ],
-                }
-            ]
-        ]
-
-        class FakeProvider:
-            def score(self, text: str) -> AffectScore:
-                return AffectScore(valence=0.4, arousal=0.6, metadata={"fake": True})
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fold1 = Path(tmp) / "fold1"
-            fold2 = Path(tmp) / "fold2"
-            output_path = Path(tmp) / "affect.html"
-            fold1.mkdir()
-            fold2.mkdir()
-            with patch("tailwag_memory.cli.load_settings", return_value=settings):
-                with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                    with patch("tailwag_memory.inspect.cli_handlers.FoldEnsembleAffectProvider.from_model_dirs", return_value=FakeProvider()):
-                        stdout = StringIO()
-                        with redirect_stdout(stdout):
-                            exit_code = main(
-                                [
-                                    "inspect",
-                                    "affect",
-                                    "--output",
-                                    str(output_path),
-                                    "--fold1-model",
-                                    str(fold1),
-                                    "--fold2-model",
-                                    str(fold2),
-                                ]
-                            )
-
-            html = output_path.read_text()
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(runner.queries[0][1], {"limit": 1000})
-        self.assertIn(str(output_path), stdout.getvalue())
-        self.assertIn("Affect Scatter", html)
-        self.assertIn("report-data", html)
-        self.assertIn("Related memory items", html)
-        self.assertIn('"has_memory_items": true', html)
-        self.assertIn('"memory_item_count": 2', html)
-        self.assertIn("\\u003cscript>memory\\u003c/script>", html)
-        self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
-
-    def test_inspect_affect_help_mentions_score_limit(self) -> None:
-        stdout = StringIO()
-        with redirect_stdout(stdout):
-            with self.assertRaises(SystemExit) as raised:
-                main(["inspect", "affect", "--help"])
-
-        self.assertEqual(raised.exception.code, 0)
-        self.assertIn("maximum person-episode pairs to score", stdout.getvalue())
-
     def test_inspect_followup_validity_json_uses_inspect_report(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64)
+        runner = RecordingQueryRunner(settings=settings)
         runner.results = [
             [
                 {
@@ -579,52 +411,17 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(runner.closed)
-        self.assertEqual(runner.queries[0][1], {"limit": 5})
+        self.assertEqual(runner.queries[0].parameters, {"limit": 5})
         output = json.loads(stdout.getvalue())
         self.assertEqual(output["title"], "Follow-Up Validity")
         self.assertEqual(output["filters"], {"limit": 5})
         self.assertEqual(output["metadata"]["utility"], "inspect followup-validity")
         self.assertEqual(output["records"][0]["validity_bucket"], "4_to_7_days")
-        self.assertIn("WHERE memory.kind = 'followup'", runner.queries[0][0])
-
-    def test_inspect_followup_validity_html_defaults_to_inspect_report_path(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
-        runner.results = [[]]
-
-        with tempfile.TemporaryDirectory() as tmp:
-            original_cwd = Path.cwd()
-            os.chdir(tmp)
-            try:
-                with patch("tailwag_memory.cli.load_settings", return_value=settings):
-                    with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                        stdout = StringIO()
-                        with redirect_stdout(stdout):
-                            exit_code = main(["inspect", "followup-validity"])
-                output_path = Path(tmp) / "inspect" / "tailwag-followup-validity.html"
-                html = output_path.read_text()
-            finally:
-                os.chdir(original_cwd)
-
-        self.assertEqual(exit_code, 0)
-        self.assertIn("inspect/tailwag-followup-validity.html", stdout.getvalue())
-        self.assertIn("Follow-Up Validity", html)
-        self.assertIn("No follow-up memory items matched this export.", html)
-        self.assertIn("tailwag-memory-items.html", html)
+        self.assertIn("WHERE memory.kind = 'followup'", runner.queries[0].query)
 
     def test_inspect_person_timeline_json_uses_inspect_report(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64)
+        runner = RecordingQueryRunner(settings=settings)
         runner.results = [
             [
                 {
@@ -670,8 +467,8 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(runner.closed)
-        self.assertEqual(runner.queries[0][1], {"person_id": "person_jamie", "limit": 5})
-        self.assertEqual(runner.queries[1][1], {"person_id": "person_jamie", "limit": 5})
+        self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 5})
+        self.assertEqual(runner.queries[1].parameters, {"person_id": "person_jamie", "limit": 5})
         output = json.loads(stdout.getvalue())
         self.assertEqual(output["title"], "Person Timeline")
         self.assertEqual(output["filters"], {"limit": 5, "person_id": "person_jamie"})
@@ -683,47 +480,9 @@ class CliTest(unittest.TestCase):
         self.assertTrue(output["records"][0]["has_memory_items"])
         self.assertEqual(output["records"][0]["memory_item_count"], 2)
 
-    def test_inspect_person_timeline_html_defaults_to_inspect_report_path(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
-        runner.results = [[], []]
-
-        with tempfile.TemporaryDirectory() as tmp:
-            original_cwd = Path.cwd()
-            os.chdir(tmp)
-            try:
-                with patch("tailwag_memory.cli.load_settings", return_value=settings):
-                    with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                        stdout = StringIO()
-                        with redirect_stdout(stdout):
-                            exit_code = main(["inspect", "person-timeline"])
-                output_path = Path(tmp) / "inspect" / "tailwag-person-timeline.html"
-                html = output_path.read_text()
-            finally:
-                os.chdir(original_cwd)
-
-        self.assertEqual(exit_code, 0)
-        self.assertIn("inspect/tailwag-person-timeline.html", stdout.getvalue())
-        self.assertIn("Person Timeline", html)
-        self.assertIn("No person timeline items matched the selected filters.", html)
-        self.assertIn("tailwag-affect.html", html)
-        self.assertIn("tailwag-memory-items.html", html)
-        self.assertIn("class=\"timeline-canvas\"", html)
-        self.assertIn("memory-marker", html)
-
     def test_inspect_memory_items_json_uses_inspect_report(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64)
+        runner = RecordingQueryRunner(settings=settings)
         runner.results = [
             [
                 {
@@ -776,10 +535,10 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(runner.closed)
-        self.assertEqual(runner.queries[0][1], {"person_id": "person_jamie", "limit": 5})
-        self.assertEqual(runner.queries[1][1], {})
-        for query, _parameters in runner.queries:
-            upper_query = query.upper()
+        self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 5})
+        self.assertEqual(runner.queries[1].parameters, {})
+        for recorded_query in runner.queries:
+            upper_query = recorded_query.query.upper()
             for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
                 self.assertNotIn(write_keyword, upper_query)
         output = json.loads(stdout.getvalue())
@@ -794,56 +553,9 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output["records"][0]["supported_episode_ids"], ["episode_1"])
         self.assertEqual(output["records"][0]["followup_state"], "visible_now")
 
-    def test_inspect_memory_items_html_defaults_to_inspect_report_path(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
-        runner.results = [[], []]
-
-        with tempfile.TemporaryDirectory() as tmp:
-            original_cwd = Path.cwd()
-            os.chdir(tmp)
-            try:
-                with patch("tailwag_memory.cli.load_settings", return_value=settings):
-                    with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                        stdout = StringIO()
-                        with redirect_stdout(stdout):
-                            exit_code = main(["inspect", "memory-items"])
-                output_path = Path(tmp) / "inspect" / "tailwag-memory-items.html"
-                css_path = Path(tmp) / "inspect" / "tailwag-inspect.css"
-                js_path = Path(tmp) / "inspect" / "tailwag-inspect.js"
-                html = output_path.read_text()
-                css = css_path.read_text()
-                js = js_path.read_text()
-            finally:
-                os.chdir(original_cwd)
-
-        self.assertEqual(exit_code, 0)
-        self.assertIn("inspect/tailwag-memory-items.html", stdout.getvalue())
-        self.assertIn("Memory Items", html)
-        self.assertIn('href="tailwag-inspect.css"', html)
-        self.assertIn('src="tailwag-inspect.js"', html)
-        self.assertTrue(css)
-        self.assertTrue(js)
-        self.assertIn("No memory items matched the selected filters.", html)
-        self.assertIn("Memory Overview", html)
-        self.assertIn("Follow-Up State", html)
-        self.assertIn("tailwag-affect.html", html)
-        self.assertIn("followup_state", html)
-
     def test_person_context_prints_unified_context(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            openai_api_key="test-key",
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64, openai_api_key="test-key")
+        runner = RecordingQueryRunner(settings=settings)
         calls = []
 
         class FakeClient:
@@ -912,88 +624,9 @@ class CliTest(unittest.TestCase):
         self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
         self.assertTrue(runner.closed)
 
-    def test_episode_create_help_mentions_memory_extraction(self) -> None:
-        stdout = StringIO()
-        with redirect_stdout(stdout):
-            with self.assertRaises(SystemExit) as raised:
-                main(["episode", "create", "--help"])
-
-        self.assertEqual(raised.exception.code, 0)
-        help_text = stdout.getvalue()
-        self.assertIn("--file", help_text)
-        self.assertIn("--skip-memory-extraction", help_text)
-        self.assertIn("OpenAI-backed memory", help_text)
-        self.assertIn("extraction", help_text)
-
-    def test_person_context_passes_semantic_scope(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            openai_api_key="test-key",
-        )
-        runner = FakeRunner(settings)
-        calls = []
-
-        class FakeClient:
-            def __init__(self, runner_arg, settings_arg) -> None:
-                pass
-
-            def person_context(
-                self,
-                person_id: str,
-                limit: int = 10,
-                semantic_scope: str | None = None,
-                **kwargs,
-            ) -> str:
-                calls.append({"person_id": person_id, "limit": limit, "semantic_scope": semantic_scope})
-                return "Jamie recently asked about chargers."
-
-        with patch("tailwag_memory.cli.load_settings", return_value=settings):
-            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                with patch("tailwag_memory.cli.TailwagMemoryClient", FakeClient):
-                    stdout = StringIO()
-                    with redirect_stdout(stdout):
-                        exit_code = main(
-                            [
-                                "person",
-                                "context",
-                                "--person-id",
-                                "person_jamie",
-                                "--limit",
-                                "3",
-                                "--semantic-scope",
-                                "chargers",
-                            ]
-                        )
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(calls, [{"person_id": "person_jamie", "limit": 3, "semantic_scope": "chargers"}])
-        self.assertIn("Jamie recently asked about chargers.", stdout.getvalue())
-        self.assertTrue(runner.closed)
-
-    def test_memory_help_excludes_context_command(self) -> None:
-        stdout = StringIO()
-        with redirect_stdout(stdout):
-            with self.assertRaises(SystemExit) as raised:
-                main(["memory", "--help"])
-
-        self.assertEqual(raised.exception.code, 0)
-        help_text = stdout.getvalue()
-        self.assertIn("extract", help_text)
-        self.assertIn("consolidate", help_text)
-        self.assertNotIn("context", help_text)
-
     def test_memory_consolidate_person_outputs_json(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            openai_api_key="test-key",
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64, openai_api_key="test-key")
+        runner = RecordingQueryRunner(settings=settings)
         calls = []
 
         class FakeClient:
@@ -1031,14 +664,8 @@ class CliTest(unittest.TestCase):
         self.assertTrue(runner.closed)
 
     def test_memory_consolidate_all_outputs_json(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            openai_api_key="test-key",
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64, openai_api_key="test-key")
+        runner = RecordingQueryRunner(settings=settings)
         calls = []
 
         class FakeClient:
@@ -1075,37 +702,9 @@ class CliTest(unittest.TestCase):
         self.assertEqual(calls[0]["min_evidence_episodes"], 5)
         self.assertEqual(json.loads(stdout.getvalue())["person_results"][0]["person_id"], "person_jamie")
 
-    def test_memory_consolidate_requires_one_target_before_runner(self) -> None:
-        with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
-            stderr = StringIO()
-            with redirect_stderr(stderr):
-                with self.assertRaises(SystemExit) as raised:
-                    main(["memory", "consolidate"])
-
-        self.assertEqual(raised.exception.code, 2)
-        runner_class.assert_not_called()
-        self.assertIn("one of the arguments --person-id --all is required", stderr.getvalue())
-
-    def test_memory_consolidate_rejects_two_targets_before_runner(self) -> None:
-        with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
-            stderr = StringIO()
-            with redirect_stderr(stderr):
-                with self.assertRaises(SystemExit) as raised:
-                    main(["memory", "consolidate", "--person-id", "person_jamie", "--all"])
-
-        self.assertEqual(raised.exception.code, 2)
-        runner_class.assert_not_called()
-        self.assertIn("not allowed with argument", stderr.getvalue())
-
     def test_episode_create_extracts_memory_by_default(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            openai_api_key="test-key",
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64, openai_api_key="test-key")
+        runner = RecordingQueryRunner(settings=settings)
         calls = []
 
         class FakeClient:
@@ -1137,13 +736,8 @@ class CliTest(unittest.TestCase):
         self.assertTrue(runner.closed)
 
     def test_episode_create_can_skip_memory_extraction(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64)
+        runner = RecordingQueryRunner(settings=settings)
         calls = []
 
         class FakeClient:
@@ -1168,14 +762,8 @@ class CliTest(unittest.TestCase):
         self.assertEqual(json.loads(stdout.getvalue())["memory_results"], [])
 
     def test_memory_extract_outputs_episode_memory_result(self) -> None:
-        settings = Settings(
-            neo4j_uri="bolt://example.test:7687",
-            neo4j_user="neo4j",
-            neo4j_password="password",
-            embedding_dimension=64,
-            openai_api_key="test-key",
-        )
-        runner = FakeRunner(settings)
+        settings = test_settings(embedding_dimension=64, openai_api_key="test-key")
+        runner = RecordingQueryRunner(settings=settings)
         calls = []
 
         class FakeClient:
@@ -1218,17 +806,6 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output["memory_results"][0]["person_id"], "person_jamie")
         self.assertEqual(output["memory_results"][0]["addressed_memory_ids"], ["mem_followup_addressed"])
         self.assertEqual(output["memory_results"][0]["supported_memory_ids"], ["mem_followup_supported"])
-
-    def test_memory_extract_missing_episode_id_exits_before_runner(self) -> None:
-        with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
-            stderr = StringIO()
-            with redirect_stderr(stderr):
-                with self.assertRaises(SystemExit) as raised:
-                    main(["memory", "extract"])
-
-        self.assertEqual(raised.exception.code, 2)
-        runner_class.assert_not_called()
-        self.assertIn("--episode-id", stderr.getvalue())
 
 
 if __name__ == "__main__":

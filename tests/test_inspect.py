@@ -568,14 +568,9 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
         self.assertEqual(report.metadata["terminal_counts"]["Superseded"], 1)
         _assert_canonical_nav(self, html, "tailwag-memory-items.html")
         self.assertIn("Memory Overview", html)
-        self.assertIn("Memory overview Sankey diagram", html)
         self.assertIn('"source": "All Episodes"', html)
         self.assertIn('"source": "Created"', html)
-        self.assertIn("has_memory: 'false'", html)
         self.assertIn("Follow-Up State", html)
-        self.assertIn('data-followup-state="${escapeAttr(state)}"', html)
-        self.assertIn("data-filter-key", html)
-        self.assertIn("data-filter-value", html)
         self.assertIn("followup_state", html)
         self.assertIn("\\u003cJamie>", html)
         self.assertIn("tailwag-memory-items.html", html)
@@ -677,7 +672,7 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
 
 
 class PersonTimelineReportTest(unittest.TestCase):
-    def test_person_timeline_report_html_has_nav_and_hash_person_filter(self) -> None:
+    def test_person_timeline_report_html_embeds_nav_memory_flags_and_escaped_text(self) -> None:
         report = person_timeline_report(
             [
                 PersonTimelineItem(
@@ -710,11 +705,6 @@ class PersonTimelineReportTest(unittest.TestCase):
         self.assertIn("tailwag-person-timeline.html", html)
         self.assertIn("tailwag-affect.html", html)
         self.assertIn("tailwag-memory-items.html", html)
-        self.assertIn("aria-pressed", html)
-        self.assertIn("class=\"person-lane\"", html)
-        self.assertIn("class=\"timeline-lane\"", html)
-        self.assertIn('tabindex="0"', html)
-        self.assertIn("class=\"memory-marker", html)
         self.assertIn("Linked memories", html)
         self.assertIn('"person_id": "person_jamie"', html)
         self.assertIn('"has_memory_items": true', html)

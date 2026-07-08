@@ -6,52 +6,7 @@ from unittest.mock import Mock, patch
 
 import tailwag_memory
 import tailwag_memory.memory_items as memory_items
-from tailwag_memory import (
-    DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
-    EmbeddingProvider,
-    EpisodeIngestionService,
-    EpisodeInput,
-    EpisodeMentionInput,
-    EpisodeMemoryExtractionResult,
-    EpisodeMemoryExtractionService,
-    EpisodeMemoryResult,
-    EpisodeRecordResult,
-    EpisodeRetrievalService,
-    EventAttendeeInput,
-    EventIngestionService,
-    EventInput,
-    EventResult,
-    EventRetrievalService,
-    MemoryConsolidationResult,
-    MemoryConsolidationService,
-    MemoryItemInput,
-    MemoryItemMergeResult,
-    MemoryItemResult,
-    MemoryItemService,
-    MockOpenAIEmbeddingProvider,
-    Neo4jQueryRunner,
-    OpenAIMemoryConsolidationProvider,
-    OpenAIConfigurationError,
-    OpenAIEmbeddingProvider,
-    PersonContextItem,
-    PersonContextRetrievalService,
-    PersonContextSource,
-    PersonContextTranscriptLine,
-    PersonIngestionService,
-    PersonInput,
-    PersonMemoryConsolidationResult,
-    PersonMemoryContextService,
-    PersonMemoryExtractionResult,
-    PersonRecognitionResult,
-    PersonRecognitionService,
-    PlaceInput,
-    QueryRunner,
-    SearchQuery,
-    Settings,
-    TailwagMemoryClient,
-    initialize_schema,
-    load_settings,
-)
+from tailwag_memory import Neo4jQueryRunner, Settings, TailwagMemoryClient
 
 
 class PackageImportTest(unittest.TestCase):
@@ -102,61 +57,11 @@ class PackageImportTest(unittest.TestCase):
             "initialize_schema",
             "load_settings",
         }
-        imported = {
-            DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
-            EmbeddingProvider,
-            EpisodeIngestionService,
-            EpisodeInput,
-            EpisodeMentionInput,
-            EpisodeMemoryExtractionResult,
-            EpisodeMemoryExtractionService,
-            EpisodeMemoryResult,
-            EpisodeRecordResult,
-            EpisodeRetrievalService,
-            EventAttendeeInput,
-            EventIngestionService,
-            EventInput,
-            EventResult,
-            EventRetrievalService,
-            MemoryConsolidationResult,
-            MemoryConsolidationService,
-            MemoryItemInput,
-            MemoryItemMergeResult,
-            MemoryItemResult,
-            MemoryItemService,
-            MockOpenAIEmbeddingProvider,
-            Neo4jQueryRunner,
-            OpenAIMemoryConsolidationProvider,
-            OpenAIConfigurationError,
-            OpenAIEmbeddingProvider,
-            PersonContextItem,
-            PersonContextRetrievalService,
-            PersonContextSource,
-            PersonContextTranscriptLine,
-            PersonIngestionService,
-            PersonInput,
-            PersonMemoryConsolidationResult,
-            PersonMemoryContextService,
-            PersonMemoryExtractionResult,
-            PersonRecognitionResult,
-            PersonRecognitionService,
-            PlaceInput,
-            QueryRunner,
-            SearchQuery,
-            Settings,
-            TailwagMemoryClient,
-            initialize_schema,
-            load_settings,
-        }
-
         self.assertEqual(set(tailwag_memory.__all__), expected_exports)
-        self.assertEqual(len(imported), len(expected_exports))
+        for name in expected_exports:
+            self.assertIsNotNone(getattr(tailwag_memory, name))
         self.assertIs(tailwag_memory.TailwagMemoryClient, TailwagMemoryClient)
         self.assertIs(tailwag_memory.Settings, Settings)
-        self.assertIs(tailwag_memory.EpisodeInput, EpisodeInput)
-        self.assertIs(tailwag_memory.EpisodeMentionInput, EpisodeMentionInput)
-        self.assertIs(tailwag_memory.EpisodeIngestionService, EpisodeIngestionService)
-        self.assertIs(tailwag_memory.EpisodeRetrievalService, EpisodeRetrievalService)
         self.assertNotIn("address_item", tailwag_memory.__all__)
         self.assertNotIn("address_item", memory_items.__all__)
         self.assertNotIn("stable_memory_id", tailwag_memory.__all__)
