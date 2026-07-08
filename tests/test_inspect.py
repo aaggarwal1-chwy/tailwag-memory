@@ -24,7 +24,7 @@ from tailwag_memory.inspect import (
     person_timeline_report_html,
     recent_person_episode_rows,
 )
-from tailwag_memory.inspect.html_utils import INSPECT_SHARED_CSS, INSPECT_SHARED_JS
+from tailwag_memory.inspect.html_utils import INSPECT_CSS_FILENAME, INSPECT_JS_FILENAME, inspect_asset_text
 from tailwag_memory.models import PersonTimelineItem, PersonTimelineTranscriptSnippet
 
 
@@ -735,20 +735,18 @@ class InspectPlaceholderFilesTest(unittest.TestCase):
             "tailwag-person-timeline.html": ["tailwag inspect person-timeline"],
             "tailwag-memory-items.html": ["tailwag inspect memory-items"],
         }
-        shared_css = (inspect_dir / "tailwag-inspect.css").read_text()
-        self.assertEqual(shared_css, INSPECT_SHARED_CSS)
-        shared_js = (inspect_dir / "tailwag-inspect.js").read_text()
-        self.assertEqual(shared_js, INSPECT_SHARED_JS)
+        self.assertIn("color-scheme: light", inspect_asset_text(INSPECT_CSS_FILENAME))
+        self.assertIn("window.inspectFilters", inspect_asset_text(INSPECT_JS_FILENAME))
 
         for filename in expected:
             html = (inspect_dir / filename).read_text()
             current = None if filename == "index.html" else filename
             _assert_canonical_nav(self, html, current)
-            self.assertIn('href="tailwag-inspect.css"', html)
+            self.assertIn('href="../src/tailwag_memory/inspect/assets/tailwag-inspect.css"', html)
             for command in command_hints[filename]:
                 self.assertIn(command, html)
             if filename != "index.html":
-                self.assertIn('src="tailwag-inspect.js"', html)
+                self.assertIn('src="../src/tailwag_memory/inspect/assets/tailwag-inspect.js"', html)
                 self.assertIn('id="report-data"', html)
 
 

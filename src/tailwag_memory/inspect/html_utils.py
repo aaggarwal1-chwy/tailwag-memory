@@ -1,259 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+from functools import lru_cache
+from importlib.resources import files
 import json
 
 INSPECT_CSS_FILENAME = "tailwag-inspect.css"
 INSPECT_JS_FILENAME = "tailwag-inspect.js"
-
-INSPECT_SHARED_CSS = """* {
-  box-sizing: border-box;
-}
-
-:root {
-  color-scheme: light;
-  --chewy-blue: #0b4db3;
-  --chewy-blue-dark: #07357c;
-  --chewy-blue-soft: #eef5ff;
-  --chewy-orange: #f4a51c;
-  --chewy-orange-soft: #fff4dc;
-  --bg: #f4f8ff;
-  --ink: #102a43;
-  --muted: #5f6f89;
-  --line: #c9d8ef;
-  --panel: #ffffff;
-  --panel-soft: #eef5ff;
-  --accent: #0b4db3;
-  --accent-2: #f4a51c;
-  --accent-3: #0073cf;
-  --danger: #b42318;
-  --warning-color: #875200;
-  --bar-bg: #dbe8fb;
-  --header-bg: #0b4db3;
-}
-
-body {
-  margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: var(--bg, #f4f8ff);
-  color: var(--ink, #102a43);
-}
-
-header {
-  padding: 22px 28px 14px;
-  border-bottom: 4px solid var(--chewy-orange, #f4a51c);
-  background: var(--header-bg, #0b4db3);
-  color: #ffffff;
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  box-shadow: 0 10px 24px rgba(7, 53, 124, .14);
-}
-
-nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  font-size: 13px;
-}
-
-nav a {
-  color: #ffffff;
-  text-decoration: none;
-  border: 1px solid rgba(255, 255, 255, .38);
-  background: rgba(255, 255, 255, .12);
-  border-radius: 6px;
-  padding: 6px 9px;
-  font-weight: 650;
-}
-
-nav a:hover {
-  background: rgba(255, 255, 255, .2);
-}
-
-nav a[aria-current="page"] {
-  border-color: var(--chewy-orange, #f4a51c);
-  background: #ffffff;
-  color: var(--chewy-blue, #0b4db3);
-  box-shadow: inset 0 -3px 0 var(--chewy-orange, #f4a51c);
-}
-
-h1 {
-  margin: 0;
-  font-size: 24px;
-  line-height: 1.2;
-  letter-spacing: 0;
-}
-
-h2 {
-  margin: 0 0 9px;
-  font-size: 16px;
-  line-height: 1.25;
-  letter-spacing: 0;
-}
-
-.meta {
-  margin-top: 6px;
-  color: #dbe8fb;
-  font-size: 13px;
-}
-
-.panel {
-  border: 1px solid var(--line, #c9d8ef);
-  border-radius: 8px;
-  background: var(--panel, #ffffff);
-  padding: 13px;
-  min-width: 0;
-  box-shadow: 0 4px 14px rgba(7, 53, 124, .06);
-}
-
-.empty,
-.warnings {
-  border: 1px solid var(--line, #c9d8ef);
-  border-radius: 8px;
-  background: var(--panel, #ffffff);
-  color: var(--muted, #5f6f89);
-  padding: 12px;
-  font-size: 13px;
-}
-
-.warnings {
-  color: var(--warning-color, var(--danger, #a33a35));
-}
-
-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-a {
-  color: var(--accent, #0b4db3);
-}
-
-.toolbar button,
-.controls button {
-  appearance: none;
-  border: 1px solid var(--accent, #0b4db3);
-  border-radius: 6px;
-  background: var(--accent, #0b4db3);
-  color: #ffffff;
-  font: inherit;
-  padding: 6px 10px;
-  cursor: pointer;
-  font-weight: 650;
-}
-
-.toolbar button:disabled,
-.controls button:disabled {
-  color: var(--muted, #5f6f89);
-  background: var(--panel-soft, #eef5ff);
-  border-color: var(--line, #c9d8ef);
-  cursor: default;
-  opacity: .55;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  border: 1px solid var(--line, #c9d8ef);
-  padding: 2px 7px;
-  background: var(--panel-soft, #eef5ff);
-  color: var(--ink, #102a43);
-  white-space: nowrap;
-  text-decoration: none;
-  font: inherit;
-}
-
-.pill[href] {
-  cursor: pointer;
-}
-
-.bar {
-  border-radius: 999px;
-  background: var(--bar-bg, #dbe8fb);
-  overflow: hidden;
-}
-
-.bar span {
-  display: block;
-  height: 100%;
-  background: var(--accent, #0b4db3);
-}
-
-@media (max-width: 760px) {
-  header {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-}
-"""
-
-INSPECT_SHARED_JS = """window.inspectFilters = {
-  href(path, filters) {
-    const params = new URLSearchParams();
-    Object.entries(filters || {}).forEach(([key, raw]) => {
-      const values = Array.isArray(raw) ? raw : [raw];
-      values.forEach((value) => {
-        if (value !== null && value !== undefined && String(value) !== '') {
-          params.append(key, String(value));
-        }
-      });
-    });
-    const hash = params.toString();
-    return hash ? `${path}#${hash}` : path;
-  },
-  read() {
-    const params = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''));
-    const first = (key) => params.get(key) || '';
-    return {
-      person: first('person'),
-      kind: first('kind'),
-      status: first('status'),
-      source: first('source'),
-      followup_state: first('followup_state'),
-      memory: first('memory'),
-      episode: first('episode'),
-      item: first('item'),
-      validity_bucket: first('validity_bucket'),
-      has_memory: first('has_memory')
-    };
-  }
-};
-
-function titleCase(value) {
-  return String(value || '').replace(/_/g, ' ').replace(/\\b\\w/g, (char) => char.toUpperCase());
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  }[char]));
-}
-
-function escapeAttr(value) {
-  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '-');
-}
-
-function formatDateTime(value) {
-  if (!value) return '';
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  }).format(date);
-}
-"""
 
 _INSPECT_NAV_ITEMS = (
     ("followup-validity", "Follow-Up Validity", "tailwag-followup-validity.html"),
@@ -261,6 +14,14 @@ _INSPECT_NAV_ITEMS = (
     ("person-timeline", "Person Timeline", "tailwag-person-timeline.html"),
     ("memory-items", "Memory Items", "tailwag-memory-items.html"),
 )
+
+
+@lru_cache(maxsize=None)
+def inspect_asset_text(filename: str) -> str:
+    """Return packaged inspect browser asset text."""
+    if filename not in {INSPECT_CSS_FILENAME, INSPECT_JS_FILENAME}:
+        raise ValueError(f"unknown inspect asset: {filename}")
+    return files(__package__).joinpath("assets", filename).read_text(encoding="utf-8")
 
 
 def _safe_json(payload: dict[str, object]) -> str:
@@ -296,3 +57,50 @@ def inspect_nav(current: str | None) -> str:
         current_attr = ' aria-current="page"' if key == current else ""
         links.append(f'<a href="{href}"{current_attr}>{label}</a>')
     return '<nav aria-label="Inspect reports">' + "".join(links) + "</nav>"
+
+
+def inspect_command_panel(command: str) -> str:
+    """Return the common empty-report command panel."""
+    return f"""<section class="panel command-panel" id="emptyCommand">
+      <h2>Generate This Report</h2>
+      <p><code>{_html_escape(command)}</code></p>
+    </section>"""
+
+
+def render_inspect_report_page(
+    report: object,
+    *,
+    current_nav: str,
+    count_meta: str,
+    page_css: str,
+    body_html: str,
+    page_js: str,
+) -> str:
+    """Render the shared HTML shell for one inspect report."""
+    payload = _safe_json(asdict(report))
+    rendered_css = page_css.strip()
+    style_tag = f"\n  <style>\n{rendered_css}\n  </style>" if rendered_css else ""
+    rendered_js = page_js.strip()
+    page_script = f"\n  <script>\n{rendered_js}\n  </script>" if rendered_js else ""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{_html_escape(report.title)}</title>
+  {inspect_style_link()}{style_tag}
+</head>
+<body>
+  <header>
+    {inspect_nav(current_nav)}
+    <h1>{_html_escape(report.title)}</h1>
+    <div class="meta">{count_meta}</div>
+  </header>
+  <main>
+{body_html.strip()}
+  </main>
+  <script id="report-data" type="application/json">{payload}</script>
+  {inspect_script_tag()}{page_script}
+</body>
+</html>
+"""

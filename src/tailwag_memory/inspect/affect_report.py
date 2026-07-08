@@ -1,22 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-
-from .html_utils import _html_escape, _safe_json, inspect_nav, inspect_script_tag, inspect_style_link
+from .html_utils import _html_escape, inspect_command_panel, render_inspect_report_page
 from .reports import InspectReport
 
 
 def affect_report_html(report: InspectReport) -> str:
     """Render a self-contained affect scatter HTML report."""
-    payload = _safe_json(asdict(report))
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{_html_escape(report.title)}</title>
-  {inspect_style_link()}
-  <style>
+    return render_inspect_report_page(
+        report,
+        current_nav="affect",
+        count_meta=f"Generated {_html_escape(report.generated_at)} - <span id=\"count\">0</span> scored points",
+        page_css=f"""
     main {{
       display: grid;
       grid-template-columns: minmax(360px, 1fr) minmax(320px, 430px);
@@ -222,15 +216,8 @@ def affect_report_html(report: InspectReport) -> str:
       .plot-wrap {{ min-height: 70vh; }}
       aside {{ border-left: 0; border-top: 1px solid var(--line); }}
     }}
-  </style>
-</head>
-<body>
-  <header>
-    {inspect_nav("affect")}
-    <h1>{_html_escape(report.title)}</h1>
-    <div class="meta">Generated {_html_escape(report.generated_at)} - <span id="count">0</span> scored points</div>
-  </header>
-  <main>
+""",
+        body_html=f"""
     <section class="plot-wrap">
       <div class="toolbar">
         <span>Valence and arousal are displayed from -1 to 1, centered from the model's native 0 to 1 scores.</span>
@@ -254,19 +241,14 @@ def affect_report_html(report: InspectReport) -> str:
     </section>
     <aside>
       <div id="warnings"></div>
-      <section class="panel command-panel" id="emptyCommand">
-        <h2>Generate This Report</h2>
-        <p><code>tailwag inspect affect</code></p>
-      </section>
+      {inspect_command_panel("tailwag inspect affect")}
       <h2 id="detailTitle">Select a point</h2>
       <div id="detail" class="empty">Click a point to inspect the evaluated text and metadata.</div>
     </aside>
-  </main>
-  <script id="report-data" type="application/json">{payload}</script>
-  {inspect_script_tag()}
-  <script>
-    const report = JSON.parse(document.getElementById('report-data').textContent);
-    const records = report.records || [];
+""",
+        page_js=f"""
+    const report = inspectReportData();
+    const records = inspectReportRecords(report);
     const pointColor = '#0b4db3';
     const memoryPointColor = '#f4a51c';
     const plot = document.getElementById('plot');
@@ -279,16 +261,10 @@ def affect_report_html(report: InspectReport) -> str:
     const fullDomain = {{ xMin: -1, xMax: 1, yMin: -1, yMax: 1 }};
     let domain = {{ ...fullDomain }};
     let dragStart = null;
-    document.getElementById('count').textContent = records.length;
-    document.getElementById('emptyCommand').hidden = records.length > 0;
-    document.getElementById('filterSummary').textContent = Object.entries(report.filters || {{}})
-      .filter(([, value]) => value !== null && value !== undefined && value !== '')
-      .map(([key, value]) => `${{key}}=${{value}}`)
-      .join(' - ');
-    const warnings = report.warnings || [];
-    if (warnings.length) {{
-      document.getElementById('warnings').innerHTML = `<div class="warnings">${{warnings.map(escapeHtml).join('<br>')}}</div>`;
-    }}
+    inspectSetCount('count', records.length);
+    inspectToggleEmptyCommand(records);
+    document.getElementById('filterSummary').textContent = inspectFilterText(report.filters);
+    inspectRenderWarnings(report);
     if (!records.length) {{
       const empty = document.createElement('div');
       empty.className = 'empty';
@@ -551,7 +527,5 @@ def affect_report_html(report: InspectReport) -> str:
     function format(value) {{
       return Number(value).toFixed(3);
     }}
-  </script>
-</body>
-</html>
-"""
+""",
+    )

@@ -1,31 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-
-from .html_utils import _html_escape, _safe_json, inspect_nav, inspect_script_tag, inspect_style_link
+from .html_utils import _html_escape, inspect_command_panel, render_inspect_report_page
 from .memory_overview_report import memory_overview_css, memory_overview_script, memory_overview_section
 from .reports import InspectReport
 
 
 def memory_items_report_html(report: InspectReport) -> str:
     """Render a self-contained memory item inspection HTML report."""
-
-    payload = _safe_json(asdict(report))
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{_html_escape(report.title)}</title>
-  {inspect_style_link()}
-  <style>
-    .topline {{
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 18px;
-      flex-wrap: wrap;
-    }}
+    return render_inspect_report_page(
+        report,
+        current_nav="memory-items",
+        count_meta=f"Generated {_html_escape(report.generated_at)} - <span id=\"count\">0</span> memory items",
+        page_css=f"""
     main {{
       padding: 20px 28px 30px;
       display: grid;
@@ -164,24 +150,10 @@ def memory_items_report_html(report: InspectReport) -> str:
       header, main {{ padding-left: 16px; padding-right: 16px; }}
       .summary, .board {{ grid-template-columns: 1fr; }}
     }}
-  </style>
-</head>
-<body>
-  <header>
-    {inspect_nav("memory-items")}
-    <div class="topline">
-      <div>
-        <h1>{_html_escape(report.title)}</h1>
-        <div class="meta">Generated {_html_escape(report.generated_at)} - <span id="count">0</span> memory items</div>
-      </div>
-    </div>
-  </header>
-  <main>
+""",
+        body_html=f"""
     <div id="warnings"></div>
-    <section class="panel command-panel" id="emptyCommand">
-      <h2>Generate This Report</h2>
-      <p><code>tailwag inspect memory-items</code></p>
-    </section>
+    {inspect_command_panel("tailwag inspect memory-items")}
 {memory_overview_section().strip()}
     <section class="summary" id="summary" aria-label="Memory item distributions"></section>
     <section class="panel">
@@ -193,12 +165,10 @@ def memory_items_report_html(report: InspectReport) -> str:
       <button type="button" id="clearFilters">Clear Filters</button>
     </section>
     <section id="tableWrap"></section>
-  </main>
-  <script id="report-data" type="application/json">{payload}</script>
-  {inspect_script_tag()}
-  <script>
-    const report = JSON.parse(document.getElementById('report-data').textContent);
-    const records = report.records || [];
+""",
+        page_js=f"""
+    const report = inspectReportData();
+    const records = inspectReportRecords(report);
     const overviewLinks = (report.metadata && report.metadata.overview_links) || [];
     const distributionKeys = [
       ['kind', 'Kind'],
@@ -208,22 +178,19 @@ def memory_items_report_html(report: InspectReport) -> str:
     ];
     const followupStates = ['visible_now', 'not_yet_due', 'expired_active', 'addressed', 'invalid'];
     const clearFilters = document.getElementById('clearFilters');
-    document.getElementById('emptyCommand').hidden = records.length > 0;
+    inspectToggleEmptyCommand(records);
     clearFilters.addEventListener('click', () => {{
       history.pushState('', document.title, window.location.pathname + window.location.search);
       render();
     }});
     window.addEventListener('hashchange', render);
-    const warnings = report.warnings || [];
-    if (warnings.length) {{
-      document.getElementById('warnings').innerHTML = `<div class="warnings">${{warnings.map(escapeHtml).join('<br>')}}</div>`;
-    }}
+    inspectRenderWarnings(report);
     render();
     function render() {{
       const filters = hashFilters();
       const visible = applyFilters(records, filters);
-      document.getElementById('count').textContent = visible.length;
-      document.getElementById('filterSummary').textContent = filterSummary(filters) || filterText(report.filters || {{}});
+      inspectSetCount('count', visible.length);
+      document.getElementById('filterSummary').textContent = filterSummary(filters) || inspectFilterText(report.filters);
       clearFilters.disabled = !hasFilters(filters);
       renderSummary(visible, filters);
       renderOverviewSankey();
@@ -452,12 +419,6 @@ def memory_items_report_html(report: InspectReport) -> str:
     function hasFilters(filters) {{
       return Boolean(filters.memory || filters.episode || filters.person || filters.kind || filters.status || filters.source || filters.followup_state || filters.validity_bucket);
     }}
-    function filterText(filters) {{
-      return Object.entries(filters)
-        .filter(([, value]) => value !== null && value !== undefined && value !== '')
-        .map(([key, value]) => `${{key}}=${{value}}`)
-        .join(' - ');
-    }}
     function pill(value, className) {{
       return `<span class="pill ${{escapeAttr(className || '')}}">${{escapeHtml(value || '')}}</span>`;
     }}
@@ -476,7 +437,5 @@ def memory_items_report_html(report: InspectReport) -> str:
     function timelineHref(filters) {{
       return inspectFilters.href('tailwag-person-timeline.html', filters || {{}});
     }}
-  </script>
-</body>
-</html>
-"""
+""",
+    )

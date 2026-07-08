@@ -11,6 +11,7 @@ from unittest.mock import patch
 from tests.helpers import RecordingQueryRunner, test_settings
 from tailwag_memory.cli import main
 from tailwag_memory.inspect import AffectScore
+from tailwag_memory.inspect.html_utils import INSPECT_CSS_FILENAME, INSPECT_JS_FILENAME, inspect_asset_text
 from tailwag_memory.models import (
     EpisodeMemoryExtractionResult,
     EpisodeRecordResult,
@@ -552,6 +553,29 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output["records"][0]["memory_id"], "mem_followup")
         self.assertEqual(output["records"][0]["supported_episode_ids"], ["episode_1"])
         self.assertEqual(output["records"][0]["followup_state"], "visible_now")
+
+    def test_inspect_html_output_writes_packaged_assets(self) -> None:
+        settings = test_settings(embedding_dimension=64)
+        runner = RecordingQueryRunner(
+            settings=settings,
+            results=[
+                [],
+                [{"episode_count": 0, "memory_episode_count": 0, "memory_count": 0}],
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "tailwag-memory-items.html"
+            with patch("tailwag_memory.cli.load_settings", return_value=settings):
+                with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = main(["inspect", "memory-items", "--output", str(output_path)])
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(output_path.exists())
+            self.assertEqual((Path(tmp) / INSPECT_CSS_FILENAME).read_text(), inspect_asset_text(INSPECT_CSS_FILENAME))
+            self.assertEqual((Path(tmp) / INSPECT_JS_FILENAME).read_text(), inspect_asset_text(INSPECT_JS_FILENAME))
 
     def test_person_context_prints_unified_context(self) -> None:
         settings = test_settings(embedding_dimension=64, openai_api_key="test-key")

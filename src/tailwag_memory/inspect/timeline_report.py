@@ -1,22 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-
-from .html_utils import _html_escape, _safe_json, inspect_nav, inspect_script_tag, inspect_style_link
+from .html_utils import _html_escape, inspect_command_panel, render_inspect_report_page
 from .reports import InspectReport
 
 
 def person_timeline_report_html(report: InspectReport) -> str:
     """Render a self-contained person timeline HTML report."""
-    payload = _safe_json(asdict(report))
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{_html_escape(report.title)}</title>
-  {inspect_style_link()}
-  <style>
+    return render_inspect_report_page(
+        report,
+        current_nav="person-timeline",
+        count_meta=f"Generated {_html_escape(report.generated_at)} - <span id=\"recordCount\">0</span> timeline items",
+        page_css=f"""
     :root {{
       --event: #875200;
       --memory: #f4a51c;
@@ -233,49 +227,31 @@ def person_timeline_report_html(report: InspectReport) -> str:
       .timeline {{ padding-left: 16px; padding-right: 16px; }}
       .timeline-marker {{ width: 190px; }}
     }}
-  </style>
-</head>
-<body>
-  <header>
-    {inspect_nav("person-timeline")}
-    <h1>{_html_escape(report.title)}</h1>
-    <div class="meta">Generated {_html_escape(report.generated_at)} - <span id="recordCount">0</span> timeline items</div>
-  </header>
-  <main>
+""",
+        body_html=f"""
     <aside>
       <div id="people" class="people"></div>
     </aside>
     <section class="timeline" aria-live="polite">
       <div id="warnings"></div>
-      <section class="panel command-panel" id="emptyCommand">
-        <h2>Generate This Report</h2>
-        <p><code>tailwag inspect person-timeline</code></p>
-      </section>
+      {inspect_command_panel("tailwag inspect person-timeline")}
       <div class="toolbar">
         <strong id="activePerson">All people</strong>
         <span id="filterSummary"></span>
       </div>
       <div id="items" class="timeline-canvas"></div>
     </section>
-  </main>
-  <script id="report-data" type="application/json">{payload}</script>
-  {inspect_script_tag()}
-  <script>
-    const report = JSON.parse(document.getElementById('report-data').textContent);
-    const records = report.records || [];
+""",
+        page_js=f"""
+    const report = inspectReportData();
+    const records = inspectReportRecords(report);
     const peopleNode = document.getElementById('people');
     const itemsNode = document.getElementById('items');
     const activePersonNode = document.getElementById('activePerson');
-    document.getElementById('recordCount').textContent = records.length;
-    document.getElementById('emptyCommand').hidden = records.length > 0;
-    document.getElementById('filterSummary').textContent = Object.entries(report.filters || {{}})
-      .filter(([, value]) => value !== null && value !== undefined && value !== '')
-      .map(([key, value]) => `${{key}}=${{value}}`)
-      .join(' - ');
-    const warnings = report.warnings || [];
-    if (warnings.length) {{
-      document.getElementById('warnings').innerHTML = `<div class="warnings">${{warnings.map(escapeHtml).join('<br>')}}</div>`;
-    }}
+    inspectSetCount('recordCount', records.length);
+    inspectToggleEmptyCommand(records);
+    document.getElementById('filterSummary').textContent = inspectFilterText(report.filters);
+    inspectRenderWarnings(report);
     renderPeople();
     renderTimeline(filtersFromHash());
     window.addEventListener('hashchange', () => renderTimeline(filtersFromHash()));
@@ -506,7 +482,5 @@ def person_timeline_report_html(report: InspectReport) -> str:
     function memoryItemsHref(filters) {{
       return inspectFilters.href('tailwag-memory-items.html', filters || {{}});
     }}
-  </script>
-</body>
-</html>
-"""
+""",
+    )

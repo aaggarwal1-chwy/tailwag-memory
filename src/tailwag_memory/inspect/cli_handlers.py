@@ -24,7 +24,7 @@ from . import (
     report_json,
     score_transcript_points,
 )
-from .html_utils import INSPECT_CSS_FILENAME, INSPECT_JS_FILENAME, INSPECT_SHARED_CSS, INSPECT_SHARED_JS
+from .html_utils import INSPECT_CSS_FILENAME, INSPECT_JS_FILENAME, inspect_asset_text
 
 ReportWriter = Callable[[str, str | None], None]
 ParserError = Callable[[str], None]
@@ -194,8 +194,8 @@ def _write_shared_assets(args: argparse.Namespace, output: str | None) -> None:
         return
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.with_name(INSPECT_CSS_FILENAME).write_text(INSPECT_SHARED_CSS)
-    output_path.with_name(INSPECT_JS_FILENAME).write_text(INSPECT_SHARED_JS)
+    output_path.with_name(INSPECT_CSS_FILENAME).write_text(inspect_asset_text(INSPECT_CSS_FILENAME))
+    output_path.with_name(INSPECT_JS_FILENAME).write_text(inspect_asset_text(INSPECT_JS_FILENAME))
 
 
 def _resolve_affect_model_dirs(args: argparse.Namespace, settings: Settings) -> tuple[str, str]:
