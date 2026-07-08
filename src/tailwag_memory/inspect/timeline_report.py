@@ -128,7 +128,7 @@ def person_timeline_report_html(report: InspectReport) -> str:
     }}
     .timeline-lane {{
       position: relative;
-      min-height: 132px;
+      min-height: 220px;
       border-top: 1px solid var(--line);
     }}
     .timeline-lane::before {{

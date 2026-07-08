@@ -5,11 +5,15 @@ def memory_overview_css() -> str:
     """Return page-specific CSS for the memory overview Sankey."""
 
     return """
-    .sankey-wrap { overflow-x: auto; }
+    .sankey-wrap {
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
     svg {
       min-width: 1040px;
       width: 100%;
       height: 440px;
+      margin: -70px 0;
       display: block;
     }
     .link {
