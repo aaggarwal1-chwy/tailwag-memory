@@ -10,7 +10,6 @@ from .models import (
     PersonContextItem,
     PersonContextSource,
     PersonContextTranscriptLine,
-    PersonRecognitionResult,
     SearchQuery,
 )
 from .person_episode_rows import person_episode_rows
@@ -166,60 +165,6 @@ class EpisodeRetrievalService:
             end_time=str(row["end_time"]) if row.get("end_time") is not None else None,
             building_code=str(row["building_code"]) if row.get("building_code") is not None else None,
             room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
-        )
-
-
-class PersonRecognitionService:
-    """Read consented people by biometric vector similarity."""
-
-    def __init__(self, runner: QueryRunner) -> None:
-        """Store dependencies for person recognition."""
-        self.runner = runner
-
-    def by_face_embedding(self, embedding: list[float], limit: int = 10) -> list[PersonRecognitionResult]:
-        """Return consented people ranked by face embedding."""
-        return self._vector_search("person_face_embedding", embedding, limit)
-
-    def by_audio_embedding(self, embedding: list[float], limit: int = 10) -> list[PersonRecognitionResult]:
-        """Return consented people ranked by audio embedding."""
-        return self._vector_search("person_audio_embedding", embedding, limit)
-
-    def _vector_search(
-        self,
-        index_name: str,
-        embedding: list[float],
-        limit: int,
-    ) -> list[PersonRecognitionResult]:
-        """Run a consent-filtered person vector search."""
-        rows = self.runner.run(
-            _vector_search_clause(index_name, "node", "candidate_limit")
-            + """
-            WHERE node.consent_status = 'consented'
-              AND coalesce(node.status, 'active') <> 'archived'
-            RETURN node.id AS person_id,
-                   node.display_name AS display_name,
-                   node.consent_status AS consent_status,
-                   node.last_seen AS last_seen,
-                   score AS score
-            ORDER BY score DESC
-            LIMIT $limit
-            """,
-            {
-                "candidate_limit": max(limit * 5, 25),
-                "limit": limit,
-                "embedding": embedding,
-            },
-        )
-        return [self._row_to_result(row) for row in rows]
-
-    def _row_to_result(self, row: dict[str, object]) -> PersonRecognitionResult:
-        """Convert a Neo4j person row into a recognition result."""
-        return PersonRecognitionResult(
-            person_id=str(row["person_id"]),
-            display_name=str(row.get("display_name") or ""),
-            consent_status=str(row.get("consent_status") or ""),
-            last_seen=str(row["last_seen"]) if row.get("last_seen") is not None else None,
-            score=row.get("score") if isinstance(row.get("score"), float) else None,
         )
 
 

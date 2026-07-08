@@ -29,8 +29,6 @@ class EpisodeInputTest(unittest.TestCase):
                         "display_name": "Jamie",
                         "email": "jamie@example.com",
                         "consent_status": "consented",
-                        "face_embedding": [0.1, 0.2],
-                        "audio_embedding": [0.3, 0.4],
                     }
                 ],
             }
@@ -43,8 +41,8 @@ class EpisodeInputTest(unittest.TestCase):
         self.assertEqual(episode.participants[0].role, "participant")
         self.assertEqual(episode.participants[0].source, "caller")
         self.assertEqual(episode.participants[0].email, "jamie@example.com")
-        self.assertEqual(episode.participants[0].face_embedding, [0.1, 0.2])
-        self.assertEqual(episode.participants[0].audio_embedding, [0.3, 0.4])
+        self.assertFalse(hasattr(episode.participants[0], "face_embedding"))
+        self.assertFalse(hasattr(episode.participants[0], "audio_embedding"))
         self.assertEqual(episode.mentioned_people, [])
 
     def test_episode_input_from_dict_accepts_mentioned_people(self) -> None:

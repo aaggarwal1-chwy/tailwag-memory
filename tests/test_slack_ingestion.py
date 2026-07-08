@@ -115,8 +115,8 @@ class SlackThreadConversionTest(unittest.TestCase):
         self.assertEqual([person.id for person in episode.participants], ["slack:U1", "slack:U2"])
         self.assertEqual([person.display_name for person in episode.participants], ["Asha", "Ben"])
         self.assertIsNone(episode.participants[0].email)
-        self.assertIsNone(episode.participants[0].face_embedding)
-        self.assertIsNone(episode.participants[0].audio_embedding)
+        self.assertFalse(hasattr(episode.participants[0], "face_embedding"))
+        self.assertFalse(hasattr(episode.participants[0], "audio_embedding"))
         self.assertEqual(episode.participants[0].source, "slack")
         self.assertEqual(
             episode.transcript,

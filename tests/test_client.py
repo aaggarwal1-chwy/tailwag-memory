@@ -58,7 +58,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
             display_name="Jamie",
             email="jamie@example.com",
             consent_status="consented",
-            face_embedding=[0.1] * 8,
         )
 
         class FakePersonIngestion:

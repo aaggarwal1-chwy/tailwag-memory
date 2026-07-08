@@ -19,8 +19,6 @@ class PersonInput:
     display_name: str | None = None
     email: str | None = None
     consent_status: str | None = None
-    face_embedding: list[float] | None = None
-    audio_embedding: list[float] | None = None
     role: str = "participant"
     source: str = "caller"
 
@@ -89,8 +87,6 @@ class EpisodeInput:
                     display_name=item.get("display_name"),
                     email=item.get("email"),
                     consent_status=item.get("consent_status"),
-                    face_embedding=item.get("face_embedding"),
-                    audio_embedding=item.get("audio_embedding"),
                     role=item.get("role", "participant"),
                     source=item.get("source", "caller"),
                 )
@@ -103,8 +99,6 @@ class EpisodeInput:
                         display_name=item["person"].get("display_name"),
                         email=item["person"].get("email"),
                         consent_status=item["person"].get("consent_status"),
-                        face_embedding=item["person"].get("face_embedding"),
-                        audio_embedding=item["person"].get("audio_embedding"),
                         role=item["person"].get("role", "mentioned"),
                         source=item["person"].get("source", item.get("source", "caller")),
                     ),
@@ -148,8 +142,6 @@ class EventInput:
                         display_name=item["person"].get("display_name"),
                         email=item["person"].get("email"),
                         consent_status=item["person"].get("consent_status"),
-                        face_embedding=item["person"].get("face_embedding"),
-                        audio_embedding=item["person"].get("audio_embedding"),
                         role=item["person"].get("role", "attendee"),
                         source=item["person"].get("source", item.get("source", "caller")),
                     ),
@@ -207,6 +199,155 @@ class PersonRecognitionResult:
     consent_status: str
     last_seen: str | None = None
     score: float | None = None
+
+
+@dataclass(frozen=True)
+class DirectoryPersonRecord:
+    """Normalized employee-directory row owned by Tailwag."""
+
+    official_name: str
+    username: str
+    site_code: str = ""
+    employee_email: str = ""
+    business_title: str = ""
+    job_family: str = ""
+    job_family_group: str = ""
+    job_level: str = ""
+    c_level: str = ""
+    manager_name: str = ""
+    cost_center: str = ""
+    senior_leadership_team: str = ""
+    business_function: str = ""
+    tenure: str = ""
+
+
+@dataclass(frozen=True)
+class DirectorySyncResult:
+    """Result of loading directory people into Tailwag."""
+
+    site_code: str
+    records_seen: int
+    records_written: int
+
+
+@dataclass(frozen=True)
+class IdentityCandidate:
+    """One possible directory identity match."""
+
+    official_name: str
+    username: str
+    employee_email: str = ""
+    business_title: str = ""
+    tenure: str = ""
+    manager_name: str = ""
+    score: float = 0.0
+
+
+@dataclass(frozen=True)
+class IdentityResolutionResult:
+    """Employee-directory identity resolution result."""
+
+    success: bool
+    status: str
+    message: str
+    data: dict[str, Any] | None = None
+    candidates: list[IdentityCandidate] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class VerifiedProfile:
+    """Verified employee profile returned for enrollment rehydration."""
+
+    person_id: str
+    official_name: str
+    username: str
+    employee_email: str = ""
+    business_title: str = ""
+    tenure: str = ""
+    manager_name: str = ""
+    directory_profile_lines: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PersonProfile:
+    """Prompt/runtime person profile projection."""
+
+    person_id: str
+    display_name: str
+    email: str = ""
+    consent_status: str = ""
+    status: str = "active"
+    interaction_count: int = 0
+    last_seen: str | None = None
+    directory_profile_lines: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BiometricCandidate:
+    """One biometric reference search candidate."""
+
+    person_id: str
+    display_name: str = ""
+    score: float = 0.0
+    consent_status: str = ""
+    reference_id: str = ""
+    model: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BiometricSearchResult:
+    """Thresholded biometric search response."""
+
+    modality: str
+    candidates: list[BiometricCandidate] = field(default_factory=list)
+    recognized: bool = False
+    status: str = "rejected"
+    reason: str = "no_match"
+    threshold: float = 0.0
+    margin_threshold: float = 0.0
+    top_score: float = 0.0
+    runner_up_score: float = 0.0
+    margin: float = 0.0
+
+
+@dataclass(frozen=True)
+class BiometricEnrollmentResult:
+    """Result of storing a biometric reference."""
+
+    saved: bool
+    status: str
+    reason: str
+    person_id: str
+    reference_id: str = ""
+
+
+@dataclass(frozen=True)
+class OwnerResolutionResult:
+    """Final turn-owner resolution result."""
+
+    audio_speaker_id: str | None
+    top_score: float
+    runner_up_score: float
+    margin: float
+    speaker_visible: bool
+    owner_id: str | None
+    owner_source: str
+    owner_confidence: float
+    unresolved_reason: str = ""
+
+
+@dataclass(frozen=True)
+class PersonContextResult:
+    """Structured prompt context for one person."""
+
+    person_id: str
+    directory_profile_lines: tuple[str, ...] = ()
+    memory_profile_lines: tuple[str, ...] = ()
+    potential_followups: tuple[str, ...] = ()
+    preferred_language: str = "English"
 
 
 @dataclass(frozen=True)

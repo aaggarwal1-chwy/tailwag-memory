@@ -13,6 +13,8 @@ class Settings:
     neo4j_user: str
     neo4j_password: str
     embedding_dimension: int
+    face_embedding_dimension: int = 512
+    voice_embedding_dimension: int = 192
     embedding_model: str = "text-embedding-3-small"
     openai_api_key: str | None = None
     synthesis_model: str = "gpt-5.5"
@@ -45,6 +47,8 @@ def load_settings() -> Settings:
         neo4j_user=os.getenv("NEO4J_USER", "neo4j"),
         neo4j_password=os.getenv("NEO4J_PASSWORD", "tailwag-memory"),
         embedding_dimension=parse_positive_int_env("TAILWAG_EMBEDDING_DIMENSION", 64),
+        face_embedding_dimension=parse_positive_int_env("TAILWAG_FACE_EMBEDDING_DIMENSION", 512),
+        voice_embedding_dimension=parse_positive_int_env("TAILWAG_VOICE_EMBEDDING_DIMENSION", 192),
         embedding_model=os.getenv("TAILWAG_EMBEDDING_MODEL", "text-embedding-3-small"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         synthesis_model=os.getenv("TAILWAG_SYNTHESIS_MODEL", "gpt-5.5"),
