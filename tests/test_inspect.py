@@ -595,6 +595,10 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
         self.assertIn("tailwag-affect.html", html)
         self.assertIn("evidenceHtml(record, supported, addressed, supersededBy, supersedes)", html)
         self.assertIn("timelineHref({ person: personId || '', item: itemId || '' })", html)
+        self.assertIn('href="#${focusedMemoryHash(record.memory_id || \'\')}"', html)
+        self.assertIn("function focusedMemoryHash(memoryId)", html)
+        self.assertIn("status: ''", html)
+        self.assertIn("followup_state: ''", html)
         self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
 
 

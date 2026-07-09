@@ -265,7 +265,7 @@ def memory_items_report_html(report: InspectReport) -> str:
           <td data-label="Summary" class="summary-cell">${{escapeHtml(record.summary || '')}}<br><span class="meta">${{filterPill(record.source || 'unknown', record.source, 'source', record.source || 'unknown')}}${{record.source_ref ? ' / ' + escapeHtml(record.source_ref) : ''}}</span></td>
           <td data-label="Evidence">${{evidenceHtml(record, supported, addressed, supersededBy, supersedes)}}</td>
           <td data-label="Timing">${{timeHtml(record)}}</td>
-          <td data-label="ID"><a href="#${{hashWith({{ memory: record.memory_id || '' }})}}"><code>${{escapeHtml(record.memory_id || '')}}</code></a></td>
+          <td data-label="ID"><a href="#${{focusedMemoryHash(record.memory_id || '')}}"><code>${{escapeHtml(record.memory_id || '')}}</code></a></td>
         </tr>
       `;
     }}
@@ -429,7 +429,18 @@ def memory_items_report_html(report: InspectReport) -> str:
       return `<code>${{escapeHtml(value || '')}}</code>`;
     }}
     function memoryLink(memoryId) {{
-      return `<a href="#${{hashWith({{ memory: memoryId || '' }})}}">${{code(memoryId)}}</a>`;
+      return `<a href="#${{focusedMemoryHash(memoryId)}}">${{code(memoryId)}}</a>`;
+    }}
+    function focusedMemoryHash(memoryId) {{
+      return hashWith({{
+        memory: memoryId || '',
+        episode: '',
+        kind: '',
+        status: '',
+        source: '',
+        followup_state: '',
+        validity_bucket: ''
+      }});
     }}
     function timelineItemLink(itemId, personId) {{
       return `<a href="${{escapeHtml(timelineHref({{ person: personId || '', item: itemId || '' }}))}}">${{code(itemId)}}</a>`;

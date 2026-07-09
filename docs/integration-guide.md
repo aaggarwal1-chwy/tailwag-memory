@@ -11,6 +11,7 @@ This guide stays at the package setup and integration-boundary level. For detail
 - Current graph model, scope, and deferred concepts: [Architecture](architecture.md)
 - Python endpoints, parameters, input models, return shapes, and service constructors: [Memory Endpoints Reference](memory-endpoints.md)
 - Local command examples and CLI workflow: [CLI Reference](cli-reference.md)
+- Read-only local inspection reports and generated report assets: [Inspect Reference](inspect-reference.md)
 - Slack app setup, CLI polling, package-level polling, and Slack state behavior: [Slack Ingestion Guide](slack-ingestion.md)
 - Current Argos integration boundary and compatibility expectations: [Argos Compatibility Note](argos-migration.md)
 
@@ -27,6 +28,8 @@ For local affect inspection with external XLM-RoBERTa-large fold model directori
 ```bash
 python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[affect]"
 ```
+
+Other inspect reports use the base install. See [Inspect Reference](inspect-reference.md) for follow-up validity, person timeline, memory item, and affect report behavior.
 
 ## Runtime Configuration
 
