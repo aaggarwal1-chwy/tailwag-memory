@@ -145,6 +145,7 @@ class BiometricReferenceService:
                     or _metadata_value(meta, "official_name")
                     or rendered_person_id
                 ),
+                official_name=_metadata_value(meta, "official_name") or None,
                 email=(
                     _metadata_value(meta, "employee_email")
                     or _metadata_value(meta, "email")
@@ -156,19 +157,32 @@ class BiometricReferenceService:
         now = utc_now_iso()
         directory_username = _metadata_value(meta, "username").lower()
         directory_site_code = _metadata_value(meta, "site_code")
+        person_label = (
+            _metadata_value(meta, "official_name")
+            or _metadata_value(meta, "display_name")
+            or _metadata_value(meta, "name")
+            or rendered_person_id
+        )
         reference_id = f"{modality}:{rendered_person_id}:{uuid4().hex}"
         label = "FaceReference" if modality == "face" else "VoiceReference"
+        reference_display_name = f"{'Face' if modality == 'face' else 'Voice'} reference for {person_label}"
         rel = "HAS_FACE_REFERENCE" if modality == "face" else "HAS_VOICE_REFERENCE"
         self.runner.run(
             f"""
             MATCH (p:Person {{id: $person_id}})
             OPTIONAL MATCH (d:EmployeeDirectoryRecord {{site_code: $directory_site_code, username: $directory_username}})
             FOREACH (_ IN CASE WHEN d IS NULL THEN [] ELSE [1] END |
+              SET p.official_name = CASE WHEN d.official_name <> '' THEN d.official_name ELSE p.official_name END,
+                  p.display_name = CASE WHEN d.official_name <> '' THEN d.official_name ELSE p.display_name END,
+                  p.name = CASE WHEN d.official_name <> '' THEN d.official_name ELSE p.name END,
+                  p.email = CASE WHEN d.employee_email <> '' THEN d.employee_email ELSE p.email END
               MERGE (p)-[:HAS_DIRECTORY_RECORD]->(d)
             )
             WITH p
             CREATE (r:{label} {{id: $reference_id}})
             SET r.embedding = $embedding,
+                r.display_name = $reference_display_name,
+                r.name = $reference_display_name,
                 r.model = $model,
                 r.dimension = $dimension,
                 r.metadata_json = $metadata_json,
@@ -182,6 +196,7 @@ class BiometricReferenceService:
             {
                 "person_id": rendered_person_id,
                 "reference_id": reference_id,
+                "reference_display_name": reference_display_name,
                 "embedding": vector,
                 "model": str(model or "").strip() or "unknown",
                 "dimension": len(vector),

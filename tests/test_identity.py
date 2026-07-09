@@ -25,8 +25,14 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         self.assertEqual(result.records_written, 1)
         query = runner.queries[0]
         self.assertIn("EmployeeDirectoryRecord", query.query)
+        self.assertIn("HAS_DIRECTORY_RECORD", query.query)
+        self.assertIn("p.official_name", query.query)
+        self.assertIn("d.name = record.official_name", query.query)
         self.assertEqual(query.parameters["records"][0]["normalized_name"], "jamie example")
         self.assertEqual(query.parameters["records"][0]["site_code"], "BOS3")
+        self.assertEqual(query.parameters["records"][0]["display_name"], "Jamie Example")
+        self.assertEqual(query.parameters["records"][0]["name"], "Jamie Example")
+        self.assertEqual(query.parameters["records"][0]["source"], "snowflake")
 
     def test_resolve_identity_returns_single_match(self) -> None:
         runner = RecordingQueryRunner(

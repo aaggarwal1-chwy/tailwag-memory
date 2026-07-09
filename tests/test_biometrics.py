@@ -35,12 +35,14 @@ class BiometricReferenceServiceTest(unittest.TestCase):
             model="facenet-vggface2",
             metadata={
                 "display_name": "Jamie Example",
+                "official_name": "Jamie Official",
                 "employee_email": "jamie@example.com",
             },
         )
 
         person_query = next(query for query in runner.queries if "person" in query.parameters)
         self.assertEqual(person_query.parameters["person"]["display_name"], "Jamie Example")
+        self.assertEqual(person_query.parameters["person"]["official_name"], "Jamie Official")
         self.assertEqual(person_query.parameters["person"]["email"], "jamie@example.com")
 
     def test_enroll_face_reference_serializes_nested_metadata_for_neo4j(self) -> None:
@@ -85,8 +87,27 @@ class BiometricReferenceServiceTest(unittest.TestCase):
 
         query = runner.queries[-1]
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
+        self.assertIn("p.official_name", query.query)
         self.assertEqual(query.parameters["directory_username"], "jamie")
         self.assertEqual(query.parameters["directory_site_code"], "BOS3")
+
+    def test_enroll_face_reference_adds_readable_reference_name(self) -> None:
+        runner = RecordingQueryRunner()
+        service = BiometricReferenceService(runner)
+
+        service.enroll_face_reference(
+            person_id="person_jamie",
+            embedding=[0.1] * 512,
+            model="facenet-vggface2",
+            metadata={"official_name": "Jamie Example"},
+        )
+
+        query = runner.queries[-1]
+        self.assertIn("r.display_name = $reference_display_name", query.query)
+        self.assertEqual(
+            query.parameters["reference_display_name"],
+            "Face reference for Jamie Example",
+        )
 
     def test_search_voice_uses_reference_index_and_thresholds(self) -> None:
         runner = RecordingQueryRunner(

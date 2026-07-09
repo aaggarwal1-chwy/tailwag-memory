@@ -105,6 +105,8 @@ def _person_upsert_cypher(
     return f"""
                 MERGE (p:Person {{id: {person_variable}.{id_property}}})
                 SET p.display_name = coalesce({person_variable}.display_name, p.display_name),
+                    p.official_name = coalesce({person_variable}.official_name, p.official_name),
+                    p.name = coalesce({person_variable}.display_name, {person_variable}.official_name, p.name),
                     p.email = coalesce({person_variable}.email, p.email),
                     p.consent_status = coalesce({person_variable}.consent_status, p.consent_status),
                     p.created_at = coalesce(p.created_at, $created_at),
@@ -125,6 +127,7 @@ class PersonIngestionService:
         person_data = {
             "id": person.id,
             "display_name": person.display_name,
+            "official_name": person.official_name,
             "email": _normalize_email(person.email),
             "consent_status": person.consent_status,
         }

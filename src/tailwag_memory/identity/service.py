@@ -170,6 +170,9 @@ class DirectoryIdentityService:
             UNWIND $records AS record
             MERGE (d:EmployeeDirectoryRecord {site_code: record.site_code, username: record.username})
             SET d.official_name = record.official_name,
+                d.display_name = record.official_name,
+                d.name = record.official_name,
+                d.source = 'snowflake',
                 d.employee_email = record.employee_email,
                 d.business_title = record.business_title,
                 d.job_family = record.job_family,
@@ -185,7 +188,18 @@ class DirectoryIdentityService:
                 d.token_sorted_name = record.token_sorted_name,
                 d.updated_at = $updated_at,
                 d.created_at = coalesce(d.created_at, $updated_at)
-            RETURN count(*) AS records_written
+            WITH d, record
+            OPTIONAL MATCH (p:Person)
+            WHERE p.id = 'person_' + record.username
+               OR (record.employee_email <> '' AND p.email = record.employee_email)
+            FOREACH (_ IN CASE WHEN p IS NULL THEN [] ELSE [1] END |
+              SET p.official_name = CASE WHEN record.official_name <> '' THEN record.official_name ELSE p.official_name END,
+                  p.display_name = CASE WHEN record.official_name <> '' THEN record.official_name ELSE p.display_name END,
+                  p.name = CASE WHEN record.official_name <> '' THEN record.official_name ELSE p.name END,
+                  p.email = CASE WHEN record.employee_email <> '' THEN record.employee_email ELSE p.email END
+              MERGE (p)-[:HAS_DIRECTORY_RECORD]->(d)
+            )
+            RETURN count(DISTINCT d) AS records_written
             """,
             {
                 "records": [_record_payload(record) for record in normalized],
@@ -334,6 +348,7 @@ class DirectoryIdentityService:
             OPTIONAL MATCH (p)-[:HAS_DIRECTORY_RECORD]->(d:EmployeeDirectoryRecord)
             RETURN p.id AS person_id,
                    p.display_name AS display_name,
+                   p.official_name AS person_official_name,
                    p.email AS email,
                    p.consent_status AS consent_status,
                    coalesce(p.status, 'active') AS status,
@@ -391,6 +406,8 @@ class DirectoryIdentityService:
             """
             MERGE (p:Person {id: $person_id})
             SET p.display_name = coalesce($display_name, p.display_name, $person_id),
+                p.official_name = coalesce($official_name, p.official_name),
+                p.name = coalesce($display_name, $official_name, p.name, $person_id),
                 p.email = coalesce($email, p.email),
                 p.consent_status = coalesce($consent_status, p.consent_status),
                 p.status = coalesce(p.status, 'active'),
@@ -411,6 +428,7 @@ class DirectoryIdentityService:
             {
                 "person_id": rendered,
                 "display_name": _optional(meta.get("display_name") or meta.get("name")),
+                "official_name": _optional(meta.get("official_name")),
                 "email": _optional(meta.get("email") or meta.get("employee_email")),
                 "consent_status": _optional(meta.get("consent_status")),
                 "last_seen": now,
@@ -517,6 +535,9 @@ def _row_values_by_column(row: Any, columns: list[str]) -> dict[str, Any]:
 
 def _record_payload(record: DirectoryPersonRecord) -> dict[str, Any]:
     payload = asdict(record)
+    payload["display_name"] = record.official_name
+    payload["name"] = record.official_name
+    payload["source"] = "snowflake"
     payload["normalized_name"] = _normalize_name(record.official_name)
     payload["token_sorted_name"] = _token_sort_key(record.official_name)
     return payload

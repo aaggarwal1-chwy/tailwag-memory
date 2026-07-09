@@ -17,6 +17,7 @@ class PersonInput:
 
     id: str
     display_name: str | None = None
+    official_name: str | None = None
     email: str | None = None
     consent_status: str | None = None
     role: str = "participant"
