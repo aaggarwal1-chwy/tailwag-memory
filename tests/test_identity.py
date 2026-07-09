@@ -1,5 +1,5 @@
 from tests.helpers import RecordingQueryRunner
-from tailwag_memory.identity import DirectoryIdentityService
+from tailwag_memory.identity import DirectoryIdentityService, load_directory_records_from_snowflake
 from tailwag_memory.models import DirectoryPersonRecord
 import unittest
 
@@ -71,6 +71,45 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
         self.assertEqual(query.parameters["directory_username"], "jamie")
         self.assertEqual(query.parameters["directory_site_code"], "BOS3")
+
+    def test_snowflake_loader_maps_employee_and_manager_by_column_name(self) -> None:
+        class Cursor:
+            description = [
+                ("MANAGER_NAME",),
+                ("EMPLOYEE_NAME",),
+                ("EMPLOYEE_USERNAME",),
+                ("BUSINESS_TITLE",),
+            ]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def execute(self, *_args):
+                return None
+
+            def fetchall(self):
+                return [("Manager Person", "Employee Person", "employee1", "Engineer")]
+
+        class Connection:
+            def cursor(self):
+                return Cursor()
+
+            def close(self):
+                return None
+
+        records = load_directory_records_from_snowflake(
+            "BOS3",
+            email_domain="example.com",
+            env_loader=lambda: None,
+            connector_factory=lambda: Connection(),
+        )
+
+        self.assertEqual(records[0].official_name, "Employee Person")
+        self.assertEqual(records[0].manager_name, "Manager Person")
+        self.assertEqual(records[0].username, "employee1")
 
 
 if __name__ == "__main__":

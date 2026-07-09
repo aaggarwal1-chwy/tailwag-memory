@@ -708,7 +708,7 @@ class CliTest(unittest.TestCase):
                     "status": "active",
                     "observed_at": "2026-07-01T10:00:00+00:00",
                     "due_at": "2026-07-02T10:00:00+00:00",
-                    "expires_at": "2026-07-09T10:00:00+00:00",
+                    "expires_at": "2099-07-09T10:00:00+00:00",
                     "metadata_json": '{"topic": "demo"}',
                     "supported_episode_ids": ["episode_1"],
                     "addressed_by": [],

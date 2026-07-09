@@ -1,6 +1,7 @@
 from tests.helpers import RecordingQueryRunner
 from tailwag_memory.biometrics import BiometricReferenceService
 import unittest
+import json
 
 
 class BiometricReferenceServiceTest(unittest.TestCase):
@@ -22,6 +23,49 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(query.parameters["person_id"], "person_jamie")
         self.assertEqual(query.parameters["model"], "facenet-vggface2")
         self.assertEqual(query.parameters["dimension"], 512)
+        self.assertEqual(json.loads(query.parameters["metadata_json"]), {"quality": "good"})
+
+    def test_enroll_face_reference_updates_person_profile_from_metadata(self) -> None:
+        runner = RecordingQueryRunner()
+        service = BiometricReferenceService(runner)
+
+        service.enroll_face_reference(
+            person_id="person_jamie",
+            embedding=[0.1] * 512,
+            model="facenet-vggface2",
+            metadata={
+                "display_name": "Jamie Example",
+                "employee_email": "jamie@example.com",
+            },
+        )
+
+        person_query = next(query for query in runner.queries if "person" in query.parameters)
+        self.assertEqual(person_query.parameters["person"]["display_name"], "Jamie Example")
+        self.assertEqual(person_query.parameters["person"]["email"], "jamie@example.com")
+
+    def test_enroll_face_reference_serializes_nested_metadata_for_neo4j(self) -> None:
+        runner = RecordingQueryRunner()
+        service = BiometricReferenceService(runner)
+
+        service.enroll_face_reference(
+            person_id="person_jamie",
+            embedding=[0.1] * 512,
+            model="facenet-vggface2",
+            metadata={
+                "display_name": "Jamie Example",
+                "directory_profile_lines": ("Title: Engineer",),
+                "metadata": {
+                    "username": "jamie",
+                    "site_code": "BOS3",
+                },
+            },
+        )
+
+        query = runner.queries[-1]
+        self.assertIn("r.metadata_json = $metadata_json", query.query)
+        stored = json.loads(query.parameters["metadata_json"])
+        self.assertEqual(stored["metadata"]["username"], "jamie")
+        self.assertEqual(stored["directory_profile_lines"], ["Title: Engineer"])
 
     def test_enroll_face_reference_links_directory_record_when_metadata_is_verified(self) -> None:
         runner = RecordingQueryRunner()
@@ -54,7 +98,7 @@ class BiometricReferenceServiceTest(unittest.TestCase):
                         "consent_status": "consented",
                         "reference_id": "voice:1",
                         "model": "ecapa",
-                        "metadata": {},
+                        "metadata_json": '{"quality": "good"}',
                         "score": 0.81,
                     }
                 ]
@@ -66,6 +110,7 @@ class BiometricReferenceServiceTest(unittest.TestCase):
 
         self.assertTrue(result.recognized)
         self.assertEqual(result.candidates[0].person_id, "person_jamie")
+        self.assertEqual(result.candidates[0].metadata, {"quality": "good"})
         self.assertIn("voice_reference_embedding", runner.queries[0].query)
         self.assertIn("HAS_VOICE_REFERENCE", runner.queries[0].query)
 

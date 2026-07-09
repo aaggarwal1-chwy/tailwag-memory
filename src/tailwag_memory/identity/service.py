@@ -130,8 +130,17 @@ def load_directory_records_from_snowflake(
         with connection.cursor() as cursor:
             cursor.execute(EMPLOYEE_DIRECTORY_SQL, (str(site_code or "").strip(),))
             rows = cursor.fetchall()
+            columns = [
+                str(description[0] if isinstance(description, (tuple, list)) else getattr(description, "name", "")).upper()
+                for description in (getattr(cursor, "description", None) or ())
+            ]
         return [
-            _record_from_row(row, site_code=str(site_code or "").strip(), email_domain=email_domain)
+            _record_from_row(
+                row,
+                site_code=str(site_code or "").strip(),
+                email_domain=email_domain,
+                columns=columns,
+            )
             for row in rows
         ]
     finally:
@@ -440,26 +449,32 @@ class DirectoryIdentityService:
         return [_row_to_record(row) for row in rows]
 
 
-def _record_from_row(row: Any, *, site_code: str, email_domain: str) -> DirectoryPersonRecord:
-    values = tuple(row)
+def _record_from_row(
+    row: Any,
+    *,
+    site_code: str,
+    email_domain: str,
+    columns: list[str] | None = None,
+) -> DirectoryPersonRecord:
+    values_by_column = _row_values_by_column(row, columns or list(EMPLOYEE_COLUMNS))
 
-    def value(index: int) -> str:
-        return str(values[index] or "").strip() if index < len(values) else ""
+    def value(column: str) -> str:
+        return str(values_by_column.get(column, "") or "").strip()
 
-    username = value(3).lower()
+    username = value("EMPLOYEE_USERNAME").lower()
     return DirectoryPersonRecord(
-        official_name=value(0),
-        business_title=value(1),
-        tenure=value(2),
+        official_name=value("EMPLOYEE_NAME"),
+        business_title=value("BUSINESS_TITLE"),
+        tenure=value("TIME_IN_JOB_PROFILE"),
         username=username,
-        job_family=value(4),
-        job_family_group=value(5),
-        job_level=value(6),
-        c_level=value(7),
-        manager_name=value(8),
-        cost_center=value(9),
-        senior_leadership_team=value(10),
-        business_function=value(11),
+        job_family=value("JOB_FAMILY"),
+        job_family_group=value("JOB_FAMILY_GROUP"),
+        job_level=value("JOB_LEVEL"),
+        c_level=value("C_LEVEL"),
+        manager_name=value("MANAGER_NAME"),
+        cost_center=value("COST_CENTER"),
+        senior_leadership_team=value("SENIOR_LEADERSHIP_TEAM"),
+        business_function=value("BUSINESS_FUNCTION"),
         employee_email=employee_email_from_username(username, email_domain),
         site_code=site_code,
     )
@@ -487,6 +502,17 @@ def _normalize_record(record: DirectoryPersonRecord | dict[str, Any], site_code:
         business_function=str(raw.get("business_function") or "").strip(),
         tenure=str(raw.get("tenure") or "").strip(),
     )
+
+
+def _row_values_by_column(row: Any, columns: list[str]) -> dict[str, Any]:
+    if isinstance(row, dict):
+        return {str(key).upper(): value for key, value in row.items()}
+    values = tuple(row)
+    return {
+        str(column or "").upper(): values[index]
+        for index, column in enumerate(columns)
+        if index < len(values)
+    }
 
 
 def _record_payload(record: DirectoryPersonRecord) -> dict[str, Any]:

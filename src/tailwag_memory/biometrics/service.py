@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -134,14 +135,25 @@ class BiometricReferenceService:
                 reason="consent_required",
                 person_id=rendered_person_id,
             )
+        meta = dict(metadata or {})
         PersonIngestionService(self.runner).upsert(
             PersonInput(
                 id=rendered_person_id,
+                display_name=(
+                    _metadata_value(meta, "display_name")
+                    or _metadata_value(meta, "name")
+                    or _metadata_value(meta, "official_name")
+                    or rendered_person_id
+                ),
+                email=(
+                    _metadata_value(meta, "employee_email")
+                    or _metadata_value(meta, "email")
+                    or None
+                ),
                 consent_status=rendered_consent,
             )
         )
         now = utc_now_iso()
-        meta = dict(metadata or {})
         directory_username = _metadata_value(meta, "username").lower()
         directory_site_code = _metadata_value(meta, "site_code")
         reference_id = f"{modality}:{rendered_person_id}:{uuid4().hex}"
@@ -159,7 +171,7 @@ class BiometricReferenceService:
             SET r.embedding = $embedding,
                 r.model = $model,
                 r.dimension = $dimension,
-                r.metadata = $metadata,
+                r.metadata_json = $metadata_json,
                 r.consent_status = $consent_status,
                 r.status = 'active',
                 r.created_at = $now,
@@ -173,7 +185,7 @@ class BiometricReferenceService:
                 "embedding": vector,
                 "model": str(model or "").strip() or "unknown",
                 "dimension": len(vector),
-                "metadata": meta,
+                "metadata_json": _metadata_json(meta),
                 "consent_status": rendered_consent,
                 "now": now,
                 "directory_username": directory_username,
@@ -218,7 +230,7 @@ class BiometricReferenceService:
                    person.consent_status AS consent_status,
                    ref.id AS reference_id,
                    ref.model AS model,
-                   ref.metadata AS metadata,
+                   ref.metadata_json AS metadata_json,
                    score AS score
             ORDER BY score DESC
             LIMIT $limit
@@ -262,9 +274,7 @@ class BiometricReferenceService:
 
 
 def _candidate_from_row(row: dict[str, Any]) -> BiometricCandidate:
-    metadata = row.get("metadata")
-    if not isinstance(metadata, dict):
-        metadata = {}
+    metadata = _metadata_from_json(row.get("metadata_json"))
     return BiometricCandidate(
         person_id=str(row.get("person_id") or ""),
         display_name=str(row.get("display_name") or ""),
@@ -286,3 +296,19 @@ def _metadata_value(metadata: dict[str, Any], key: str) -> str:
     if value is None and isinstance(metadata.get("metadata"), dict):
         value = metadata["metadata"].get(key)
     return str(value or "").strip()
+
+
+def _metadata_json(metadata: dict[str, Any]) -> str:
+    return json.dumps(metadata, sort_keys=True, default=str)
+
+
+def _metadata_from_json(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        decoded = json.loads(str(value))
+    except Exception:
+        return {}
+    return dict(decoded) if isinstance(decoded, dict) else {}
