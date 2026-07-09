@@ -7,8 +7,18 @@ from typing import Any
 
 from ..db import QueryRunner
 from ..models import utc_now_iso
-from .models import InspectMemoryAddressedEpisode, InspectMemoryItem
+from .models import InspectMemoryAddressedEpisode, InspectMemoryItem, InspectSankeyLink
 from .reports import InspectReport
+
+_TERMINAL_ORDER = ["still_active", "addressed", "superseded", "expired_active", "invalid", "other"]
+_TERMINAL_LABELS = {
+    "still_active": "Still Active",
+    "addressed": "Addressed",
+    "superseded": "Superseded",
+    "expired_active": "Expired Active",
+    "invalid": "Invalid",
+    "other": "Other Inactive",
+}
 
 
 class MemoryItemInspectService:
@@ -75,20 +85,45 @@ class MemoryItemInspectService:
         reference_time = now or datetime.now(timezone.utc)
         return [_row_to_item(row, now=reference_time) for row in rows]
 
+    def episode_conversion(self) -> dict[str, int]:
+        """Return episode counts for the memory overview Sankey."""
+
+        rows = self.runner.run(
+            """
+            MATCH (episode:Episode)
+            OPTIONAL MATCH (episode)<-[:SUPPORTED_BY]-(memory:MemoryItem)<-[:HAS_MEMORY]-(:Person)
+            RETURN count(DISTINCT episode) AS episode_count,
+                   count(DISTINCT CASE WHEN memory IS NULL THEN null ELSE episode END) AS memory_episode_count,
+                   count(DISTINCT memory) AS memory_count
+            """,
+            {},
+        )
+        row = rows[0] if rows else {}
+        episode_count = _int(row.get("episode_count"))
+        memory_episode_count = _int(row.get("memory_episode_count"))
+        memory_count = _int(row.get("memory_count"))
+        return {
+            "episode_count": episode_count,
+            "memory_episode_count": memory_episode_count,
+            "memory_count": memory_count,
+        }
+
 
 def memory_items_report(
     items: list[InspectMemoryItem],
     *,
     person_id: str | None = None,
     limit: int = 1000,
+    episode_conversion: dict[str, int] | None = None,
     generated_at: str | None = None,
 ) -> InspectReport:
     """Build a report envelope for memory item inspection exports."""
 
     filters = {"person_id": person_id, "limit": limit}
     records = [asdict(item) for item in items]
+    overview_links = _overview_links(records, episode_conversion or {})
     return InspectReport(
-        title="Tailwag Memory Items",
+        title="Memory Items",
         generated_at=generated_at or utc_now_iso(),
         filters=filters,
         records=records,
@@ -101,9 +136,96 @@ def memory_items_report(
                 "affect": "tailwag-affect.html",
             },
             "distributions": _distributions(records),
+            "overview_links": [asdict(link) for link in overview_links],
+            "episode_counts": _episode_counts(overview_links),
+            "terminal_counts": _terminal_counts(overview_links),
         },
         warnings=[] if items else ["No memory items matched the selected filters."],
     )
+
+
+def _overview_links(records: list[dict[str, object]], episode_conversion: dict[str, int]) -> list[InspectSankeyLink]:
+    """Build the memory-items overview Sankey links."""
+
+    links = _episode_links(episode_conversion)
+    terminal_counts = {key: 0 for key in _TERMINAL_ORDER}
+    for record in records:
+        terminal_counts[_terminal_state(record)] += 1
+    total = sum(terminal_counts.values())
+    if total:
+        links.append(InspectSankeyLink(source="Created", target="Active", count=total))
+    links.extend(
+        InspectSankeyLink(source="Active", target=_TERMINAL_LABELS[key], count=count)
+        for key, count in terminal_counts.items()
+        if count > 0
+    )
+    return links
+
+
+def _episode_links(episode_conversion: dict[str, int]) -> list[InspectSankeyLink]:
+    """Build episode-to-memory Sankey links."""
+
+    episode_count = _int(episode_conversion.get("episode_count"))
+    memory_episode_count = _int(episode_conversion.get("memory_episode_count"))
+    memory_count = _int(episode_conversion.get("memory_count"))
+    without_memory_count = max(0, episode_count - memory_episode_count)
+    links: list[InspectSankeyLink] = []
+    if memory_episode_count:
+        links.append(InspectSankeyLink("All Episodes", "Episodes With Memories", memory_episode_count))
+    if without_memory_count:
+        links.append(InspectSankeyLink("All Episodes", "Episodes Without Memories", without_memory_count))
+    if memory_count:
+        links.append(InspectSankeyLink("Episodes With Memories", "Created", memory_count))
+    return links
+
+
+def _terminal_counts(links: list[InspectSankeyLink]) -> dict[str, int]:
+    """Return terminal lifecycle counts from overview links."""
+
+    return {link.target: link.count for link in links if link.source == "Active"}
+
+
+def _episode_counts(links: list[InspectSankeyLink]) -> dict[str, int]:
+    """Return episode conversion counts from overview links."""
+
+    with_memory = _link_count(links, "All Episodes", "Episodes With Memories")
+    without_memory = _link_count(links, "All Episodes", "Episodes Without Memories")
+    memory_count = _link_count(links, "Episodes With Memories", "Created")
+    counts: dict[str, int] = {}
+    if with_memory or without_memory:
+        counts["All Episodes"] = with_memory + without_memory
+        counts["Episodes With Memories"] = with_memory
+        counts["Episodes Without Memories"] = without_memory
+    if memory_count:
+        counts["Memory Items From Episodes"] = memory_count
+    return counts
+
+
+def _link_count(links: list[InspectSankeyLink], source: str, target: str) -> int:
+    """Return the count for one Sankey link."""
+
+    for link in links:
+        if link.source == source and link.target == target:
+            return link.count
+    return 0
+
+
+def _terminal_state(record: dict[str, object]) -> str:
+    """Return the lifecycle terminal state for one memory item record."""
+
+    status = _string(record.get("status")) or "active"
+    kind = _string(record.get("kind"))
+    if status == "superseded" or _has_values(record.get("superseded_by_memory_ids")):
+        return "superseded"
+    if status == "addressed" or _has_values(record.get("addressed_by")):
+        return "addressed"
+    if kind == "followup":
+        followup_state = _string(record.get("followup_state"))
+        if followup_state in {"expired_active", "invalid"}:
+            return followup_state
+    if status == "active":
+        return "still_active"
+    return "other"
 
 
 def _row_to_item(row: dict[str, object], *, now: datetime) -> InspectMemoryItem:
@@ -276,6 +398,15 @@ def _optional_string(value: object) -> str | None:
 
     rendered = _string(value)
     return rendered or None
+
+
+def _int(value: object) -> int:
+    """Return a non-negative integer count from a Neo4j row value."""
+
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _string(value: object) -> str:

@@ -22,12 +22,6 @@ From the consuming repo, install Tailwag in editable mode:
 python -m pip install -e /Users/aaggarwal1/Desktop/code/tailwag-memory
 ```
 
-For local development with test dependencies:
-
-```bash
-python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[dev]"
-```
-
 For local affect inspection with external XLM-RoBERTa-large fold model directories:
 
 ```bash

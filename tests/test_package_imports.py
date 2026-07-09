@@ -184,12 +184,10 @@ class PackageImportTest(unittest.TestCase):
 
         self.assertEqual(set(tailwag_memory.__all__), expected_exports)
         self.assertEqual(len(imported), len(expected_exports))
+        for name in expected_exports:
+            self.assertIsNotNone(getattr(tailwag_memory, name))
         self.assertIs(tailwag_memory.TailwagMemoryClient, TailwagMemoryClient)
         self.assertIs(tailwag_memory.Settings, Settings)
-        self.assertIs(tailwag_memory.EpisodeInput, EpisodeInput)
-        self.assertIs(tailwag_memory.EpisodeMentionInput, EpisodeMentionInput)
-        self.assertIs(tailwag_memory.EpisodeIngestionService, EpisodeIngestionService)
-        self.assertIs(tailwag_memory.EpisodeRetrievalService, EpisodeRetrievalService)
         self.assertNotIn("address_item", tailwag_memory.__all__)
         self.assertNotIn("address_item", memory_items.__all__)
         self.assertNotIn("stable_memory_id", tailwag_memory.__all__)

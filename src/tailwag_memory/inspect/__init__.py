@@ -8,13 +8,17 @@ from .affect import (
     score_transcript_points,
 )
 from .affect_report import affect_report_html
+from .followup_report import followup_validity_report_html
+from .followups import FollowupValidityInspectService, followup_validity_report
 from .memory_items import MemoryItemInspectService, memory_items_report
 from .memory_report import memory_items_report_html
 from .models import (
     AffectScore,
+    InspectFollowupValidityItem,
     InspectMemoryAddressedEpisode,
     InspectMemoryItem,
     InspectRelatedMemoryItem,
+    InspectSankeyLink,
     InspectTranscriptLine,
     PersonEpisodeAffectPoint,
     PersonEpisodeTranscriptPoint,
@@ -34,10 +38,13 @@ __all__ = [
     "AffectScoringConfigurationError",
     "AffectScoringProvider",
     "FoldEnsembleAffectProvider",
+    "FollowupValidityInspectService",
     "HuggingFaceXLMRobertaLargeAffectProvider",
+    "InspectFollowupValidityItem",
     "InspectMemoryAddressedEpisode",
     "InspectMemoryItem",
     "InspectRelatedMemoryItem",
+    "InspectSankeyLink",
     "InspectTranscriptLine",
     "InspectReport",
     "MemoryItemInspectService",
@@ -47,6 +54,8 @@ __all__ = [
     "PersonTimelineRetrievalService",
     "affect_report",
     "affect_report_html",
+    "followup_validity_report",
+    "followup_validity_report_html",
     "memory_items_report",
     "memory_items_report_html",
     "person_timeline_report",

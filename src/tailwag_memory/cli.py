@@ -11,21 +11,7 @@ from .client import TailwagMemoryClient
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
-from .inspect import (
-    AffectScoringConfigurationError,
-    FoldEnsembleAffectProvider,
-    MemoryItemInspectService,
-    PersonEpisodeTranscriptService,
-    PersonTimelineRetrievalService,
-    affect_report,
-    affect_report_html,
-    memory_items_report,
-    memory_items_report_html,
-    person_timeline_report,
-    person_timeline_report_html,
-    report_json,
-    score_transcript_points,
-)
+from .inspect.cli_handlers import add_inspect_subcommands, run_inspect_command, validate_inspect_args
 from .ingestion import EventIngestionService
 from .memory_items import (
     DEFAULT_CONSOLIDATION_CLUSTER_LIMIT,
@@ -50,21 +36,6 @@ def _embedding_provider(settings: Settings) -> OpenAIEmbeddingProvider:
         model=settings.embedding_model,
         dimension=settings.embedding_dimension,
     )
-
-
-def _resolve_affect_model_dirs(args: argparse.Namespace, settings: Settings) -> tuple[str, str]:
-    """Resolve fold model directories from CLI args or environment-backed settings."""
-    fold1_model = str(args.fold1_model or settings.affect_fold1_model or "").strip()
-    fold2_model = str(args.fold2_model or settings.affect_fold2_model or "").strip()
-    if not fold1_model:
-        raise ValueError("--fold1-model or TAILWAG_AFFECT_FOLD1_MODEL is required")
-    if not fold2_model:
-        raise ValueError("--fold2-model or TAILWAG_AFFECT_FOLD2_MODEL is required")
-    for label, value in [("fold1", fold1_model), ("fold2", fold2_model)]:
-        path = Path(value)
-        if not path.exists() or not path.is_dir():
-            raise ValueError(f"{label} model directory does not exist: {value}")
-    return fold1_model, fold2_model
 
 
 def _write_or_print_report(rendered: str, output: str | None) -> None:
@@ -164,29 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     inspect_parser = subparsers.add_parser("inspect")
     inspect_subparsers = inspect_parser.add_subparsers(dest="inspect_command", required=True)
-    affect_parser = inspect_subparsers.add_parser("affect", help="export person-episode valence/arousal inspection data")
-    affect_parser.add_argument("--person-id", help="optional person filter")
-    affect_parser.add_argument("--limit", type=int, default=1000, help="maximum person-episode pairs to score")
-    affect_parser.add_argument("--format", choices=["html", "json"], default="html", help="export format")
-    affect_parser.add_argument("--output", help="output file path, or '-' for stdout")
-    affect_parser.add_argument("--fold1-model", help="external XLM-RoBERTa-large fold1 model directory")
-    affect_parser.add_argument("--fold2-model", help="external XLM-RoBERTa-large fold2 model directory")
-    person_timeline_parser = inspect_subparsers.add_parser(
-        "person-timeline",
-        help="export read-only person timeline inspection data",
-    )
-    person_timeline_parser.add_argument("--person-id", help="optional person filter")
-    person_timeline_parser.add_argument("--limit", type=int, default=100, help="maximum timeline items to export")
-    person_timeline_parser.add_argument("--format", choices=["html", "json"], default="html", help="export format")
-    person_timeline_parser.add_argument("--output", help="output file path, or '-' for stdout")
-    memory_items_parser = inspect_subparsers.add_parser(
-        "memory-items",
-        help="export read-only memory item inspection data",
-    )
-    memory_items_parser.add_argument("--person-id", help="optional person filter")
-    memory_items_parser.add_argument("--limit", type=int, default=1000, help="maximum memory items to export")
-    memory_items_parser.add_argument("--format", choices=["html", "json"], default="html", help="export format")
-    memory_items_parser.add_argument("--output", help="output file path, or '-' for stdout")
+    add_inspect_subcommands(inspect_subparsers)
 
     slack_parser = subparsers.add_parser("slack")
     slack_subparsers = slack_parser.add_subparsers(dest="slack_command", required=True)
@@ -261,12 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     settings = load_settings()
     if args.command == "slack" and args.slack_command == "poll" and not settings.slack_bot_token:
         parser.error("SLACK_BOT_TOKEN is required. Add it to .env or export it in your shell.")
-    affect_model_dirs: tuple[str, str] | None = None
-    if args.command == "inspect" and args.inspect_command == "affect":
-        try:
-            affect_model_dirs = _resolve_affect_model_dirs(args, settings)
-        except ValueError as exc:
-            parser.error(str(exc))
+    validate_inspect_args(args, settings, parser.error)
 
     runner = Neo4jQueryRunner(settings)
 
@@ -418,91 +362,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "inspect":
-            if args.inspect_command == "affect":
-                assert affect_model_dirs is not None
-                points = PersonEpisodeTranscriptService(runner).points(
-                    person_id=args.person_id,
-                    limit=args.limit,
-                )
-                try:
-                    provider = FoldEnsembleAffectProvider.from_model_dirs(*affect_model_dirs)
-                    scored_points = score_transcript_points(points, provider)
-                except AffectScoringConfigurationError as exc:
-                    parser.error(str(exc))
-                report = affect_report(
-                    scored_points,
-                    filters={
-                        "person_id": args.person_id,
-                        "limit": args.limit,
-                    },
-                    metadata={
-                        "utility": "inspect affect",
-                        "storage": "on_demand",
-                        "future_storage_hint": "person-to-episode or person-to-memory relationship properties",
-                        "fold1_model": affect_model_dirs[0],
-                        "fold2_model": affect_model_dirs[1],
-                    },
-                    warnings=[] if points else ["No person-specific transcript text matched the selected filters."],
-                )
-                if args.format == "json":
-                    rendered = report_json(report)
-                else:
-                    rendered = affect_report_html(report)
-                output = args.output
-                if output is None and args.format == "html":
-                    output = "inspect/tailwag-affect.html"
-                _write_or_print_report(rendered, None if output == "-" else output)
-                return 0
-            if args.inspect_command == "person-timeline":
-                items = PersonTimelineRetrievalService(runner).items(
-                    person_id=args.person_id,
-                    limit=args.limit,
-                )
-                report = person_timeline_report(
-                    items,
-                    filters={
-                        "person_id": args.person_id,
-                        "limit": args.limit,
-                    },
-                    metadata={
-                        "utility": "inspect person-timeline",
-                        "storage": "read_only",
-                        "canonical_reports": {
-                            "person_timeline": "tailwag-person-timeline.html",
-                            "affect": "tailwag-affect.html",
-                            "memory_items": "tailwag-memory-items.html",
-                        },
-                    },
-                    warnings=[] if items else ["No person timeline items matched the selected filters."],
-                )
-                if args.format == "json":
-                    rendered = report_json(report)
-                else:
-                    rendered = person_timeline_report_html(report)
-                output = args.output
-                if output is None and args.format == "html":
-                    output = "inspect/tailwag-person-timeline.html"
-                _write_or_print_report(rendered, None if output == "-" else output)
-                return 0
-            if args.inspect_command == "memory-items":
-                items = MemoryItemInspectService(runner).items(
-                    person_id=args.person_id,
-                    limit=args.limit,
-                )
-                report = memory_items_report(
-                    items,
-                    person_id=args.person_id,
-                    limit=args.limit,
-                )
-                if args.format == "json":
-                    rendered = report_json(report)
-                else:
-                    rendered = memory_items_report_html(report)
-                output = args.output
-                if output is None and args.format == "html":
-                    output = "inspect/tailwag-memory-items.html"
-                _write_or_print_report(rendered, None if output == "-" else output)
-                return 0
+            return run_inspect_command(
+                args,
+                runner=runner,
+                writer=_write_or_print_report,
+                parser_error=parser.error,
+            )
 
         if args.command == "slack":
             memory_client = TailwagMemoryClient(runner, settings)

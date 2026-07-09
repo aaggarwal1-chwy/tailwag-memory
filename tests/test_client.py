@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import unittest
 from unittest.mock import patch
 
+from tests.helpers import RecordingQueryRunner, test_episode, test_settings
 from tailwag_memory.client import TailwagMemoryClient
 from tailwag_memory.config import Settings
 from tailwag_memory.episode_normalization import normalize_robot_speaker_labels
@@ -18,40 +19,17 @@ from tailwag_memory.models import (
 )
 
 
-class FakeRunner:
-    def __init__(self) -> None:
-        self.closed = False
-
-    def close(self) -> None:
-        self.closed = True
-
-
 def _settings() -> Settings:
-    return Settings(
-        neo4j_uri="bolt://example.test:7687",
-        neo4j_user="neo4j",
-        neo4j_password="password",
-        embedding_dimension=8,
-        openai_api_key="test-key",
-    )
+    return test_settings()
 
 
 def _episode() -> EpisodeInput:
-    return EpisodeInput(
-        id="episode_1",
-        episode_type="conversation",
-        start_time="2026-06-18T10:00:00+00:00",
-        end_time=None,
-        transcript="Jamie: I like robot demos.",
-        retention_class="standard",
-        place=PlaceInput(building_code="MAIN", room_id="101"),
-        participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
-    )
+    return test_episode()
 
 
 class TailwagMemoryClientTest(unittest.TestCase):
     def test_upsert_person_delegates_without_initializing_embeddings(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
         calls = []
         person = PersonInput(
             id="person_jamie",
@@ -77,7 +55,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(calls, [("upsert", runner, person)])
 
     def test_archive_person_delegates_without_initializing_embeddings(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
         calls = []
 
         class FakePersonIngestion:
@@ -97,7 +75,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(calls, [("archive", runner, "person_jamie")])
 
     def test_rekey_person_by_email_delegates_without_initializing_embeddings(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
         calls = []
 
         class FakePersonIngestion:
@@ -117,7 +95,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(calls, [("rekey", runner, "jamie@example.com", "person_argos_jamie")])
 
     def test_canonical_person_id_by_email_delegates_without_initializing_embeddings(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
         calls = []
 
         class FakePersonIngestion:
@@ -137,7 +115,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(calls, [("canonical", runner, "jamie@example.com")])
 
     def test_record_episode_ingests_and_extracts_memory_by_default(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
         calls = []
 
         class FakeIngestion:
@@ -182,7 +160,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(result.memory_errors, [])
 
     def test_record_episode_normalizes_robot_user_label_for_single_speaker(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
         calls = []
         episode = EpisodeInput(
             id="episode_1",
@@ -221,84 +199,51 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertIs(extracted, ingested)
         self.assertEqual(calls[1][2], False)
 
-    def test_robot_user_label_uses_person_id_when_display_name_is_missing(self) -> None:
-        episode = EpisodeInput(
-            id="episode_1",
-            episode_type="conversation",
-            start_time="2026-06-18T10:00:00+00:00",
-            end_time=None,
-            transcript="User: I like robot demos.",
-            retention_class="standard",
-            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
-            participants=[PersonInput(id="person_jamie", role="speaker")],
-        )
+    def test_robot_user_label_normalization_variants(self) -> None:
+        cases = [
+            (
+                [PersonInput(id="person_jamie", role="speaker")],
+                "User: I like robot demos.",
+                "person_jamie: I like robot demos.",
+            ),
+            (
+                [PersonInput(id="person_jamie", display_name="Jamie")],
+                "User: I like robot demos.",
+                "Jamie: I like robot demos.",
+            ),
+            (
+                [PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
+                "The word User: appears here.\n  User: This line is labeled.",
+                "The word User: appears here.\n  Jamie: This line is labeled.",
+            ),
+        ]
+        for participants, transcript, expected in cases:
+            with self.subTest(expected=expected):
+                episode = test_episode(
+                    transcript=transcript,
+                    building_code="ARGOS",
+                    room_id="realtime",
+                    participants=participants,
+                )
+                self.assertEqual(normalize_robot_speaker_labels(episode).transcript, expected)
 
-        normalized = normalize_robot_speaker_labels(episode)
-
-        self.assertEqual(normalized.transcript, "person_jamie: I like robot demos.")
-
-    def test_robot_user_label_without_speaker_role_uses_single_participant(self) -> None:
-        episode = EpisodeInput(
-            id="episode_1",
-            episode_type="conversation",
-            start_time="2026-06-18T10:00:00+00:00",
-            end_time=None,
-            transcript="User: I like robot demos.",
-            retention_class="standard",
-            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
-            participants=[PersonInput(id="person_jamie", display_name="Jamie")],
-        )
-
-        normalized = normalize_robot_speaker_labels(episode)
-
-        self.assertEqual(normalized.transcript, "Jamie: I like robot demos.")
-
-    def test_robot_user_label_is_not_changed_for_ambiguous_or_unlinked_episodes(self) -> None:
-        base = EpisodeInput(
-            id="episode_1",
-            episode_type="conversation",
-            start_time="2026-06-18T10:00:00+00:00",
-            end_time=None,
-            transcript="User: I like robot demos.\nAssistant: Got it.",
-            retention_class="standard",
-            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
-            participants=[],
-        )
-        multi_speaker = EpisodeInput(
-            id=base.id,
-            episode_type=base.episode_type,
-            start_time=base.start_time,
-            end_time=base.end_time,
-            transcript=base.transcript,
-            retention_class=base.retention_class,
-            place=base.place,
-            participants=[
+        for participants in [
+            [],
+            [
                 PersonInput(id="person_jamie", display_name="Jamie", role="speaker"),
                 PersonInput(id="person_casey", display_name="Casey", role="speaker"),
             ],
-        )
-
-        self.assertIs(normalize_robot_speaker_labels(base), base)
-        self.assertIs(normalize_robot_speaker_labels(multi_speaker), multi_speaker)
-
-    def test_robot_user_label_replacement_only_matches_line_leading_labels(self) -> None:
-        episode = EpisodeInput(
-            id="episode_1",
-            episode_type="conversation",
-            start_time="2026-06-18T10:00:00+00:00",
-            end_time=None,
-            transcript="The word User: appears here.\n  User: This line is labeled.",
-            retention_class="standard",
-            place=PlaceInput(building_code="ARGOS", room_id="realtime"),
-            participants=[PersonInput(id="person_jamie", display_name="Jamie", role="speaker")],
-        )
-
-        normalized = normalize_robot_speaker_labels(episode)
-
-        self.assertEqual(normalized.transcript, "The word User: appears here.\n  Jamie: This line is labeled.")
+        ]:
+            episode = test_episode(
+                transcript="User: I like robot demos.\nAssistant: Got it.",
+                building_code="ARGOS",
+                room_id="realtime",
+                participants=participants,
+            )
+            self.assertIs(normalize_robot_speaker_labels(episode), episode)
 
     def test_record_episode_can_skip_memory_extraction(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
         calls = []
 
         class FakeIngestion:
@@ -317,7 +262,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(result.memory_errors, [])
 
     def test_extract_memory_for_episode_uses_stored_episode_path(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
         calls = []
 
         class FakeExtraction:
@@ -373,7 +318,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         now = datetime(2026, 6, 18, tzinfo=timezone.utc)
         with patch("tailwag_memory.client.PersonMemoryContextService", FakeMemoryContext):
             with patch("tailwag_memory.client.PersonContextRetrievalService", FakeRetrieval):
-                context = TailwagMemoryClient(FakeRunner(), _settings()).person_context(
+                context = TailwagMemoryClient(RecordingQueryRunner(), _settings()).person_context(
                     "person_jamie",
                     limit=3,
                     semantic_scope="chargers",
@@ -391,7 +336,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(retrieval_calls, [("person_jamie", 3, "chargers")])
 
     def test_search_semantic_memory_returns_episode_and_memory_item_results(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
         calls = []
         now = datetime(2026, 6, 18, tzinfo=timezone.utc)
 
@@ -510,7 +455,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         )
 
     def test_search_semantic_memory_skips_empty_requests_without_embeddings(self) -> None:
-        client = TailwagMemoryClient(FakeRunner(), _settings())
+        client = TailwagMemoryClient(RecordingQueryRunner(), _settings())
 
         empty_result = {"episodes": [], "memory_items": []}
         with patch.object(client, "_embeddings", side_effect=AssertionError("embeddings should not be initialized")):
@@ -535,7 +480,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 )
 
         with patch("tailwag_memory.client.MemoryConsolidationService", FakeConsolidationService):
-            client = TailwagMemoryClient(FakeRunner(), _settings())
+            client = TailwagMemoryClient(RecordingQueryRunner(), _settings())
             single = client.consolidate_memory(person_id="person_jamie", min_evidence_episodes=4)
             all_people = client.consolidate_memory(all_people=True, person_limit=7, min_evidence_episodes=5)
 
@@ -548,10 +493,10 @@ class TailwagMemoryClientTest(unittest.TestCase):
 
     def test_consolidate_memory_requires_person_or_all_people(self) -> None:
         with self.assertRaisesRegex(ValueError, "person_id"):
-            TailwagMemoryClient(FakeRunner(), _settings()).consolidate_memory()
+            TailwagMemoryClient(RecordingQueryRunner(), _settings()).consolidate_memory()
 
     def test_context_manager_closes_runner(self) -> None:
-        runner = FakeRunner()
+        runner = RecordingQueryRunner()
 
         with TailwagMemoryClient(runner, _settings()):
             pass

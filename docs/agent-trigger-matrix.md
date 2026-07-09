@@ -26,7 +26,7 @@ Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS
 | Privacy/Biometric Review Agent | Consent, biometric vectors, retention language, and raw media boundaries | privacy review notes, consent/biometric docs, guardrail tests |
 | Scope Guard Agent | Scope boundary checks and deferred concept protection | scope review notes, deferred-concept checks, scope documentation updates |
 | Release Quality Gate Agent | Final pre-merge or pre-release verification | quality checklist, verification summary, release readiness notes |
-| Test Agent | Test coverage and verification workflow | pytest suite, fixtures, test helpers |
+| Test Agent | Test coverage and verification workflow | unittest suite, fixtures, test helpers |
 | Code Refactor Agent | Code structure, module boundaries, duplication control | refactor PRs/patches, module splits, cleanup notes |
 | Documentation Agent | User-facing and contributor-facing docs | README updates, architecture notes, examples |
 

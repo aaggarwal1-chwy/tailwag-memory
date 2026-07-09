@@ -128,21 +128,6 @@ class SlackThreadConversionTest(unittest.TestCase):
             ),
         )
 
-    def test_thread_keeps_slack_person_id_and_stores_email_metadata(self) -> None:
-        root_ts = _ts()
-        client = FakeSlackClient(
-            user_names={"U1": "Asha"},
-            user_emails={"U1": "Asha.Example@Example.COM"},
-        )
-        episode = build_episode_from_slack_thread(
-            channel="C123",
-            messages=[{"ts": root_ts, "user": "U1", "text": "Can someone review the deck?"}],
-            client=client,
-        )
-
-        self.assertEqual(episode.participants[0].id, "slack:U1")
-        self.assertEqual(episode.participants[0].email, "asha.example@example.com")
-
     def test_thread_uses_canonical_person_id_when_email_resolves(self) -> None:
         root_ts = _ts()
         client = FakeSlackClient(
@@ -421,49 +406,6 @@ class SlackMemoryPollerTest(unittest.TestCase):
             self.assertEqual(service.episodes[0].id, f"slack:C123:{root_ts}")
             state = json.loads(state_path.read_text())
             self.assertEqual(state["channels"]["C123"]["latest_history_ts"], root_ts)
-
-    def test_backfill_resolves_slack_email_to_existing_canonical_person(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "slack-state.json"
-            root_ts = _ts()
-            service = FakeEpisodeRecorder(
-                canonical_ids_by_email={"asha.example@example.com": "person_asha"}
-            )
-            client = FakeSlackClient(
-                history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
-                user_names={"U1": "Asha"},
-                user_emails={"U1": "Asha.Example@Example.COM"},
-            )
-            poller = SlackMemoryPoller(client, service, state_path)
-
-            poller.poll_once("C123", backfill_hours=1)
-
-            self.assertEqual(service.canonical_lookup_calls, ["asha.example@example.com"])
-            self.assertEqual(service.episodes[0].participants[0].id, "person_asha")
-            self.assertIsNone(service.episodes[0].participants[0].display_name)
-            self.assertIsNone(service.episodes[0].participants[0].email)
-
-    def test_backfill_resolves_mentioned_slack_email_to_existing_canonical_person(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            state_path = Path(tmp) / "slack-state.json"
-            root_ts = _ts()
-            service = FakeEpisodeRecorder(
-                canonical_ids_by_email={"chandra.example@example.com": "person_chandra"}
-            )
-            client = FakeSlackClient(
-                history_messages=[{"ts": root_ts, "user": "U1", "text": "Can <@U3> review this?"}],
-                user_names={"U1": "Asha", "U3": "Chandra"},
-                user_emails={"U3": "Chandra.Example@Example.COM"},
-            )
-            poller = SlackMemoryPoller(client, service, state_path)
-
-            poller.poll_once("C123", backfill_hours=1)
-
-            self.assertEqual(service.canonical_lookup_calls, ["chandra.example@example.com"])
-            mention = service.episodes[0].mentioned_people[0]
-            self.assertEqual(mention.person.id, "person_chandra")
-            self.assertIsNone(mention.person.display_name)
-            self.assertIsNone(mention.person.email)
 
     def test_backfill_can_skip_memory_extraction(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

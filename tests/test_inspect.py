@@ -7,6 +7,9 @@ import tailwag_memory.inspect as inspect_tools
 from tailwag_memory.inspect import (
     AffectScore,
     FoldEnsembleAffectProvider,
+    FollowupValidityInspectService,
+    followup_validity_report,
+    followup_validity_report_html,
     InspectRelatedMemoryItem,
     MemoryItemInspectService,
     PersonEpisodeAffectPoint,
@@ -21,18 +24,35 @@ from tailwag_memory.inspect import (
     person_timeline_report_html,
     recent_person_episode_rows,
 )
+from tailwag_memory.inspect.html_utils import INSPECT_CSS_FILENAME, INSPECT_JS_FILENAME, inspect_asset_text
 from tailwag_memory.models import PersonTimelineItem, PersonTimelineTranscriptSnippet
 
 
 def _assert_canonical_nav(testcase: unittest.TestCase, html: str, current_href: str | None = None) -> None:
     """Assert inspect reports render the canonical nav order."""
+    followup_index = html.index('href="tailwag-followup-validity.html"')
     affect_index = html.index('href="tailwag-affect.html"')
     timeline_index = html.index('href="tailwag-person-timeline.html"')
     memory_index = html.index('href="tailwag-memory-items.html"')
+    testcase.assertLess(followup_index, affect_index)
     testcase.assertLess(affect_index, timeline_index)
     testcase.assertLess(timeline_index, memory_index)
     if current_href is not None:
         testcase.assertIn(f'href="{current_href}" aria-current="page"', html)
+
+
+def _assert_css_rule_contains(
+    testcase: unittest.TestCase,
+    html: str,
+    selector: str,
+    declarations: list[str],
+) -> None:
+    """Assert the first rendered CSS rule for a selector includes declarations."""
+    rule_start = html.index(f"{selector} {{")
+    rule_end = html.index("}", rule_start)
+    rule = html[rule_start:rule_end]
+    for declaration in declarations:
+        testcase.assertIn(declaration, rule)
 
 
 class InspectPackageImportTest(unittest.TestCase):
@@ -42,10 +62,13 @@ class InspectPackageImportTest(unittest.TestCase):
             "AffectScoringConfigurationError",
             "AffectScoringProvider",
             "FoldEnsembleAffectProvider",
+            "FollowupValidityInspectService",
             "HuggingFaceXLMRobertaLargeAffectProvider",
+            "InspectFollowupValidityItem",
             "InspectMemoryAddressedEpisode",
             "InspectMemoryItem",
             "InspectRelatedMemoryItem",
+            "InspectSankeyLink",
             "InspectReport",
             "InspectTranscriptLine",
             "MemoryItemInspectService",
@@ -55,6 +78,8 @@ class InspectPackageImportTest(unittest.TestCase):
             "PersonTimelineRetrievalService",
             "affect_report",
             "affect_report_html",
+            "followup_validity_report",
+            "followup_validity_report_html",
             "memory_items_report",
             "memory_items_report_html",
             "person_timeline_report",
@@ -67,6 +92,7 @@ class InspectPackageImportTest(unittest.TestCase):
         self.assertEqual(set(inspect_tools.__all__), expected_exports)
         self.assertIs(inspect_tools.AffectScore, AffectScore)
         self.assertIs(inspect_tools.FoldEnsembleAffectProvider, FoldEnsembleAffectProvider)
+        self.assertIs(inspect_tools.FollowupValidityInspectService, FollowupValidityInspectService)
         self.assertIs(inspect_tools.PersonEpisodeTranscriptService, PersonEpisodeTranscriptService)
         self.assertIs(inspect_tools.MemoryItemInspectService, MemoryItemInspectService)
         self.assertIs(inspect_tools.person_timeline_report, person_timeline_report)
@@ -128,10 +154,111 @@ class InspectNavigationTest(unittest.TestCase):
 
         html = affect_report_html(report)
 
-        self.assertIn("function relatedMemoryHtml(transcript)", html)
         self.assertIn("Related memory items", html)
-        self.assertIn("transcript.related_memory_items", html)
+        self.assertIn("tailwag-person-timeline.html", html)
+        self.assertIn("tailwag-memory-items.html", html)
         self.assertIn("\\u003cJamie likes concise demos>", html)
+
+
+class FollowupValidityInspectServiceTest(unittest.TestCase):
+    def test_items_fetches_followups_and_groups_by_validity_duration(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "memory_id": "mem_expired",
+                        "person_id": "person_jamie",
+                        "display_name": "Jamie",
+                        "summary": "Ask Jamie about the launch.",
+                        "status": "active",
+                        "observed_at": "2026-07-01T10:00:00+00:00",
+                        "created_at": "",
+                        "updated_at": "",
+                        "due_at": "2026-07-01T10:00:00+00:00",
+                        "expires_at": "2026-07-02T10:00:00+00:00",
+                        "addressed_count": 0,
+                        "superseded_count": 0,
+                    },
+                    {
+                        "memory_id": "mem_visible",
+                        "person_id": "person_casey",
+                        "display_name": "Casey",
+                        "summary": "Ask Casey about the demo.",
+                        "status": "active",
+                        "observed_at": "2026-07-01T10:00:00+00:00",
+                        "created_at": "",
+                        "updated_at": "",
+                        "due_at": "2026-07-08T10:00:00+00:00",
+                        "expires_at": "2026-07-15T10:00:00+00:00",
+                        "addressed_count": 0,
+                        "superseded_count": 0,
+                    },
+                    {
+                        "memory_id": "mem_future",
+                        "person_id": "person_lee",
+                        "display_name": "Lee",
+                        "summary": "Ask Lee next month.",
+                        "status": "active",
+                        "observed_at": "2026-07-01T10:00:00+00:00",
+                        "created_at": "",
+                        "updated_at": "",
+                        "due_at": "2026-08-01T10:00:00+00:00",
+                        "expires_at": "2026-08-20T10:00:00+00:00",
+                        "addressed_count": 0,
+                        "superseded_count": 0,
+                    },
+                ]
+            ]
+        )
+
+        items = FollowupValidityInspectService(runner).items(
+            limit=10,
+            now=datetime(2026, 7, 8, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(runner.queries[0].parameters, {"limit": 10})
+        self.assertIn("WHERE memory.kind = 'followup'", runner.queries[0].query)
+        self.assertIn("ADDRESSED_BY", runner.queries[0].query)
+        self.assertIn("SUPERSEDED_BY", runner.queries[0].query)
+        upper_query = runner.queries[0].query.upper()
+        for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
+            self.assertNotIn(write_keyword, upper_query)
+        self.assertEqual([item.followup_state for item in items], ["expired_active", "visible_now", "not_yet_due"])
+        self.assertEqual([item.validity_bucket for item in items], ["1_to_3_days", "4_to_7_days", "15_to_30_days"])
+
+    def test_followup_validity_report_html_groups_all_followup_states_together(self) -> None:
+        items = FollowupValidityInspectService(
+            RecordingQueryRunner(results=[
+                [
+                    {
+                        "memory_id": "mem_visible",
+                        "person_id": "person_jamie",
+                        "display_name": "<Jamie>",
+                        "summary": "<script>alert(1)</script>",
+                        "status": "active",
+                        "observed_at": "2026-07-01T10:00:00+00:00",
+                        "due_at": "2026-07-08T10:00:00+00:00",
+                        "expires_at": "2026-07-15T10:00:00+00:00",
+                        "addressed_count": 0,
+                        "superseded_count": 0,
+                    }
+                ]
+            ])
+        ).items(now=datetime(2026, 7, 8, 12, 0, tzinfo=timezone.utc))
+
+        report = followup_validity_report(items, limit=10, generated_at="2026-07-08T12:00:00+00:00")
+        html = followup_validity_report_html(report)
+
+        self.assertEqual(report.title, "Follow-Up Validity")
+        self.assertEqual(report.metadata["distributions"]["validity_bucket"], {"4_to_7_days": 1})
+        self.assertEqual(report.metadata["distributions"]["followup_state"], {"visible_now": 1})
+        _assert_canonical_nav(self, html, "tailwag-followup-validity.html")
+        self.assertIn("Follow-Up Validity", html)
+        self.assertIn("validity_bucket", html)
+        self.assertIn("visible_now", html)
+        self.assertIn("tailwag-memory-items.html", html)
+        self.assertIn("tailwag-person-timeline.html", html)
+        self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
 
 
 class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
@@ -352,6 +479,29 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
 
         self.assertEqual([item.followup_state for item in items], ["invalid", "invalid", "invalid"])
 
+    def test_episode_conversion_fetches_read_only_episode_memory_counts(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "episode_count": 8,
+                        "memory_episode_count": 3,
+                        "memory_count": 5,
+                    }
+                ]
+            ]
+        )
+
+        conversion = MemoryItemInspectService(runner).episode_conversion()
+
+        self.assertEqual(conversion, {"episode_count": 8, "memory_episode_count": 3, "memory_count": 5})
+        self.assertEqual(runner.queries[0].parameters, {})
+        self.assertIn("MATCH (episode:Episode)", runner.queries[0].query)
+        self.assertIn("SUPPORTED_BY", runner.queries[0].query)
+        upper_query = runner.queries[0].query.upper()
+        for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
+            self.assertNotIn(write_keyword, upper_query)
+
     def test_memory_items_report_includes_distributions_and_html_hash_support(self) -> None:
         runner = RecordingQueryRunner(
             results=[
@@ -411,38 +561,40 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
             now=datetime(2026, 7, 7, tzinfo=timezone.utc),
         )
 
-        report = memory_items_report(items, person_id=None, limit=10, generated_at="2026-07-07T12:00:00+00:00")
+        report = memory_items_report(
+            items,
+            person_id=None,
+            limit=10,
+            episode_conversion={"episode_count": 4, "memory_episode_count": 2, "memory_count": 3},
+            generated_at="2026-07-07T12:00:00+00:00",
+        )
         html = memory_items_report_html(report)
 
-        self.assertEqual(report.title, "Tailwag Memory Items")
+        self.assertEqual(report.title, "Memory Items")
         self.assertEqual(report.metadata["storage"], "read_only")
         self.assertEqual(report.metadata["distributions"]["kind"], {"preference": 1, "followup": 1, "fact": 1})
         self.assertEqual(report.metadata["distributions"]["person"], {"person_jamie": 3})
         self.assertEqual(report.metadata["distributions"]["status"], {"active": 2, "superseded": 1})
         self.assertEqual(report.metadata["distributions"]["followup_state"]["visible_now"], 1)
+        self.assertEqual(report.metadata["episode_counts"]["All Episodes"], 4)
+        self.assertEqual(report.metadata["episode_counts"]["Episodes With Memories"], 2)
+        self.assertEqual(report.metadata["episode_counts"]["Episodes Without Memories"], 2)
+        self.assertEqual(report.metadata["terminal_counts"]["Superseded"], 1)
         _assert_canonical_nav(self, html, "tailwag-memory-items.html")
+        self.assertIn("Memory Overview", html)
+        self.assertIn("height: 440px", html)
+        self.assertIn("margin: -70px 0", html)
+        self.assertIn('viewBox="0 0 1120 440"', html)
+        self.assertIn('"source": "All Episodes"', html)
+        self.assertIn('"source": "Created"', html)
         self.assertIn("Follow-Up State", html)
-        self.assertNotIn("['followup_state', 'Follow-Up']", html)
-        self.assertIn("const followupStates = ['visible_now', 'not_yet_due', 'expired_active', 'addressed', 'invalid'];", html)
-        self.assertIn("function displayStatus(record)", html)
-        self.assertIn("return 'superseded'", html)
-        self.assertIn('data-followup-state="${escapeAttr(state)}"', html)
-        self.assertIn("function hashFilters()", html)
-        self.assertIn("function applyFilters(values, filters, omitted = new Set())", html)
-        self.assertIn("data-filter-key", html)
-        self.assertIn("data-filter-value", html)
-        self.assertIn("function filterPill(value, className, key, filterValue)", html)
-        self.assertIn("params.set('kind'", html)
-        self.assertIn("params.set('status'", html)
-        self.assertIn("params.set('source'", html)
         self.assertIn("followup_state", html)
-        self.assertIn("function personDistributionRows(values, activePerson)", html)
         self.assertIn("\\u003cJamie>", html)
         self.assertIn("tailwag-memory-items.html", html)
         self.assertIn("tailwag-person-timeline.html", html)
         self.assertIn("tailwag-affect.html", html)
-        self.assertIn("window.addEventListener('hashchange', render)", html)
-        self.assertIn("params.set('person'", html)
+        self.assertIn("evidenceHtml(record, supported, addressed, supersededBy, supersedes)", html)
+        self.assertIn("timelineHref({ person: personId || '', item: itemId || '' })", html)
         self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
 
 
@@ -468,6 +620,7 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
                         "role": "speaker",
                         "source": "caller",
                         "memory_item_count": 2,
+                        "memory_item_ids": ["mem_episode"],
                     }
                 ],
                 [
@@ -502,6 +655,7 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(episode.text, "I shipped the patch.")
         self.assertTrue(episode.has_memory_items)
         self.assertEqual(episode.memory_item_count, 2)
+        self.assertEqual(episode.memory_item_ids, ["mem_episode"])
         self.assertEqual(
             [(line.timestamp, line.speaker, line.text) for line in episode.transcript_snippets],
             [("", "Jamie", "I shipped the patch.")],
@@ -516,6 +670,7 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
         self.assertIn("MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)", runner.queries[0].query)
         self.assertIn("WHERE ($person_id IS NULL OR person.id = $person_id)", runner.queries[0].query)
         self.assertIn("count(DISTINCT memory) AS memory_item_count", runner.queries[0].query)
+        self.assertIn("memory_item_ids AS memory_item_ids", runner.queries[0].query)
         self.assertIn("type(r) = 'ATTENDED'", runner.queries[1].query)
         self.assertIn("0 AS memory_item_count", runner.queries[1].query)
         for query in runner.queries:
@@ -536,7 +691,7 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
 
 
 class PersonTimelineReportTest(unittest.TestCase):
-    def test_person_timeline_report_html_has_nav_and_hash_person_filter(self) -> None:
+    def test_person_timeline_report_html_embeds_nav_memory_flags_and_escaped_text(self) -> None:
         report = person_timeline_report(
             [
                 PersonTimelineItem(
@@ -564,32 +719,27 @@ class PersonTimelineReportTest(unittest.TestCase):
 
         html = person_timeline_report_html(report)
 
-        self.assertIn("Tailwag Person Timeline", html)
+        self.assertIn("Person Timeline", html)
         _assert_canonical_nav(self, html, "tailwag-person-timeline.html")
         self.assertIn("tailwag-person-timeline.html", html)
         self.assertIn("tailwag-affect.html", html)
         self.assertIn("tailwag-memory-items.html", html)
-        self.assertIn("new URLSearchParams(location.hash.slice(1))", html)
-        self.assertIn("function selectedPeopleFromHash()", html)
-        self.assertIn("params.getAll('person')", html)
-        self.assertIn("function togglePerson(personId)", html)
-        self.assertIn("params.append('person', personId)", html)
-        self.assertIn("function activePeopleLabel(personIds, visible)", html)
-        self.assertIn("overflow: visible", html)
-        self.assertIn("aria-pressed", html)
-        self.assertIn("function renderLanes(visible)", html)
-        self.assertIn("class=\"person-lane\"", html)
-        self.assertIn("class=\"timeline-lane\"", html)
-        self.assertIn(".timeline-marker.active", html)
-        self.assertIn("function bringMarkerToFront(marker)", html)
-        self.assertIn('onclick="bringMarkerToFront(this)"', html)
-        self.assertIn('tabindex="0"', html)
-        self.assertIn("style=\"left:${left}%; top:16px\"", html)
-        self.assertNotIn("index % 4", html)
-        self.assertNotIn("const laneHeight", html)
-        self.assertIn("class=\"memory-marker", html)
-        self.assertIn("function hasLinkedMemory(record)", html)
         self.assertIn("Linked memories", html)
+        self.assertIn("min-height: 220px", html)
+        self.assertIn("const markerLayout = layoutMarkers(sorted, domain);", html)
+        self.assertIn("64 + markerLayout.rowCount * 168", html)
+        self.assertIn("top:${top}px", html)
+        self.assertIn("is not in this exported timeline", html)
+        self.assertIn("recordMatchesItem(record, selectedItem) ? 'active' : ''", html)
+        _assert_css_rule_contains(self, html, "body", ["height: 100vh", "overflow: hidden"])
+        _assert_css_rule_contains(self, html, "main", ["overflow: hidden"])
+        _assert_css_rule_contains(
+            self,
+            html,
+            "aside",
+            ["position: sticky", "top: 0", "align-self: start"],
+        )
+        _assert_css_rule_contains(self, html, ".timeline", ["min-height: 0", "overflow: auto"])
         self.assertIn('"person_id": "person_jamie"', html)
         self.assertIn('"has_memory_items": true', html)
         self.assertIn('"memory_item_count": 2', html)
@@ -602,18 +752,36 @@ class InspectPlaceholderFilesTest(unittest.TestCase):
         inspect_dir = root / "inspect"
         expected = [
             "index.html",
+            "tailwag-followup-validity.html",
             "tailwag-affect.html",
             "tailwag-person-timeline.html",
             "tailwag-memory-items.html",
         ]
+        command_hints = {
+            "index.html": [
+                "tailwag inspect followup-validity",
+                "tailwag inspect affect",
+                "tailwag inspect person-timeline",
+                "tailwag inspect memory-items",
+            ],
+            "tailwag-followup-validity.html": ["tailwag inspect followup-validity"],
+            "tailwag-affect.html": ["tailwag inspect affect"],
+            "tailwag-person-timeline.html": ["tailwag inspect person-timeline"],
+            "tailwag-memory-items.html": ["tailwag inspect memory-items"],
+        }
+        self.assertIn("color-scheme: light", inspect_asset_text(INSPECT_CSS_FILENAME))
+        self.assertIn("window.inspectFilters", inspect_asset_text(INSPECT_JS_FILENAME))
 
         for filename in expected:
             html = (inspect_dir / filename).read_text()
             current = None if filename == "index.html" else filename
             _assert_canonical_nav(self, html, current)
-            self.assertIn("position: sticky", html)
+            self.assertIn('href="../src/tailwag_memory/inspect/assets/tailwag-inspect.css"', html)
+            for command in command_hints[filename]:
+                self.assertIn(command, html)
             if filename != "index.html":
-                self.assertIn("No Generated Data Yet", html)
+                self.assertIn('src="../src/tailwag_memory/inspect/assets/tailwag-inspect.js"', html)
+                self.assertIn('id="report-data"', html)
 
 
 if __name__ == "__main__":

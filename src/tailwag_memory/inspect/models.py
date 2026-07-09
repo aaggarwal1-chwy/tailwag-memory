@@ -5,6 +5,31 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class InspectSankeyLink:
+    """One weighted flow link in a read-only Sankey inspection report."""
+
+    source: str
+    target: str
+    count: int
+
+
+@dataclass(frozen=True)
+class InspectFollowupValidityItem:
+    """Follow-up memory item grouped by validity-window duration."""
+
+    memory_id: str
+    person_id: str
+    display_name: str | None
+    summary: str
+    status: str
+    followup_state: str
+    due_at: str = ""
+    expires_at: str = ""
+    validity_seconds: int | None = None
+    validity_bucket: str = "invalid"
+
+
+@dataclass(frozen=True)
 class InspectTranscriptLine:
     """Transcript line included in an inspection point."""
 

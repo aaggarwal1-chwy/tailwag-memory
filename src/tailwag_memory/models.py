@@ -429,6 +429,7 @@ class PersonTimelineItem:
     source: str | None = None
     has_memory_items: bool = False
     memory_item_count: int = 0
+    memory_item_ids: list[str] = field(default_factory=list)
     transcript_snippets: list[PersonTimelineTranscriptSnippet] = field(default_factory=list)
 
 
