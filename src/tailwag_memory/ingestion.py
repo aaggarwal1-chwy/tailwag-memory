@@ -106,7 +106,7 @@ def _person_upsert_cypher(
                 MERGE (p:Person {{id: {person_variable}.{id_property}}})
                 SET p.display_name = coalesce({person_variable}.display_name, p.display_name),
                     p.official_name = coalesce({person_variable}.official_name, p.official_name),
-                    p.name = coalesce({person_variable}.display_name, {person_variable}.official_name, p.name),
+                    p.name = coalesce(p.name, {person_variable}.id),
                     p.email = coalesce({person_variable}.email, p.email),
                     p.consent_status = coalesce({person_variable}.consent_status, p.consent_status),
                     p.created_at = coalesce(p.created_at, $created_at),

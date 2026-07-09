@@ -88,6 +88,7 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         query = runner.queries[-1]
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
         self.assertIn("p.official_name", query.query)
+        self.assertIn("p.name = p.id", query.query)
         self.assertEqual(query.parameters["directory_username"], "jamie")
         self.assertEqual(query.parameters["directory_site_code"], "BOS3")
 

@@ -251,6 +251,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", query.query)
         self.assertIn("e.updated_at = $updated_at", query.query)
         self.assertIn("p.display_name = coalesce(person.display_name, p.display_name)", query.query)
+        self.assertIn("p.name = coalesce(p.name, person.id)", query.query)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", query.query)
         self.assertNotIn("face_embedding", query.query)
         self.assertNotIn("audio_embedding", query.query)

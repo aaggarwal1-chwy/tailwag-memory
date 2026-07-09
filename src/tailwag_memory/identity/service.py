@@ -195,7 +195,7 @@ class DirectoryIdentityService:
             FOREACH (_ IN CASE WHEN p IS NULL THEN [] ELSE [1] END |
               SET p.official_name = CASE WHEN record.official_name <> '' THEN record.official_name ELSE p.official_name END,
                   p.display_name = CASE WHEN record.official_name <> '' THEN record.official_name ELSE p.display_name END,
-                  p.name = CASE WHEN record.official_name <> '' THEN record.official_name ELSE p.name END,
+                  p.name = p.id,
                   p.email = CASE WHEN record.employee_email <> '' THEN record.employee_email ELSE p.email END
               MERGE (p)-[:HAS_DIRECTORY_RECORD]->(d)
             )
@@ -407,7 +407,7 @@ class DirectoryIdentityService:
             MERGE (p:Person {id: $person_id})
             SET p.display_name = coalesce($display_name, p.display_name, $person_id),
                 p.official_name = coalesce($official_name, p.official_name),
-                p.name = coalesce($display_name, $official_name, p.name, $person_id),
+                p.name = coalesce(p.name, $person_id),
                 p.email = coalesce($email, p.email),
                 p.consent_status = coalesce($consent_status, p.consent_status),
                 p.status = coalesce(p.status, 'active'),

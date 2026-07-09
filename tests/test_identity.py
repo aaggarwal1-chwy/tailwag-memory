@@ -27,6 +27,7 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         self.assertIn("EmployeeDirectoryRecord", query.query)
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
         self.assertIn("p.official_name", query.query)
+        self.assertIn("p.name = p.id", query.query)
         self.assertIn("d.name = record.official_name", query.query)
         self.assertEqual(query.parameters["records"][0]["normalized_name"], "jamie example")
         self.assertEqual(query.parameters["records"][0]["site_code"], "BOS3")
@@ -75,6 +76,7 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
 
         query = runner.queries[0]
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
+        self.assertIn("p.name = coalesce(p.name, $person_id)", query.query)
         self.assertEqual(query.parameters["directory_username"], "jamie")
         self.assertEqual(query.parameters["directory_site_code"], "BOS3")
 

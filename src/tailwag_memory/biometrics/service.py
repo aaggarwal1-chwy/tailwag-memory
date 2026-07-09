@@ -174,7 +174,7 @@ class BiometricReferenceService:
             FOREACH (_ IN CASE WHEN d IS NULL THEN [] ELSE [1] END |
               SET p.official_name = CASE WHEN d.official_name <> '' THEN d.official_name ELSE p.official_name END,
                   p.display_name = CASE WHEN d.official_name <> '' THEN d.official_name ELSE p.display_name END,
-                  p.name = CASE WHEN d.official_name <> '' THEN d.official_name ELSE p.name END,
+                  p.name = p.id,
                   p.email = CASE WHEN d.employee_email <> '' THEN d.employee_email ELSE p.email END
               MERGE (p)-[:HAS_DIRECTORY_RECORD]->(d)
             )
