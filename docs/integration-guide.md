@@ -87,6 +87,7 @@ Tailwag provides:
 - OpenAI-backed episode and memory item embeddings
 - transcript-derived memory extraction and per-person memory consolidation
 - graph, vector, biometric, and person-context retrieval
+- biometric reference enrollment/search and adaptive reference aggregation
 - Slack source adapter mapping into normal Tailwag episodes
 
 ## Public API Surface
@@ -111,6 +112,7 @@ Inspection helpers are imported from `tailwag_memory.inspect`, not from the top-
 - Use caller-owned IDs; do not use Neo4j internal `<id>` or `<elementId>` values as integration keys.
 - Do not pass raw face images or raw audio into Tailwag. Pass embeddings only.
 - Keep biometric vector usage tied to consent and retention policies in the calling system.
+- Use `enroll_face_reference()` / `enroll_voice_reference()` for first durable samples, and `observe_face_embedding()` / `observe_voice_embedding()` for cross-modal-safe adaptive updates. Tailwag owns sample counts, similarity thresholds, and completion.
 - Direct memory item writes are advanced. Prefer episode recording plus extraction for live systems.
 - `fact` memories must remain narrow person-prompt context, not broad ontology facts.
 - `SemanticFact`, confidence fields, `org_id`, external vector stores, and secondary persistence are outside current scope.

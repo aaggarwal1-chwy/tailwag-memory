@@ -25,12 +25,13 @@ Implemented now:
 - OpenAI-backed episode embeddings
 - OpenAI-backed memory item embeddings
 - Neo4j 5.26 local Docker runtime
-- Neo4j constraints and vector indexes for episode text, person biometric vectors, and `MemoryItem.summary_embedding`
+- Neo4j constraints and vector indexes for episode text, biometric reference vectors, and `MemoryItem.summary_embedding`
 - deterministic/vector-derived person context with durable memory sections and the target person's recent transcript lines
 - transcript-derived person memory items
 - per-person memory consolidation and merged memories from repeated or related episode evidence into `MemoryItem`
-- optional caller-supplied `Person.face_embedding`
-- optional caller-supplied `Person.audio_embedding`
+- caller-supplied `FaceReference.embedding`
+- caller-supplied `VoiceReference.embedding`
+- adaptive biometric reference aggregation with per-reference sample counts
 - graph and vector retrieval services
 - Slack channel polling into conversation episodes
 - episode mention relationships
@@ -57,7 +58,7 @@ Deferred intentionally:
 - Caller-owned IDs are the stable integration keys for `Person`, `Episode`, and `Event`.
 - `Place` identity is `(building_code, room_id)`.
 - Production text embeddings use the OpenAI-compatible provider; tests use deterministic mocks.
-- Face and audio embeddings are biometric identifiers supplied by the caller or an upstream recognition model. Tailwag stores vectors, not raw face images or raw audio.
+- Face and audio embeddings are biometric identifiers supplied by the caller or an upstream recognition model. Tailwag stores vectors on `FaceReference` and `VoiceReference` nodes, not raw face images or raw audio.
 - `MemoryItem` is the approved narrow path for durable transcript-derived person memory. It is not a broad ontology, triple store, or open-ended semantic fact graph.
 - Per-person memory consolidation may use Neo4j episode vector indexes to reduce candidate evidence, but it writes only `MemoryItem` records and `SUPPORTED_BY`/`SUPERSEDED_BY` audit links.
 - Follow-up addressing writes `ADDRESSED_BY` audit links from resolved follow-up memories to the episode that resolved them.
@@ -74,8 +75,6 @@ Deferred intentionally:
   display_name,
   email,
   consent_status,
-  face_embedding,
-  audio_embedding,
   last_seen,
   status,
   archived_at,
@@ -86,7 +85,49 @@ Deferred intentionally:
 
 `Person.id` comes from the calling system. When email is present, Tailwag stores it as `lower(trim(email))`, resolves writes to an existing same-email person before creating a new node, and Neo4j enforces `email` as unique. If an incoming canonical `person_*` ID matches a Slack temporary person by email, Tailwag rekeys that Slack node in place when the canonical ID is available. `last_seen` is updated when the person participates in a newer episode, attends a newer event, or receives an explicit person-only identity upsert.
 
-Archived people keep historical graph data, but stored biometric vectors are removed and recognition excludes them. Re-enrollment should use the explicit person-only upsert path after the caller decides the identity is active again.
+Archived people keep historical graph data, and recognition/update paths exclude their biometric references. Re-enrollment should use the explicit biometric APIs after the caller decides the identity is active again.
+
+### Biometric References
+
+```cypher
+(:Person)-[:HAS_FACE_REFERENCE]->(:FaceReference {
+  id,
+  embedding,
+  model,
+  dimension,
+  consent_status,
+  status,
+  sample_count,
+  accepted_update_count,
+  target_sample_count,
+  aggregate_method,
+  metadata_json,
+  created_at,
+  updated_at
+})
+
+(:Person)-[:HAS_VOICE_REFERENCE]->(:VoiceReference {
+  id,
+  embedding,
+  model,
+  dimension,
+  consent_status,
+  status,
+  sample_count,
+  accepted_update_count,
+  target_sample_count,
+  aggregate_method,
+  metadata_json,
+  created_at,
+  updated_at
+})
+```
+
+Initial enrollment sets `sample_count=1` and
+`aggregate_method="normalized_running_average"`. Adaptive observations update
+the stored embedding only after Tailwag verifies active consent, non-archived
+person status, cross-modal evidence, model/dimension compatibility, similarity
+thresholds, and `sample_count < target_sample_count`.
 
 ### Episode
 
@@ -234,11 +275,12 @@ FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE;
 Tailwag initializes vector indexes for:
 
 - `Episode.transcript_embedding`
-- `Person.face_embedding`
-- `Person.audio_embedding`
+- `FaceReference.embedding`
+- `VoiceReference.embedding`
 - `MemoryItem.summary_embedding`
 
-The configured embedding dimension must match the Neo4j vector indexes and supplied biometric vectors for vector search compatibility.
+Text embedding dimensions must match the configured Neo4j text vector indexes.
+Biometric reference dimensions are model-specific and stored on each reference.
 
 ## Write Paths
 
@@ -248,7 +290,7 @@ High-level episode recording uses episode ingestion and, by default, runs transc
 
 Event ingestion stores or updates the event, upserts the place, creates the event `OCCURRED_AT` relationship, upserts accepted attendees, updates attendee `last_seen`, and writes `ATTENDED` relationships.
 
-Person-only ingestion supports explicit identity/profile refreshes through `upsert_person()`, biometric revocation through `archive_person()`, and Slack-to-canonical identity convergence through `rekey_person_by_email()`.
+Person-only ingestion supports explicit identity/profile refreshes through `upsert_person()`, lifecycle archival through `archive_person()`, and Slack-to-canonical identity convergence through `rekey_person_by_email()`. Biometric writes use the reference APIs, not `PersonInput`.
 
 ## Read Paths
 

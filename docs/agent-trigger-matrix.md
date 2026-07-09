@@ -45,7 +45,7 @@ Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS
 | Need to ingest Slack or another external source into `EpisodeInput` or `EventInput` | Source Adapter Agent | Ingestion Agent, CLI Mockup Agent, Privacy/Biometric Review Agent, Test Agent | Adapter and mapping behavior only; core writes stay in ingestion services | Handoff to Ingestion Agent for write behavior |
 | Public dataclasses, service methods, env vars, package metadata, examples, or integration docs change | Integration Contract Agent | Documentation Agent, Test Agent, Release Quality Gate Agent | Package-consumer boundaries only; no internal refactor unless needed to preserve compatibility | Handoff to owning implementation agent for behavior gaps |
 | Need to preserve or validate `argos-agent` Tailwag memory provider compatibility, including Argos-facing Tailwag APIs | Argos Migration Agent | Integration Contract Agent, Memory Item Agent, Source Adapter Agent, Documentation Agent, Test Agent, Release Quality Gate Agent | Tailwag compatibility only; no unrelated Argos runtime, robot, face, speaker, navigation, or display internals | Handoff to Memory Item Agent for Tailwag memory behavior and Source Adapter Agent for Slack ingestion behavior |
-| Consent, `face_embedding`, `audio_embedding`, retention, recognition source, Slack identity, or raw media language changes | Privacy/Biometric Review Agent | Ingestion Agent, Retrieval Agent, Documentation Agent, Scope Guard Agent | Review and guardrails only; no upstream recognition implementation | Handoff to owning implementation agent for behavior fixes |
+| Consent, biometric reference embeddings, retention, recognition source, Slack identity, or raw media language changes | Privacy/Biometric Review Agent | Ingestion Agent, Retrieval Agent, Documentation Agent, Scope Guard Agent | Review and guardrails only; no upstream recognition implementation | Handoff to owning implementation agent for behavior fixes |
 | A change risks adding deferred concepts, confidence fields, `org_id`, secondary persistence, or external vector databases | Scope Guard Agent | Neo4j Schema Agent, Ingestion Agent, Memory Item Agent, Documentation Agent, Test Agent | Scope review and guardrails only unless scope is explicitly updated; approved `MemoryItem` work is limited to durable transcript-derived memory, not a broad ontology | Handoff to Documentation Agent when scope changes |
 | Broad work is ready for final handoff, merge, package-facing release, or tag | Release Quality Gate Agent | Test Agent, Documentation Agent, Integration Contract Agent | Final verification only; do not implement feature behavior | Handoff back to owning agent if verification fails |
 | Tests are missing, failing, flaky, or not covering changed behavior | Test Agent | Any implementation agent related to the failing area | Tests and fixtures only unless fixing a small test-discovered bug | Handoff to Code Refactor Agent if failures reveal design issues |
@@ -90,7 +90,7 @@ Inputs:
 Outputs:
 
 - constraints for `Person.id`, `Episode.id`, `Event.id`, `MemoryItem.id`, and `(Place.building_code, Place.room_id)`
-- vector indexes for `Episode.transcript_embedding`, `Person.face_embedding`, `Person.audio_embedding`, and `MemoryItem.summary_embedding`
+- vector indexes for `Episode.transcript_embedding`, `FaceReference.embedding`, `VoiceReference.embedding`, and `MemoryItem.summary_embedding`
 - schema initialization command support
 
 Non-goals:
@@ -130,8 +130,7 @@ Inputs:
 - caller-provided `Event.id`
 - caller-provided `Person.id`
 - participant roles and relationship provenance sources
-- optional caller-supplied face embeddings
-- optional caller-supplied audio embeddings
+- caller-supplied biometric vectors only through biometric reference APIs
 - episode transcript
 - event description and start/end times
 - `building_code`
@@ -143,8 +142,7 @@ Outputs:
 - persisted event
 - upserted people
 - updated `Person.last_seen`
-- stored `Person.face_embedding` when supplied
-- stored `Person.audio_embedding` when supplied
+- stored `FaceReference` and `VoiceReference` nodes when biometric APIs are called
 - upserted place
 - graph relationships
 - episode embeddings

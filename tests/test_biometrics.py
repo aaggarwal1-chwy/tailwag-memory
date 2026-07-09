@@ -23,7 +23,12 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(query.parameters["person_id"], "person_jamie")
         self.assertEqual(query.parameters["model"], "facenet-vggface2")
         self.assertEqual(query.parameters["dimension"], 512)
+        self.assertEqual(query.parameters["target_sample_count"], 5)
         self.assertEqual(json.loads(query.parameters["metadata_json"]), {"quality": "good"})
+        self.assertIn("r.sample_count = 1", query.query)
+        self.assertIn("r.accepted_update_count = 0", query.query)
+        self.assertIn("r.target_sample_count = $target_sample_count", query.query)
+        self.assertIn("r.aggregate_method = 'normalized_running_average'", query.query)
 
     def test_enroll_face_reference_updates_person_profile_from_metadata(self) -> None:
         runner = RecordingQueryRunner()
@@ -147,6 +152,222 @@ class BiometricReferenceServiceTest(unittest.TestCase):
             runner.queries[0].query,
         )
         self.assertEqual(runner.queries[0].parameters["site_code"], "BOS3")
+
+    def test_observe_face_embedding_updates_reference_from_agreement(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "reference_id": "face:person_jamie:1",
+                        "embedding": [1.0, 0.0, 0.0],
+                        "sample_count": 1,
+                        "accepted_update_count": 0,
+                        "target_sample_count": 5,
+                        "metadata_json": '{"quality": "good"}',
+                    }
+                ],
+                [],
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.observe_face_embedding(
+            person_id="person_jamie",
+            embedding=[1.0, 0.0, 0.0],
+            model="facenet-vggface2",
+            evidence={
+                "owner_id": "person_jamie",
+                "owner_source": "audio_face_agree",
+                "primary_face_person_id": "person_jamie",
+                "audio_speaker_id": "person_jamie",
+                "face_margin": 0.3,
+                "voice_margin": 0.25,
+                "unknown_count": 0,
+            },
+            metadata={"scene": "clean"},
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(result.status, "updated")
+        self.assertEqual(result.sample_count, 2)
+        self.assertEqual(result.target_sample_count, 5)
+        self.assertAlmostEqual(result.similarity, 1.0)
+        update_query = runner.queries[-1]
+        self.assertIn("r.sample_count = $sample_count", update_query.query)
+        self.assertEqual(update_query.parameters["sample_count"], 2)
+        self.assertEqual(update_query.parameters["accepted_update_count"], 1)
+        stored = json.loads(update_query.parameters["metadata_json"])
+        self.assertEqual(stored["quality"], "good")
+        self.assertEqual(stored["adaptive_last_update"]["metadata"], {"scene": "clean"})
+
+    def test_observe_reference_rejects_after_sample_target(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "reference_id": "voice:person_jamie:1",
+                        "embedding": [1.0, 0.0],
+                        "sample_count": 5,
+                        "accepted_update_count": 4,
+                        "target_sample_count": 5,
+                        "metadata_json": "{}",
+                    }
+                ]
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.observe_voice_embedding(
+            person_id="person_jamie",
+            embedding=[1.0, 0.0],
+            model="ecapa",
+            evidence={
+                "owner_id": "person_jamie",
+                "owner_source": "face",
+                "primary_face_person_id": "person_jamie",
+                "face_margin": 0.3,
+                "recognized_count": 1,
+                "unknown_count": 0,
+            },
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.status, "complete")
+        self.assertEqual(result.reason, "sample_target_reached")
+        self.assertEqual(result.sample_count, 5)
+        self.assertEqual(len(runner.queries), 1)
+
+    def test_observe_reference_rejects_low_similarity(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "reference_id": "face:person_jamie:1",
+                        "embedding": [1.0, 0.0],
+                        "sample_count": 1,
+                        "accepted_update_count": 0,
+                        "target_sample_count": 5,
+                        "metadata_json": "{}",
+                    }
+                ]
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.observe_face_embedding(
+            person_id="person_jamie",
+            embedding=[0.0, 1.0],
+            model="facenet-vggface2",
+            evidence={
+                "owner_id": "person_jamie",
+                "owner_source": "audio_face_agree",
+                "primary_face_person_id": "person_jamie",
+                "audio_speaker_id": "person_jamie",
+                "face_margin": 0.3,
+                "voice_margin": 0.3,
+                "unknown_count": 0,
+            },
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.reason, "below_similarity_threshold")
+        self.assertEqual(result.sample_count, 1)
+        self.assertAlmostEqual(result.similarity, 0.0)
+
+    def test_observe_reference_rejects_model_mismatch(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "reference_id": "face:person_jamie:1",
+                        "embedding": [1.0, 0.0],
+                        "model": "facenet-vggface2",
+                        "sample_count": 1,
+                        "accepted_update_count": 0,
+                        "target_sample_count": 5,
+                        "metadata_json": "{}",
+                    }
+                ]
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.observe_face_embedding(
+            person_id="person_jamie",
+            embedding=[1.0, 0.0],
+            model="other-face-model",
+            evidence={
+                "owner_id": "person_jamie",
+                "owner_source": "audio_face_agree",
+                "primary_face_person_id": "person_jamie",
+                "audio_speaker_id": "person_jamie",
+                "face_margin": 0.3,
+                "voice_margin": 0.3,
+                "unknown_count": 0,
+            },
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.reason, "model_mismatch")
+        self.assertEqual(len(runner.queries), 1)
+
+    def test_observe_face_embedding_rejects_face_only_evidence(self) -> None:
+        runner = RecordingQueryRunner()
+        service = BiometricReferenceService(runner)
+
+        result = service.observe_face_embedding(
+            person_id="person_jamie",
+            embedding=[1.0, 0.0],
+            model="facenet-vggface2",
+            evidence={
+                "owner_id": "person_jamie",
+                "owner_source": "face",
+                "primary_face_person_id": "person_jamie",
+                "face_margin": 0.3,
+                "recognized_count": 1,
+                "unknown_count": 0,
+            },
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.reason, "weak_evidence")
+        self.assertEqual(runner.queries, [])
+
+    def test_observe_voice_embedding_accepts_clean_face_evidence(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "reference_id": "voice:person_jamie:1",
+                        "embedding": [1.0, 0.0],
+                        "sample_count": 1,
+                        "accepted_update_count": 0,
+                        "target_sample_count": 5,
+                        "metadata_json": "{}",
+                    }
+                ],
+                [],
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.observe_voice_embedding(
+            person_id="person_jamie",
+            embedding=[1.0, 0.0],
+            model="ecapa",
+            evidence={
+                "owner_id": "person_jamie",
+                "owner_source": "face",
+                "primary_face_person_id": "person_jamie",
+                "face_margin": 0.3,
+                "recognized_count": 1,
+                "unknown_count": 0,
+            },
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(result.modality, "voice")
+        self.assertEqual(result.sample_count, 2)
 
 
 if __name__ == "__main__":

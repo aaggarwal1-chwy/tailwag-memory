@@ -120,8 +120,8 @@ Notes:
 - This endpoint does not generate OpenAI text embeddings and does not require `OPENAI_API_KEY`.
 - Omitted profile fields preserve existing `Person` values.
 - Person-only upserts mark the person active, clear `archived_at`, and update `last_seen` to the write time.
-- Standalone profile writes use `id`, `display_name`, `email`, `consent_status`, `face_embedding`, and `audio_embedding`; `role` and `source` remain episode/event relationship provenance.
-- Non-consented `consent_status` values clear stored biometric vectors through the same consent-aware person upsert rules used by episode and event ingestion.
+- Standalone profile writes use `id`, `display_name`, `email`, and `consent_status`; `role` and `source` remain episode/event relationship provenance.
+- Biometric vectors are not written through `PersonInput`. Use the biometric reference APIs so consent, reference status, and adaptive sample counts stay centralized on `FaceReference` and `VoiceReference` nodes.
 
 ### `archive_person(person_id)`
 
@@ -138,7 +138,7 @@ Returns: `bool`, true when a matching person was archived.
 Notes:
 
 - Archiving preserves historical graph data, including prior episode, event, and memory item relationships.
-- Archiving removes stored biometric vectors by clearing `face_embedding` and `audio_embedding`.
+- Archived people are excluded from biometric search and adaptive update paths.
 - Archived people are excluded from biometric recognition.
 - Archived people are not deleted; callers should keep using caller-owned IDs if they need to re-enroll or inspect historical context.
 - Archive is not a full retention deletion mechanism; retention and deletion policy remains caller-owned.
@@ -339,9 +339,7 @@ Caller-supplied person data.
 | `id` | `str` | yes | none | Caller-owned person ID. |
 | `display_name` | `str \| None` | no | `None` | Human-readable name. |
 | `email` | `str \| None` | no | `None` | Optional identity evidence. Nonblank emails are stored as `lower(trim(email))`; Tailwag uses this normalized value to attach same-email writes and Neo4j enforces it as unique. |
-| `consent_status` | `str \| None` | no | `None` | Consent state. Non-consented values clear stored biometric vectors. |
-| `face_embedding` | `list[float] \| None` | no | `None` | Caller-supplied face vector. Must match configured dimension. |
-| `audio_embedding` | `list[float] \| None` | no | `None` | Caller-supplied audio vector. Must match configured dimension. |
+| `consent_status` | `str \| None` | no | `None` | Consent state used by identity and biometric reference policies. |
 | `role` | `str` | no | `"participant"` | Role on an episode or attendee context. |
 | `source` | `str` | no | `"caller"` | Provenance for participation or memory extraction. |
 
@@ -452,7 +450,7 @@ Methods:
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
 | `upsert(person)` | `PersonInput` | `str` | Create or update a person profile. Omitted fields preserve existing values. |
-| `archive(person_id)` | person ID | `bool` | Mark the person archived and clear stored biometric vectors while keeping historical graph data. |
+| `archive(person_id)` | person ID | `bool` | Mark the person archived while keeping historical graph data and excluding their biometric references from recognition. |
 | `rekey_by_email(email, new_person_id)` | email, new person ID | `bool` | Replace one Slack-owned email-matched person's ID with a canonical ID while preserving graph relationships; false when the email or canonical ID is not unique-safe. |
 | `canonical_id_by_email(email)` | email | `str \| None` | Return the one canonical `person_*` ID for an exact email match, or `None` when the match is absent, ambiguous, or not canonical. |
 
@@ -506,14 +504,29 @@ Follow-up support and addressing are handled internally by transcript extraction
 | --- | --- | --- | --- |
 | `by_place(building_code, room_id, limit=10)` | place key | `list[EventResult]` | Recent events at a place. |
 
-### `PersonRecognitionService(runner)`
+### `BiometricReferenceService(runner)`
 
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
-| `by_face_embedding(embedding, limit=10)` | face vector | `list[PersonRecognitionResult]` | Consented people ranked by face similarity. |
-| `by_audio_embedding(embedding, limit=10)` | audio vector | `list[PersonRecognitionResult]` | Consented people ranked by audio similarity. |
+| `enroll_face_reference(...)` | `person_id`, face vector, model, metadata, consent | `BiometricEnrollmentResult` | Store the first or explicit face reference sample. |
+| `search_face(...)` | face vector, model, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `FaceReference` nodes. |
+| `enroll_voice_reference(...)` | `person_id`, voice vector, model, metadata, consent | `BiometricEnrollmentResult` | Store the first or explicit voice reference sample. |
+| `search_voice(...)` | voice vector, model, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `VoiceReference` nodes. |
+| `observe_face_embedding(...)` | `person_id`, face vector, model, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe face observation for adaptive aggregation. |
+| `observe_voice_embedding(...)` | `person_id`, voice vector, model, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe voice observation for adaptive aggregation. |
 
-Only people with `consent_status="consented"` are returned.
+Only active consented references for non-archived people are searched or updated.
+Enrollment initializes `sample_count=1`, `accepted_update_count=0`,
+`target_sample_count=5`, and `aggregate_method=normalized_running_average`.
+Observation updates reject missing references, completed references, weak evidence,
+model mismatch, dimension mismatch, low similarity, non-consented references, and
+archived people.
+
+Default adaptive thresholds are `0.72` for face similarity, `0.55` for voice
+similarity, and `0.20` for cross-modal evidence margin. Tailwag updates accepted
+references with a normalized running average and returns `BiometricUpdateResult`
+fields including `accepted`, `status`, `reason`, `sample_count`,
+`target_sample_count`, and `similarity`.
 
 ### `PersonContextRetrievalService(runner, embeddings=None)`
 
@@ -652,7 +665,9 @@ Common return types:
 | --- | --- |
 | `EpisodeMemoryResult` | `episode_id`, `transcript`, optional `start_time`, `end_time`, `building_code`, `room_id`, and `score`. |
 | `EventResult` | `event_id`, `description`, `start_time`, `end_time`, `building_code`, `room_id`. |
-| `PersonRecognitionResult` | `person_id`, `display_name`, `consent_status`, `last_seen`, optional `score`. |
+| `BiometricEnrollmentResult` | `saved`, `status`, `reason`, `person_id`, `reference_id`. |
+| `BiometricSearchResult` | candidates, recognition status/reason, threshold, top score, runner-up score, and margin. |
+| `BiometricUpdateResult` | update accepted/status/reason, person/reference IDs, modality, sample counts, and similarity. |
 | `PersonContextSource` | `person_id`, `display_name`, `items`. |
 | `PersonContextItem` | `item_id`, `item_type`, `text`, timestamps, place, role, source, score, transcript lines. |
 | `MemoryItemResult` | `memory_id`, `person_id`, `kind`, `key`, `summary`, `source`, status/timestamps, metadata, optional `score`. |
@@ -667,7 +682,7 @@ Common return types:
 
 - Caller-owned IDs are the stable integration keys. Do not use Neo4j internal IDs.
 - Run schema initialization before ingestion or retrieval.
-- The configured embedding dimension must match Neo4j vector indexes and supplied biometric vectors for vector search compatibility.
+- The configured text embedding dimension must match Neo4j text vector indexes. Biometric reference dimensions are stored per reference and must match their model-specific vector indexes.
 - Do not pass raw face images or raw audio into Tailwag. Pass embeddings only.
 - Direct memory item writes are advanced. Prefer episode recording plus extraction for live systems.
 - `fact` memories must remain narrow person-prompt context, not broad ontology facts.

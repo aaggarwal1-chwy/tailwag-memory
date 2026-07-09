@@ -22,6 +22,7 @@ from .memory_item_service import MemoryItemService
 from .models import (
     BiometricEnrollmentResult,
     BiometricSearchResult,
+    BiometricUpdateResult,
     DirectoryPersonRecord,
     DirectorySyncResult,
     EpisodeInput,
@@ -226,6 +227,42 @@ class TailwagMemoryClient:
     def has_voice_reference(self, person_id: str) -> bool:
         """Return whether a person has at least one active voice reference."""
         return BiometricReferenceService(self.runner).has_voice_reference(person_id)
+
+    def observe_face_embedding(
+        self,
+        *,
+        person_id: str,
+        embedding: list[float],
+        model: str,
+        evidence: dict[str, object],
+        metadata: dict[str, object] | None = None,
+    ) -> BiometricUpdateResult:
+        """Offer one face observation for adaptive reference aggregation."""
+        return BiometricReferenceService(self.runner).observe_face_embedding(
+            person_id=person_id,
+            embedding=embedding,
+            model=model,
+            evidence=dict(evidence or {}),
+            metadata=dict(metadata or {}),
+        )
+
+    def observe_voice_embedding(
+        self,
+        *,
+        person_id: str,
+        embedding: list[float],
+        model: str,
+        evidence: dict[str, object],
+        metadata: dict[str, object] | None = None,
+    ) -> BiometricUpdateResult:
+        """Offer one voice observation for adaptive reference aggregation."""
+        return BiometricReferenceService(self.runner).observe_voice_embedding(
+            person_id=person_id,
+            embedding=embedding,
+            model=model,
+            evidence=dict(evidence or {}),
+            metadata=dict(metadata or {}),
+        )
 
     def resolve_turn_owner(
         self,

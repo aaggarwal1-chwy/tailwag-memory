@@ -33,12 +33,12 @@ Implemented now:
 - OpenAI-backed episode embeddings
 - OpenAI-backed memory item embeddings
 - Neo4j 5.26 local Docker runtime
-- Neo4j constraints and vector indexes for episode text, person biometric vectors, and `MemoryItem.summary_embedding`
+- Neo4j constraints and vector indexes for episode text, biometric reference vectors, and `MemoryItem.summary_embedding`
 - deterministic/vector-derived person context with durable memory sections and the target person's recent transcript lines
 - transcript-derived person memory items
 - per-person memory consolidation and merged memories from repeated or related episode evidence into `MemoryItem`
-- optional `Person.face_embedding`
-- optional `Person.audio_embedding`
+- `FaceReference` and `VoiceReference` nodes for caller-supplied biometric vectors
+- adaptive biometric reference aggregation with per-reference sample counts
 - graph and vector retrieval services
 - Slack channel polling into conversation episodes
 - source-provided event attendees
@@ -126,7 +126,7 @@ The inspection commands write static HTML reports under `inspect/` by default. T
 
 For the current graph model and scope boundaries, see the [architecture](docs/architecture.md). For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package setup and integration ownership, see the [Python package integration guide](docs/integration-guide.md). For local commands, see the [CLI reference](docs/cli-reference.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md). For the current Argos integration boundary, see the [Argos compatibility note](docs/argos-migration.md).
 
-Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model; it does not store raw face images, raw audio, or generate real biometric embeddings itself.
+Face and audio embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model on biometric reference nodes; it does not store raw face images, raw audio, or generate real biometric embeddings itself. Adaptive updates store sample counts and normalized running-average aggregates on those reference nodes.
 Episode transcripts and memory item summaries are sent to OpenAI for text embeddings when the OpenAI provider is configured. Person context is assembled deterministically from durable memory items, visible follow-ups, and the target person's recent transcript lines. When `--semantic-scope` is provided for person context, the package uses vector matching to rank durable memory items; rendered episode context remains bounded to lines spoken by the target person.
 Memory item extraction sends caller-provided transcripts and a small set of existing candidate memory items to OpenAI when high-level episode recording or explicit memory backfill is used. Memory consolidation sends bounded, person-scoped episode evidence clusters and existing memory items to OpenAI. `MemoryItem` is the narrow approved semantic-memory path for durable person preferences, boundaries, pets, facts, and follow-ups; it is not a broad ontology or triple store.
 

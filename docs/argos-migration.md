@@ -35,10 +35,10 @@ Argos owns:
 - final prompt assembly
 - Tailwag provider wiring and operator rollout
 
-Argos currently keeps biometric vectors local. Tailwag still supports optional
-caller-supplied `Person.face_embedding` and `Person.audio_embedding`, but the
-current Argos provider sends non-biometric person metadata for encounter and
-identity updates.
+Argos produces biometric embeddings but does not store durable biometric state.
+Tailwag stores caller-supplied face and voice vectors on `FaceReference` and
+`VoiceReference` nodes, owns biometric search, and owns adaptive reference
+aggregation.
 
 ## Live Argos Contracts
 

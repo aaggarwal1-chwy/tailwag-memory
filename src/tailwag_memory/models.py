@@ -326,6 +326,21 @@ class BiometricEnrollmentResult:
 
 
 @dataclass(frozen=True)
+class BiometricUpdateResult:
+    """Result of adaptively updating a biometric reference aggregate."""
+
+    accepted: bool
+    status: str
+    reason: str
+    person_id: str
+    reference_id: str = ""
+    modality: str = ""
+    sample_count: int = 0
+    target_sample_count: int = 0
+    similarity: float = 0.0
+
+
+@dataclass(frozen=True)
 class OwnerResolutionResult:
     """Final turn-owner resolution result."""
 
