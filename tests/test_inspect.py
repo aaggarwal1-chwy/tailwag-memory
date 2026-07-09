@@ -41,6 +41,20 @@ def _assert_canonical_nav(testcase: unittest.TestCase, html: str, current_href: 
         testcase.assertIn(f'href="{current_href}" aria-current="page"', html)
 
 
+def _assert_css_rule_contains(
+    testcase: unittest.TestCase,
+    html: str,
+    selector: str,
+    declarations: list[str],
+) -> None:
+    """Assert the first rendered CSS rule for a selector includes declarations."""
+    rule_start = html.index(f"{selector} {{")
+    rule_end = html.index("}", rule_start)
+    rule = html[rule_start:rule_end]
+    for declaration in declarations:
+        testcase.assertIn(declaration, rule)
+
+
 class InspectPackageImportTest(unittest.TestCase):
     def test_inspect_package_exports_inspection_utilities(self) -> None:
         expected_exports = {
@@ -579,6 +593,8 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
         self.assertIn("tailwag-memory-items.html", html)
         self.assertIn("tailwag-person-timeline.html", html)
         self.assertIn("tailwag-affect.html", html)
+        self.assertIn("evidenceHtml(record, supported, addressed, supersededBy, supersedes)", html)
+        self.assertIn("timelineHref({ person: personId || '', item: itemId || '' })", html)
         self.assertIn("\\u003cscript>alert(1)\\u003c/script>", html)
 
 
@@ -710,6 +726,20 @@ class PersonTimelineReportTest(unittest.TestCase):
         self.assertIn("tailwag-memory-items.html", html)
         self.assertIn("Linked memories", html)
         self.assertIn("min-height: 220px", html)
+        self.assertIn("const markerLayout = layoutMarkers(sorted, domain);", html)
+        self.assertIn("64 + markerLayout.rowCount * 168", html)
+        self.assertIn("top:${top}px", html)
+        self.assertIn("is not in this exported timeline", html)
+        self.assertIn("recordMatchesItem(record, selectedItem) ? 'active' : ''", html)
+        _assert_css_rule_contains(self, html, "body", ["height: 100vh", "overflow: hidden"])
+        _assert_css_rule_contains(self, html, "main", ["overflow: hidden"])
+        _assert_css_rule_contains(
+            self,
+            html,
+            "aside",
+            ["position: sticky", "top: 0", "align-self: start"],
+        )
+        _assert_css_rule_contains(self, html, ".timeline", ["min-height: 0", "overflow: auto"])
         self.assertIn('"person_id": "person_jamie"', html)
         self.assertIn('"has_memory_items": true', html)
         self.assertIn('"memory_item_count": 2', html)

@@ -15,16 +15,31 @@ def person_timeline_report_html(report: InspectReport) -> str:
       --event: #875200;
       --memory: #f4a51c;
     }}
+    body {{
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }}
+    header {{
+      flex: 0 0 auto;
+    }}
     main {{
+      flex: 1 1 auto;
       display: grid;
       grid-template-columns: 260px minmax(0, 1fr);
-      min-height: calc(100vh - 112px);
+      min-height: 0;
+      overflow: hidden;
     }}
     aside {{
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100%;
       border-right: 1px solid var(--line);
       padding: 18px;
       background: var(--panel-soft);
-      overflow: auto;
+      overflow-y: auto;
     }}
     .people {{
       display: grid;
@@ -57,7 +72,8 @@ def person_timeline_report_html(report: InspectReport) -> str:
     .timeline {{
       padding: 18px 24px 32px;
       min-width: 0;
-      overflow: visible;
+      min-height: 0;
+      overflow: auto;
     }}
     .toolbar {{
       display: flex;
@@ -221,10 +237,31 @@ def person_timeline_report_html(report: InspectReport) -> str:
     dd {{ margin: 0; overflow-wrap: anywhere; }}
     .warnings {{ margin-bottom: 12px; color: var(--danger); }}
     @media (max-width: 760px) {{
-      main {{ grid-template-columns: 1fr; }}
-      aside {{ border-right: 0; border-bottom: 1px solid var(--line); }}
+      body {{
+        height: auto;
+        overflow: auto;
+        display: block;
+      }}
+      main {{
+        display: block;
+        min-height: 0;
+        overflow: visible;
+      }}
+      aside {{
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        height: auto;
+        max-height: 42vh;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }}
       .people {{ grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }}
-      .timeline {{ padding-left: 16px; padding-right: 16px; }}
+      .timeline {{
+        padding-left: 16px;
+        padding-right: 16px;
+        overflow: auto;
+      }}
       .timeline-marker {{ width: 190px; }}
     }}
 """,
@@ -348,10 +385,21 @@ def person_timeline_report_html(report: InspectReport) -> str:
       document.getElementById('recordCount').textContent = visible.length;
       activePersonNode.textContent = activePeopleLabel([...selected], visible, selectedItem, selectedHasMemory);
       if (!visible.length) {{
-        itemsNode.innerHTML = '<div class="empty">No timeline items matched this selection.</div>';
+        itemsNode.innerHTML = `<div class="empty">${{escapeHtml(emptyTimelineMessage(selected, selectedItem))}}</div>`;
         return;
       }}
-      itemsNode.innerHTML = renderLanes(visible);
+      itemsNode.innerHTML = renderLanes(visible, selectedItem);
+    }}
+    function emptyTimelineMessage(selected, selectedItem) {{
+      if (!selectedItem) return 'No timeline items matched this selection.';
+      const itemExists = records.some((record) => recordMatchesItem(record, selectedItem));
+      if (!itemExists) {{
+        return `Item ${{selectedItem}} is not in this exported timeline. Regenerate the person timeline with a higher --limit or the matching --person-id to include it.`;
+      }}
+      if (selected && selected.size) {{
+        return `Item ${{selectedItem}} is in this export, but not for the selected people. Clear the person selection or regenerate with the matching --person-id.`;
+      }}
+      return `Item ${{selectedItem}} did not match the current timeline filters.`;
     }}
     function activePeopleLabel(personIds, visible, selectedItem, selectedHasMemory) {{
       if (selectedItem) return `Item ${{selectedItem}}`;
@@ -364,9 +412,9 @@ def person_timeline_report_html(report: InspectReport) -> str:
       }}
       return `${{personIds.length}} people selected`;
     }}
-    function renderLanes(visible) {{
+    function renderLanes(visible, selectedItem) {{
       const domain = timeDomain(visible);
-      return `${{renderAxis(domain)}}${{personLaneGroups(visible).map((group) => renderLane(group, domain)).join('')}}`;
+      return `${{renderAxis(domain)}}${{personLaneGroups(visible).map((group) => renderLane(group, domain, selectedItem)).join('')}}`;
     }}
     function personLaneGroups(visible) {{
       const groups = new Map();
@@ -389,28 +437,49 @@ def person_timeline_report_html(report: InspectReport) -> str:
         <span class="axis-tick" style="left:${{timePercent(tick.value, domain)}}%">${{escapeHtml(formatDateTime(tick.value))}}</span>
       `).join('')}}</div>`;
     }}
-    function renderLane(group, domain) {{
+    function renderLane(group, domain, selectedItem) {{
       const sorted = [...group.records].sort((left, right) => timeValue(left.start_time) - timeValue(right.start_time));
+      const markerLayout = layoutMarkers(sorted, domain);
+      const laneHeight = Math.max(220, 64 + markerLayout.rowCount * 168);
       return `
         <section class="person-lane" data-person-id="${{escapeAttr(group.person_id)}}">
           <div class="lane-label">
             <strong><a href="${{escapeHtml(memoryItemsHref({{ person: group.person_id }}))}}">${{escapeHtml(group.display_name)}}</a></strong>
             <span>${{group.records.length}} item${{group.records.length === 1 ? '' : 's'}}</span>
           </div>
-          <div class="timeline-lane">
-            ${{sorted.map((record) => renderMarker(record, domain)).join('')}}
+          <div class="timeline-lane" style="min-height:${{laneHeight}}px">
+            ${{markerLayout.items.map((item) => renderMarker(item.record, item.left, item.top, selectedItem)).join('')}}
           </div>
         </section>
       `;
     }}
-    function renderMarker(record, domain) {{
+    function layoutMarkers(sorted, domain) {{
+      const rows = [];
+      const items = sorted.map((record) => ({{
+        record,
+        left: timePercent(timeValue(record.start_time), domain),
+        top: 16
+      }}));
+      items.forEach((item) => {{
+        let rowIndex = rows.findIndex((row) => item.left - row.lastLeft >= 18);
+        if (rowIndex === -1) {{
+          rowIndex = rows.length;
+          rows.push({{ lastLeft: item.left }});
+        }} else {{
+          rows[rowIndex].lastLeft = item.left;
+        }}
+        item.top = 16 + rowIndex * 168;
+      }});
+      return {{ items, rowCount: Math.max(1, rows.length) }};
+    }}
+    function renderMarker(record, left, top, selectedItem) {{
       const type = record.item_type || '';
       const memoryClass = hasLinkedMemory(record) ? 'with-memory' : '';
-      const left = timePercent(timeValue(record.start_time), domain);
+      const activeClass = selectedItem && recordMatchesItem(record, selectedItem) ? 'active' : '';
       const memoryLabel = hasLinkedMemory(record) ? `Linked memories ${{linkedMemoryCount(record)}}` : 'No linked memory';
       const memoryHref = memoryItemsHrefForRecord(record);
       return `
-        <article class="timeline-marker ${{escapeAttr(type)}} ${{memoryClass}}" id="${{escapeAttr(record.item_id || '')}}" tabindex="0" onclick="bringMarkerToFront(this)" onfocus="bringMarkerToFront(this)" style="left:${{left}}%; top:16px">
+        <article class="timeline-marker ${{escapeAttr(type)}} ${{memoryClass}} ${{activeClass}}" id="${{escapeAttr(record.item_id || '')}}" tabindex="0" onclick="bringMarkerToFront(this)" onfocus="bringMarkerToFront(this)" style="left:${{left}}%; top:${{top}}px">
           <div class="marker-head">
             <strong>${{escapeHtml(formatDateTime(record.start_time))}}</strong>
             <span class="kind">${{escapeHtml(type)}}</span>

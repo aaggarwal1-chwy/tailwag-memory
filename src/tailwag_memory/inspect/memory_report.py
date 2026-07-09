@@ -263,16 +263,16 @@ def memory_items_report_html(report: InspectReport) -> str:
           <td data-label="Kind">${{filterPill(record.kind || 'unknown', record.kind, 'kind', record.kind || 'unknown')}}<br><code>${{escapeHtml(record.key || '')}}</code></td>
           <td data-label="Status">${{filterPill(displayStatus(record), displayStatus(record), 'status', displayStatus(record))}}${{record.kind === 'followup' ? filterPill(record.followup_state || 'unknown', record.followup_state, 'followup_state', record.followup_state || 'unknown') : ''}}</td>
           <td data-label="Summary" class="summary-cell">${{escapeHtml(record.summary || '')}}<br><span class="meta">${{filterPill(record.source || 'unknown', record.source, 'source', record.source || 'unknown')}}${{record.source_ref ? ' / ' + escapeHtml(record.source_ref) : ''}}</span></td>
-          <td data-label="Evidence">${{evidenceHtml(supported, addressed, supersededBy, supersedes)}}</td>
+          <td data-label="Evidence">${{evidenceHtml(record, supported, addressed, supersededBy, supersedes)}}</td>
           <td data-label="Timing">${{timeHtml(record)}}</td>
           <td data-label="ID"><a href="#${{hashWith({{ memory: record.memory_id || '' }})}}"><code>${{escapeHtml(record.memory_id || '')}}</code></a></td>
         </tr>
       `;
     }}
-    function evidenceHtml(supported, addressed, supersededBy, supersedes) {{
+    function evidenceHtml(record, supported, addressed, supersededBy, supersedes) {{
       const lines = [];
-      if (supported.length) lines.push(`Supported by ${{supported.map(timelineItemLink).join(', ')}}`);
-      if (addressed.length) lines.push(`Addressed by ${{addressed.map((entry) => timelineItemLink(entry.episode_id)).join(', ')}}`);
+      if (supported.length) lines.push(`Supported by ${{supported.map((itemId) => timelineItemLink(itemId, record.person_id)).join(', ')}}`);
+      if (addressed.length) lines.push(`Addressed by ${{addressed.map((entry) => timelineItemLink(entry.episode_id, record.person_id)).join(', ')}}`);
       if (supersededBy.length) lines.push(`Superseded by ${{supersededBy.map(memoryLink).join(', ')}}`);
       if (supersedes.length) lines.push(`Supersedes ${{supersedes.map(memoryLink).join(', ')}}`);
       return lines.length ? lines.join('<br>') : '<span class="meta">No linked evidence</span>';
@@ -431,8 +431,8 @@ def memory_items_report_html(report: InspectReport) -> str:
     function memoryLink(memoryId) {{
       return `<a href="#${{hashWith({{ memory: memoryId || '' }})}}">${{code(memoryId)}}</a>`;
     }}
-    function timelineItemLink(itemId) {{
-      return `<a href="${{escapeHtml(timelineHref({{ item: itemId || '' }}))}}">${{code(itemId)}}</a>`;
+    function timelineItemLink(itemId, personId) {{
+      return `<a href="${{escapeHtml(timelineHref({{ person: personId || '', item: itemId || '' }}))}}">${{code(itemId)}}</a>`;
     }}
     function timelineHref(filters) {{
       return inspectFilters.href('tailwag-person-timeline.html', filters || {{}});
