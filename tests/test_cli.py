@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
 from io import StringIO
 import json
 from pathlib import Path
@@ -515,24 +516,30 @@ class CliTest(unittest.TestCase):
             ]
         ]
 
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 7, 3, 12, 0, tzinfo=timezone.utc)
+
         with patch("tailwag_memory.cli.load_settings", return_value=settings):
             with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
-                stdout = StringIO()
-                with redirect_stdout(stdout):
-                    exit_code = main(
-                        [
-                            "inspect",
-                            "memory-items",
-                            "--format",
-                            "json",
-                            "--output",
-                            "-",
-                            "--person-id",
-                            "person_jamie",
-                            "--limit",
-                            "5",
-                        ]
-                    )
+                with patch("tailwag_memory.inspect.memory_items.datetime", FixedDateTime):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        exit_code = main(
+                            [
+                                "inspect",
+                                "memory-items",
+                                "--format",
+                                "json",
+                                "--output",
+                                "-",
+                                "--person-id",
+                                "person_jamie",
+                                "--limit",
+                                "5",
+                            ]
+                        )
 
         self.assertEqual(exit_code, 0)
         self.assertTrue(runner.closed)
