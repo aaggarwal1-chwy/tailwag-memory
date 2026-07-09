@@ -19,7 +19,7 @@ from ..vector_queries import vector_search_clause
 
 
 DEFAULT_FACE_THRESHOLD = 0.60
-DEFAULT_VOICE_THRESHOLD = 0.40
+DEFAULT_VOICE_THRESHOLD = 0.50
 DEFAULT_MARGIN_THRESHOLD = 0.20
 DEFAULT_FACE_UPDATE_THRESHOLD = 0.72
 DEFAULT_VOICE_UPDATE_THRESHOLD = 0.55
@@ -603,9 +603,4 @@ def _evidence_allows_update(modality: str, person_id: str, evidence: dict[str, A
             and face_margin >= DEFAULT_UPDATE_EVIDENCE_MARGIN
             and voice_margin >= DEFAULT_UPDATE_EVIDENCE_MARGIN
         )
-    return (
-        owner_source == "face"
-        and primary_face_person_id == person_id
-        and recognized_count == 1
-        and face_margin >= DEFAULT_UPDATE_EVIDENCE_MARGIN
-    )
+    return False

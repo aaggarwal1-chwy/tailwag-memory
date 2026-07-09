@@ -141,6 +141,31 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertIn("voice_reference_embedding", runner.queries[0].query)
         self.assertIn("HAS_VOICE_REFERENCE", runner.queries[0].query)
 
+    def test_search_voice_rejects_below_updated_threshold(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "person_id": "person_jamie",
+                        "display_name": "Jamie",
+                        "consent_status": "consented",
+                        "reference_id": "voice:1",
+                        "model": "ecapa",
+                        "metadata_json": "{}",
+                        "score": 0.49,
+                    }
+                ]
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.search_voice(embedding=[0.2] * 192, model="ecapa")
+
+        self.assertFalse(result.recognized)
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.reason, "below_threshold")
+        self.assertEqual(result.threshold, 0.50)
+
     def test_search_face_site_filter_keeps_directoryless_enrolled_people(self) -> None:
         runner = RecordingQueryRunner()
         service = BiometricReferenceService(runner)
@@ -223,9 +248,11 @@ class BiometricReferenceServiceTest(unittest.TestCase):
             model="ecapa",
             evidence={
                 "owner_id": "person_jamie",
-                "owner_source": "face",
+                "owner_source": "audio_face_agree",
+                "audio_speaker_id": "person_jamie",
                 "primary_face_person_id": "person_jamie",
                 "face_margin": 0.3,
+                "voice_margin": 0.3,
                 "recognized_count": 1,
                 "unknown_count": 0,
             },
@@ -333,7 +360,29 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(result.reason, "weak_evidence")
         self.assertEqual(runner.queries, [])
 
-    def test_observe_voice_embedding_accepts_clean_face_evidence(self) -> None:
+    def test_observe_voice_embedding_rejects_face_only_evidence(self) -> None:
+        runner = RecordingQueryRunner()
+        service = BiometricReferenceService(runner)
+
+        result = service.observe_voice_embedding(
+            person_id="person_jamie",
+            embedding=[1.0, 0.0],
+            model="ecapa",
+            evidence={
+                "owner_id": "person_jamie",
+                "owner_source": "face",
+                "primary_face_person_id": "person_jamie",
+                "face_margin": 0.3,
+                "recognized_count": 1,
+                "unknown_count": 0,
+            },
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.reason, "weak_evidence")
+        self.assertEqual(runner.queries, [])
+
+    def test_observe_voice_embedding_accepts_audio_face_agreement(self) -> None:
         runner = RecordingQueryRunner(
             results=[
                 [
@@ -357,9 +406,11 @@ class BiometricReferenceServiceTest(unittest.TestCase):
             model="ecapa",
             evidence={
                 "owner_id": "person_jamie",
-                "owner_source": "face",
+                "owner_source": "audio_face_agree",
                 "primary_face_person_id": "person_jamie",
+                "audio_speaker_id": "person_jamie",
                 "face_margin": 0.3,
+                "voice_margin": 0.3,
                 "recognized_count": 1,
                 "unknown_count": 0,
             },

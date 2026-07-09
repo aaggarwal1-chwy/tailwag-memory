@@ -523,10 +523,12 @@ model mismatch, dimension mismatch, low similarity, non-consented references, an
 archived people.
 
 Default adaptive thresholds are `0.72` for face similarity, `0.55` for voice
-similarity, and `0.20` for cross-modal evidence margin. Tailwag updates accepted
-references with a normalized running average and returns `BiometricUpdateResult`
-fields including `accepted`, `status`, `reason`, `sample_count`,
-`target_sample_count`, and `similarity`.
+similarity, and `0.20` for cross-modal evidence margin. Adaptive face and voice
+updates both require face and voice agreement on the same owner before Tailwag
+considers the offered embedding. Tailwag updates accepted references with a
+normalized running average and returns `BiometricUpdateResult` fields including
+`accepted`, `status`, `reason`, `sample_count`, `target_sample_count`, and
+`similarity`.
 
 ### `PersonContextRetrievalService(runner, embeddings=None)`
 
