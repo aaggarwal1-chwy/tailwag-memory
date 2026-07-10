@@ -29,11 +29,35 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         self.assertIn("p.official_name", query.query)
         self.assertIn("p.name = p.id", query.query)
         self.assertIn("d.name = record.official_name", query.query)
+        self.assertIn("toLower(split(p.email, '@')[0]) = record.username", query.query)
+        self.assertNotIn("p.id = 'person_' + record.username", query.query)
         self.assertEqual(query.parameters["records"][0]["normalized_name"], "jamie example")
         self.assertEqual(query.parameters["records"][0]["site_code"], "BOS3")
         self.assertEqual(query.parameters["records"][0]["display_name"], "Jamie Example")
         self.assertEqual(query.parameters["records"][0]["name"], "Jamie Example")
         self.assertEqual(query.parameters["records"][0]["source"], "snowflake")
+
+    def test_sync_directory_people_links_person_by_email_username_without_employee_email(self) -> None:
+        runner = RecordingQueryRunner()
+        service = DirectoryIdentityService(runner)
+
+        service.sync_directory_people(
+            "BOS3",
+            [
+                DirectoryPersonRecord(
+                    site_code="BOS3",
+                    username="jamie",
+                    official_name="Jamie Example",
+                )
+            ],
+        )
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["records"][0]["username"], "jamie")
+        self.assertEqual(query.parameters["records"][0]["employee_email"], "")
+        self.assertIn("p.email CONTAINS '@'", query.query)
+        self.assertIn("toLower(split(p.email, '@')[0]) = record.username", query.query)
+        self.assertIn("MERGE (p)-[:HAS_DIRECTORY_RECORD]->(d)", query.query)
 
     def test_resolve_identity_returns_single_match(self) -> None:
         runner = RecordingQueryRunner(
@@ -79,6 +103,21 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         self.assertIn("p.name = coalesce(p.name, $person_id)", query.query)
         self.assertEqual(query.parameters["directory_username"], "jamie")
         self.assertEqual(query.parameters["directory_site_code"], "BOS3")
+
+    def test_record_encounter_reconciles_directory_record_by_email_username(self) -> None:
+        runner = RecordingQueryRunner()
+        service = DirectoryIdentityService(runner)
+
+        service.record_encounter(
+            person_id="person_external_jamie",
+            metadata={"email": "Jamie@Example.com"},
+        )
+
+        query = runner.queries[0]
+        self.assertIn("EmployeeDirectoryRecord", query.query)
+        self.assertIn("HAS_DIRECTORY_RECORD", query.query)
+        self.assertIn("toLower(split(p.email, '@')[0])", query.query)
+        self.assertEqual(query.parameters["email"], "Jamie@Example.com")
 
     def test_snowflake_loader_maps_employee_and_manager_by_column_name(self) -> None:
         class Cursor:

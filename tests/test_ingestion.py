@@ -41,6 +41,10 @@ class PersonUpsertCypherTest(unittest.TestCase):
         self.assertIn("MERGE (p:Person {id: attendee.person_id})", attendee_clause)
         self.assertIn("p.email = coalesce(person.email, p.email)", participant_clause)
         self.assertIn("p.email = coalesce(attendee.email, p.email)", attendee_clause)
+        self.assertIn("EmployeeDirectoryRecord", participant_clause)
+        self.assertIn("HAS_DIRECTORY_RECORD", participant_clause)
+        self.assertIn("WITH *", participant_clause)
+        self.assertIn("toLower(split(p.email, '@')[0])", participant_clause)
         self.assertNotIn("face_embedding", participant_clause)
         self.assertNotIn("audio_embedding", attendee_clause)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", participant_clause)
@@ -85,6 +89,18 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertNotIn("audio_embedding", query.query)
         self.assertNotIn("p.status = 'archived' THEN p.face_embedding", query.query)
         self.assertNotIn("p.status = 'archived' THEN p.audio_embedding", query.query)
+
+    def test_upsert_reconciles_existing_directory_record_by_email_username(self) -> None:
+        runner = RecordingQueryRunner()
+        service = PersonIngestionService(runner)
+
+        service.upsert(PersonInput(id="person_external_jamie", email="jamie@example.com"))
+
+        query = runner.queries[1]
+        self.assertIn("EmployeeDirectoryRecord", query.query)
+        self.assertIn("HAS_DIRECTORY_RECORD", query.query)
+        self.assertIn("p.email CONTAINS '@'", query.query)
+        self.assertIn("toLower(split(p.email, '@')[0])", query.query)
 
     def test_upsert_query_excludes_org_identity_and_confidence(self) -> None:
         runner = RecordingQueryRunner()

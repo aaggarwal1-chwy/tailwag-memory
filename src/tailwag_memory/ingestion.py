@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .db import QueryRunner
+from .directory_reconciliation import person_directory_reconciliation_cypher
 from .embeddings import EmbeddingProvider
 from .episode_normalization import normalize_robot_speaker_labels
 from .models import EpisodeInput, EventInput, PersonInput, utc_now_iso
@@ -102,7 +103,8 @@ def _person_upsert_cypher(
         if set_lifecycle_fields
         else ""
     )
-    return f"""
+    return (
+        f"""
                 MERGE (p:Person {{id: {person_variable}.{id_property}}})
                 SET p.display_name = coalesce({person_variable}.display_name, p.display_name),
                     p.official_name = coalesce({person_variable}.official_name, p.official_name),
@@ -112,6 +114,8 @@ def _person_upsert_cypher(
                     p.created_at = coalesce(p.created_at, $created_at),
                     p.last_seen = {last_seen_assignment}{lifecycle_fields}
                 """
+        + person_directory_reconciliation_cypher("p")
+    )
 
 
 class PersonIngestionService:

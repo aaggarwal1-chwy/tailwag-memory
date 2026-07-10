@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - fallback keeps tests/dev envs lightweigh
     rapidfuzz_jaro_winkler = None
 
 from ..db import QueryRunner
+from ..directory_reconciliation import person_directory_reconciliation_cypher
 from ..models import (
     DirectoryPersonRecord,
     DirectorySyncResult,
@@ -190,9 +191,14 @@ class DirectoryIdentityService:
                 d.created_at = coalesce(d.created_at, $updated_at)
             WITH d, record
             OPTIONAL MATCH (p:Person)
-            WHERE p.id = 'person_' + record.username
-               OR (record.employee_email <> '' AND p.email = record.employee_email)
-            FOREACH (_ IN CASE WHEN p IS NULL THEN [] ELSE [1] END |
+            WHERE p.email IS NOT NULL
+              AND p.email CONTAINS '@'
+              AND toLower(split(p.email, '@')[0]) = record.username
+            WITH d, record, [
+              person IN collect(DISTINCT p)
+              WHERE person IS NOT NULL
+            ] AS people
+            FOREACH (p IN people |
               SET p.official_name = CASE WHEN record.official_name <> '' THEN record.official_name ELSE p.official_name END,
                   p.display_name = CASE WHEN record.official_name <> '' THEN record.official_name ELSE p.display_name END,
                   p.name = p.id,
@@ -418,6 +424,9 @@ class DirectoryIdentityService:
                 p.interaction_count = coalesce(p.interaction_count, 0) + 1,
                 p.updated_at = $updated_at,
                 p.created_at = coalesce(p.created_at, $updated_at)
+            """
+            + person_directory_reconciliation_cypher("p")
+            + """
             WITH p
             OPTIONAL MATCH (d:EmployeeDirectoryRecord {site_code: $directory_site_code, username: $directory_username})
             FOREACH (_ IN CASE WHEN d IS NULL THEN [] ELSE [1] END |
