@@ -25,6 +25,8 @@ export NEO4J_PASSWORD=tailwag-memory
 export OPENAI_API_KEY=sk-your-token-here
 export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
+export TAILWAG_FACE_EMBEDDING_DIMENSION=512
+export TAILWAG_VOICE_EMBEDDING_DIMENSION=192
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 export TAILWAG_AFFECT_FOLD1_MODEL=/path/to/fold1
@@ -40,7 +42,12 @@ settings = load_settings()
 runner = Neo4jQueryRunner(settings)
 
 try:
-    initialize_schema(runner, settings.embedding_dimension)
+    initialize_schema(
+        runner,
+        settings.embedding_dimension,
+        face_embedding_dimension=settings.face_embedding_dimension,
+        voice_embedding_dimension=settings.voice_embedding_dimension,
+    )
 finally:
     runner.close()
 ```

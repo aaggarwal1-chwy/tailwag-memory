@@ -58,7 +58,7 @@ Deferred intentionally:
 - Caller-owned IDs are the stable integration keys for `Person`, `Episode`, and `Event`.
 - `Place` identity is `(building_code, room_id)`.
 - Production text embeddings use the OpenAI-compatible provider; tests use deterministic mocks.
-- Face and audio embeddings are biometric identifiers supplied by the caller or an upstream recognition model. Tailwag stores vectors on `FaceReference` and `VoiceReference` nodes, not raw face images or raw audio.
+- Face and voice embeddings are biometric identifiers supplied by the caller or an upstream recognition model. Tailwag stores vectors on `FaceReference` and `VoiceReference` nodes, not raw face images or raw audio.
 - `MemoryItem` is the approved narrow path for durable transcript-derived person memory. It is not a broad ontology, triple store, or open-ended semantic fact graph.
 - Per-person memory consolidation may use Neo4j episode vector indexes to reduce candidate evidence, but it writes only `MemoryItem` records and `SUPPORTED_BY`/`SUPERSEDED_BY` audit links.
 - Follow-up addressing writes `ADDRESSED_BY` audit links from resolved follow-up memories to the episode that resolved them.
@@ -268,6 +268,15 @@ FOR (e:Event) REQUIRE e.id IS UNIQUE;
 CREATE CONSTRAINT memory_item_id IF NOT EXISTS
 FOR (m:MemoryItem) REQUIRE m.id IS UNIQUE;
 
+CREATE CONSTRAINT employee_directory_record_key IF NOT EXISTS
+FOR (d:EmployeeDirectoryRecord) REQUIRE (d.site_code, d.username) IS UNIQUE;
+
+CREATE CONSTRAINT face_reference_id IF NOT EXISTS
+FOR (r:FaceReference) REQUIRE r.id IS UNIQUE;
+
+CREATE CONSTRAINT voice_reference_id IF NOT EXISTS
+FOR (r:VoiceReference) REQUIRE r.id IS UNIQUE;
+
 CREATE CONSTRAINT place_key IF NOT EXISTS
 FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE;
 ```
@@ -321,7 +330,9 @@ Core runtime settings are loaded from environment variables or `.env`:
 | `NEO4J_PASSWORD` | `tailwag-memory` | Neo4j password. |
 | `OPENAI_API_KEY` | unset | Required for OpenAI-backed embeddings, extraction, consolidation, and vector search with the OpenAI provider. |
 | `TAILWAG_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model. |
-| `TAILWAG_EMBEDDING_DIMENSION` | `64` | Vector dimension used by indexes, text embeddings, and biometric vectors. |
+| `TAILWAG_EMBEDDING_DIMENSION` | `64` | Vector dimension used by episode and memory item text embedding indexes. |
+| `TAILWAG_FACE_EMBEDDING_DIMENSION` | `512` | Vector dimension used by the `FaceReference.embedding` index. |
+| `TAILWAG_VOICE_EMBEDDING_DIMENSION` | `192` | Vector dimension used by the `VoiceReference.embedding` index. |
 | `TAILWAG_SYNTHESIS_MODEL` | `gpt-5.5` | OpenAI model used by memory extraction and consolidation providers. |
 | `SLACK_BOT_TOKEN` | unset | Required only when polling Slack. |
 | `TAILWAG_AFFECT_FOLD1_MODEL` | unset | Optional external XLM-RoBERTa-large fold 1 model directory for `tailwag inspect affect`. |

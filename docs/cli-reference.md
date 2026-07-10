@@ -65,13 +65,24 @@ tailwag person context --person-id person_jamie
 tailwag person context --person-id person_jamie --semantic-scope "chargers"
 tailwag person context --person-id person_jamie --current-text "robot demo later today"
 tailwag person context --person-id person_jamie --memory-limit 8 --recent-episode-limit 3
+tailwag person profile --person-id person_jamie
 ```
 
-Search people by caller-supplied biometric vectors:
+Sync and resolve employee directory identities:
 
 ```bash
-tailwag person search-face --embedding-file path/to/face-vector.json
-tailwag person search-audio --embedding-file path/to/audio-vector.json
+tailwag directory sync --site-code BOS3
+tailwag directory sync --site-code BOS3 --file path/to/directory-records.json
+tailwag identity resolve --site-code BOS3 --first Jamie --last Example
+```
+
+`directory sync` reads from Snowflake when `--file` is omitted. The JSON file form is for local fixtures or offline imports of directory records.
+
+Search people by caller-supplied biometric reference vectors:
+
+```bash
+tailwag biometric search-face --embedding-file path/to/face-vector.json --model facenet --site-code BOS3
+tailwag biometric search-voice --embedding-file path/to/voice-vector.json --model speechbrain_ecapa --site-code BOS3
 ```
 
 ## Inspect Utilities

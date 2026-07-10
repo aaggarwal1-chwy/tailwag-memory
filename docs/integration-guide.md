@@ -39,6 +39,8 @@ export NEO4J_PASSWORD=tailwag-memory
 export OPENAI_API_KEY=sk-your-token-here
 export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
+export TAILWAG_FACE_EMBEDDING_DIMENSION=512
+export TAILWAG_VOICE_EMBEDDING_DIMENSION=192
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
@@ -47,7 +49,8 @@ Configuration notes:
 
 - `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD` are required for live storage and retrieval.
 - `OPENAI_API_KEY` is required when production code uses OpenAI-backed text embeddings, memory extraction, consolidation, or vector search.
-- `TAILWAG_EMBEDDING_DIMENSION` must match Neo4j vector indexes and supplied biometric vectors for vector search compatibility.
+- `TAILWAG_EMBEDDING_DIMENSION` must match Neo4j text vector indexes for episode and memory item embeddings.
+- `TAILWAG_FACE_EMBEDDING_DIMENSION` and `TAILWAG_VOICE_EMBEDDING_DIMENSION` must match the configured face and voice reference vector indexes.
 - `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by memory extraction and consolidation providers.
 - `SLACK_BOT_TOKEN` is only required when polling Slack.
 - `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are optional paths used only by `tailwag inspect affect`.
@@ -70,7 +73,7 @@ The consuming system should provide:
 - stable caller-owned `Person.id`, `Episode.id`, and `Event.id` values
 - person identity and re-enrollment decisions
 - consent status and retention policy
-- face/audio embeddings from upstream recognition models, when available
+- face and voice embeddings from upstream recognition models, passed through Tailwag's biometric reference APIs when durable biometric state is intended
 - raw transcript, place, participant, and event payloads
 - Slack channel IDs and bot credentials when using Slack ingestion
 
