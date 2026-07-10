@@ -86,6 +86,7 @@ class EpisodeInput:
                 PersonInput(
                     id=item["id"],
                     display_name=item.get("display_name"),
+                    official_name=item.get("official_name"),
                     email=item.get("email"),
                     consent_status=item.get("consent_status"),
                     role=item.get("role", "participant"),
@@ -98,6 +99,7 @@ class EpisodeInput:
                     person=PersonInput(
                         id=item["person"]["id"],
                         display_name=item["person"].get("display_name"),
+                        official_name=item["person"].get("official_name"),
                         email=item["person"].get("email"),
                         consent_status=item["person"].get("consent_status"),
                         role=item["person"].get("role", "mentioned"),
@@ -141,6 +143,7 @@ class EventInput:
                     person=PersonInput(
                         id=item["person"]["id"],
                         display_name=item["person"].get("display_name"),
+                        official_name=item["person"].get("official_name"),
                         email=item["person"].get("email"),
                         consent_status=item["person"].get("consent_status"),
                         role=item["person"].get("role", "attendee"),

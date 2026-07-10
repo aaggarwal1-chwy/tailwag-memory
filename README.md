@@ -102,6 +102,12 @@ Install the package in editable mode:
 python3 -m pip install -e .
 ```
 
+Install the optional FastAPI runtime when serving HTTP:
+
+```bash
+python3 -m pip install -e ".[api]"
+```
+
 Initialize the Neo4j schema before ingesting or querying data:
 
 ```bash
@@ -120,6 +126,31 @@ For Slack polling, also add your bot token:
 
 ```bash
 SLACK_BOT_TOKEN=xoxb-your-token-here
+```
+
+For the HTTP API, add a bearer token. `GET /health` stays open for health checks;
+all memory API routes require `Authorization: Bearer <token>`.
+
+```bash
+TAILWAG_API_BEARER_TOKEN=replace-with-a-private-token
+```
+
+Interactive FastAPI docs are off by default for production. Enable them only in local or controlled environments:
+
+```bash
+TAILWAG_API_DOCS_ENABLED=true
+```
+
+Run the API locally with Uvicorn:
+
+```bash
+python3 -m uvicorn tailwag_memory.api.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+Or start the API container with the optional Compose profile:
+
+```bash
+docker compose --profile api up -d
 ```
 
 Directory sync is part of the base package. `tailwag directory sync --site-code ...`
@@ -155,4 +186,11 @@ The tests can run without a live Neo4j instance:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+API contract tests require the optional FastAPI runtime:
+
+```bash
+python3 -m pip install -e ".[api]"
+PYTHONPATH=src python3 -m unittest tests.test_api_app
 ```

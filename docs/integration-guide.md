@@ -31,6 +31,12 @@ python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[affect]"
 
 Other inspect reports use the base install. See [Inspect Reference](inspect-reference.md) for follow-up validity, person timeline, memory item, and affect report behavior.
 
+For HTTP serving with FastAPI:
+
+```bash
+python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[api]"
+```
+
 ## Runtime Configuration
 
 Set runtime configuration in the consuming process or its environment:
@@ -47,6 +53,8 @@ export TAILWAG_VOICE_EMBEDDING_DIMENSION=192
 export TAILWAG_FACE_EMBEDDING_MODEL=facenet
 export TAILWAG_VOICE_EMBEDDING_MODEL=speechbrain_ecapa
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
+export TAILWAG_API_BEARER_TOKEN=replace-with-a-private-token
+export TAILWAG_API_DOCS_ENABLED=false
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 export SNOWFLAKE_ACCOUNT=CHEWY-CHEWY
 export SNOWFLAKE_USER=<username>@CHEWY.COM
@@ -66,6 +74,8 @@ Configuration notes:
 - `TAILWAG_FACE_EMBEDDING_DIMENSION` and `TAILWAG_VOICE_EMBEDDING_DIMENSION` must match the configured face and voice reference vector indexes.
 - `TAILWAG_FACE_EMBEDDING_MODEL` and `TAILWAG_VOICE_EMBEDDING_MODEL` identify the one supported upstream biometric model per modality. Tailwag stores those names on references and rejects adaptive updates when stored references were created with a different configured model.
 - `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by memory extraction and consolidation providers.
+- `TAILWAG_API_BEARER_TOKEN` is required for the FastAPI memory routes. `GET /health` is unauthenticated for container and load-balancer health checks.
+- `TAILWAG_API_DOCS_ENABLED=true` exposes `/docs`, `/redoc`, and `/openapi.json`; leave it false or unset in production unless schema docs are intentionally exposed behind a trusted boundary.
 - `SLACK_BOT_TOKEN` is only required when polling Slack.
 - `SNOWFLAKE_*` variables are only required when using `sync_directory_from_snowflake()` or `tailwag directory sync` without `--file`. The Snowflake connector is currently a base package dependency because directory sync is part of the current CLI/API surface.
 - `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are optional paths used only by `tailwag inspect affect`.
@@ -119,6 +129,8 @@ Lower-level services are public for advanced cases such as test fakes, custom em
 Slack adapter classes are imported from `tailwag_memory.slack_ingestion`, not from the top-level package. See [Slack Ingestion Guide](slack-ingestion.md#package-api).
 
 Inspection helpers are imported from `tailwag_memory.inspect`, not from the top-level package. They are intended for local investigation and reporting, not for normal memory-service integration.
+
+The optional FastAPI adapter mirrors selected `TailwagMemoryClient` calls for service deployments under `/argos/providers/memory/resources/memory/request/{request_id}`. See [Optional HTTP Endpoints](memory-endpoints.md#optional-http-endpoints) for routes, auth, docs exposure, and local run commands.
 
 ## Operational Notes
 

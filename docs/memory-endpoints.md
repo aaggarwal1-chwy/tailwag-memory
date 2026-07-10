@@ -6,6 +6,8 @@ This document is the caller-facing reference for the Tailwag memory system. It d
 
 These are synchronous Python APIs, not HTTP endpoints. Normal callers should use `TailwagMemoryClient`; lower-level services are available when a caller needs dependency injection, custom providers, or tests without live OpenAI/Neo4j calls.
 
+An optional FastAPI adapter is available for service deployments. It mirrors selected `TailwagMemoryClient` calls over HTTP, but the Python client remains the canonical package API.
+
 Inspection utilities are imported from `tailwag_memory.inspect`, not from the top-level `tailwag_memory` package. They are optional local analysis/reporting helpers and are separate from the normal memory service API surface below. See [Inspect Reference](inspect-reference.md) for report commands, generated assets, and read-only boundaries.
 
 ## Runtime Setup
@@ -30,6 +32,8 @@ export TAILWAG_VOICE_EMBEDDING_DIMENSION=192
 export TAILWAG_FACE_EMBEDDING_MODEL=facenet
 export TAILWAG_VOICE_EMBEDDING_MODEL=speechbrain_ecapa
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
+export TAILWAG_API_BEARER_TOKEN=replace-with-a-private-token
+export TAILWAG_API_DOCS_ENABLED=false
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 export SNOWFLAKE_ACCOUNT=CHEWY-CHEWY
 export SNOWFLAKE_USER=<username>@CHEWY.COM
@@ -63,6 +67,151 @@ finally:
 ```
 
 `OPENAI_API_KEY` is required when production code uses the OpenAI provider for embeddings, memory extraction, consolidation, or vector search. `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by extraction and consolidation providers. `SNOWFLAKE_*` variables are required only for Snowflake-backed directory sync; local JSON directory imports do not need them. `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are only needed for optional affect inspection with `tailwag-memory[affect]`. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
+
+`TAILWAG_API_BEARER_TOKEN` is required only for the optional FastAPI memory routes. `TAILWAG_API_DOCS_ENABLED=true` exposes interactive docs; leave it false or unset in production unless docs are intentionally exposed behind a trusted boundary.
+
+## Optional HTTP Endpoints
+
+Install the API extra:
+
+```bash
+python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[api]"
+```
+
+Run the service:
+
+```bash
+python -m uvicorn tailwag_memory.api.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+`GET /health` is unauthenticated and does not initialize Neo4j or OpenAI clients. All memory API routes require:
+
+```text
+Authorization: Bearer <TAILWAG_API_BEARER_TOKEN>
+```
+
+Interactive docs at `/docs`, `/redoc`, and `/openapi.json` are disabled unless `TAILWAG_API_DOCS_ENABLED=true`.
+
+Memory API URLs follow the Argos provider/resource/request convention:
+
+```text
+/argos/providers/{provider_id}/resources/{resource_id}/request/{request_id}
+```
+
+For these Tailwag routes, `provider_id` and `resource_id` must both be `memory`. The `request_id` is the operation name, such as `person-context` or `episodes`.
+
+### `GET /health`
+
+Returns:
+
+```json
+{"status": "ok", "service": "tailwag-memory"}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/person-context`
+
+Request:
+
+```json
+{
+  "person_id": "person_jamie",
+  "limit": 10,
+  "semantic_scope": "workplace help",
+  "current_text": "robot demo later today",
+  "memory_limit": 12,
+  "recent_episode_limit": 5
+}
+```
+
+Calls `TailwagMemoryClient.person_context(...)`, not `person_context_structured(...)`.
+
+Returns:
+
+```json
+{
+  "person_id": "person_jamie",
+  "context_markdown": "...",
+  "generated_at": "2026-07-10T00:00:00+00:00"
+}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/episodes`
+
+Request:
+
+```json
+{
+  "episode": {
+    "id": "episode_example_001",
+    "episode_type": "conversation",
+    "start_time": "2026-06-15T15:00:00+00:00",
+    "end_time": "2026-06-15T15:02:00+00:00",
+    "transcript": "Jamie: Are there spare laptop chargers in room 101?",
+    "retention_class": "standard",
+    "place": {"building_code": "MAIN", "room_id": "101"},
+    "participants": [{"id": "person_jamie", "role": "speaker"}]
+  },
+  "extract_memory": true
+}
+```
+
+Returns the `EpisodeRecordResult` dictionary shape.
+
+### `POST /argos/providers/memory/resources/memory/request/semantic-search`
+
+Request:
+
+```json
+{"text": "robot demos", "person_id": "person_jamie", "building_code": "MAIN", "limit": 5}
+```
+
+Returns the existing semantic search shape:
+
+```json
+{"episodes": [], "memory_items": []}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/people`
+
+Request:
+
+```json
+{"person": {"id": "person_jamie", "display_name": "Jamie", "consent_status": "consented"}}
+```
+
+Returns:
+
+```json
+{"person_id": "person_jamie"}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/people/archive`
+
+Request:
+
+```json
+{"person_id": "person_jamie"}
+```
+
+Returns:
+
+```json
+{"archived": true}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/people/rekey-by-email`
+
+Request:
+
+```json
+{"email": "jamie@example.com", "new_person_id": "person_jamie"}
+```
+
+Returns:
+
+```json
+{"rekeyed": true}
+```
 
 ## Quick Start
 
