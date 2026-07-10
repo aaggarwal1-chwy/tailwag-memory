@@ -4,7 +4,7 @@
 
 Tailwag Memory is a compact Neo4j-only memory package. It accepts caller-owned people, places, episodes, and events; stores them as graph records; generates OpenAI-backed text embeddings in production; and returns deterministic/vector-derived person context for downstream agents.
 
-This document is the source of truth for current architecture and scope boundaries. For package API details, see [Memory Endpoints Reference](memory-endpoints.md). For package-consumer workflows, see [Python Package Integration Guide](integration-guide.md). For the current Argos integration boundary, see [Argos Compatibility Note](argos-migration.md).
+This document is the source of truth for current architecture and scope boundaries. For package API details, see [Memory Endpoints Reference](memory-endpoints.md). For package-consumer workflows, see [Python Package Integration Guide](integration-guide.md). For local inspection reports, see [Inspect Reference](inspect-reference.md). For the current Argos integration boundary, see [Argos Compatibility Note](argos-migration.md).
 
 ## Current Scope
 
@@ -36,7 +36,7 @@ Implemented now:
 - Slack channel polling into conversation episodes
 - episode mention relationships
 - source-provided event attendees
-- optional read-only valence/arousal inspection CLI for person-episode transcript text
+- optional read-only inspect reports for follow-up validity, affect, person timelines, and memory items
 
 Deferred intentionally:
 
@@ -63,7 +63,7 @@ Deferred intentionally:
 - Per-person memory consolidation may use Neo4j episode vector indexes to reduce candidate evidence, but it writes only `MemoryItem` records and `SUPPORTED_BY`/`SUPERSEDED_BY` audit links.
 - Follow-up addressing writes `ADDRESSED_BY` audit links from resolved follow-up memories to the episode that resolved them.
 - Tailwag does not store confidence ratings, `org_id`, or secondary database records.
-- Inspection utilities are read-only developer/operator tools. The affect inspector scores person-episode transcript text on demand from external model folders and does not change the core package API, graph schema, or Neo4j records.
+- Inspection utilities are read-only developer/operator tools for follow-up validity, affect, person timeline, and memory item reports. They may export static HTML/JSON and shared browser assets, but they do not change the core package API, graph schema, or Neo4j records. The affect inspector scores person-episode transcript text on demand from external model folders and does not persist affect values.
 
 ## Graph Model
 

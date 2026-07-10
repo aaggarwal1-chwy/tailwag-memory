@@ -6,7 +6,7 @@ This document is the caller-facing reference for the Tailwag memory system. It d
 
 These are synchronous Python APIs, not HTTP endpoints. Normal callers should use `TailwagMemoryClient`; lower-level services are available when a caller needs dependency injection, custom providers, or tests without live OpenAI/Neo4j calls.
 
-Inspection utilities are imported from `tailwag_memory.inspect`, not from the top-level `tailwag_memory` package. They are optional local analysis/reporting helpers and are separate from the normal memory service API surface below.
+Inspection utilities are imported from `tailwag_memory.inspect`, not from the top-level `tailwag_memory` package. They are optional local analysis/reporting helpers and are separate from the normal memory service API surface below. See [Inspect Reference](inspect-reference.md) for report commands, generated assets, and read-only boundaries.
 
 ## Runtime Setup
 

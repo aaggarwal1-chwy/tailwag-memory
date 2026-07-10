@@ -87,10 +87,11 @@ tailwag biometric search-voice --embedding-file path/to/voice-vector.json --site
 
 ## Inspect Utilities
 
-Export read-only inspection reports for recent person-episode affect, person timelines, and memory item/follow-up state:
+Export read-only inspection reports for follow-up validity, recent person-episode affect, person timelines, and memory item state. For report details, generated assets, and inspect boundaries, see [Inspect Reference](inspect-reference.md).
 
 ```bash
-python3 -m pip install -e ".[affect]"
+tailwag inspect followup-validity
+tailwag inspect followup-validity --format json --output -
 tailwag inspect affect --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
 tailwag inspect affect --person-id person_jamie --limit 25 --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
 tailwag inspect affect --format json --output - --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
@@ -100,13 +101,13 @@ tailwag inspect memory-items
 tailwag inspect memory-items --person-id person_jamie --format json --output -
 ```
 
-The affect utility uses external XLM-RoBERTa-large fold model directories and scores on demand. It does not write scores back to Neo4j. The default export scores the 1000 most recent person-episode pairs; raise or lower that with `--limit` depending on local inference cost. You can also set `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` in `.env` instead of passing model paths every time.
+Only the affect utility needs the optional dependency and external XLM-RoBERTa-large fold model directories:
 
-HTML output is the default and writes linked reports under `inspect/` unless `--output` is provided: `inspect/tailwag-affect.html`, `inspect/tailwag-person-timeline.html`, and `inspect/tailwag-memory-items.html`. The repository also includes empty placeholder pages at those paths so the report family can be opened before any database export has run. The scatter plot displays valence and arousal on a centered `-1..1` VAD-style axis; the side panel keeps the model's native `0..1` averaged fold scores visible for comparison. Points with same-person memory item evidence linked to the episode are highlighted with a second color and show the linked memory count in the side panel. Drag across a dense plot area to zoom into that slice, and use Reset Zoom to return to the full graph. JSON output returns the same point data for scripts or notebooks.
+```bash
+python3 -m pip install -e ".[affect]"
+```
 
-Each scatter point represents one person's text within one episode, with assistant and other-person transcript lines excluded before scoring. The implementation lives in the `tailwag_memory.inspect` package so the core memory service API remains focused on storage, retrieval, source adapters, and memory-item behavior. Future persisted affect scores should live on person-to-episode or person-to-memory relationships rather than on shared episode nodes.
-
-The person timeline report combines read-only participation episodes and attended events into a browsable person view with hash links such as `#person=person_jamie`. The memory items report includes all stored memory items in the export scope, shows distributions by kind/status/source/person, and includes a follow-up state board for visible, not-yet-due, expired-active, addressed, and superseded follow-ups.
+HTML output is the default and writes linked reports under `inspect/` unless `--output` is provided: `inspect/tailwag-followup-validity.html`, `inspect/tailwag-affect.html`, `inspect/tailwag-person-timeline.html`, and `inspect/tailwag-memory-items.html`. HTML exports also write `tailwag-inspect.css` and `tailwag-inspect.js` beside the report. JSON output returns the same report envelope for scripts or notebooks.
 
 ## Memory Maintenance
 
@@ -149,6 +150,8 @@ tailwag episode create --help
 tailwag search --help
 tailwag person context --help
 tailwag memory consolidate --help
+tailwag inspect --help
+tailwag inspect followup-validity --help
 tailwag inspect affect --help
 tailwag slack poll --help
 ```

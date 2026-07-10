@@ -12,6 +12,7 @@ Neo4j-only hybrid memory service with OpenAI-backed embeddings and deterministic
 - [Memory endpoints reference](docs/memory-endpoints.md)
 - [Python package integration guide](docs/integration-guide.md)
 - [CLI reference](docs/cli-reference.md)
+- [Inspect reference](docs/inspect-reference.md)
 - [Slack ingestion guide](docs/slack-ingestion.md)
 
 ## Current Scope
@@ -42,7 +43,7 @@ Implemented now:
 - graph and vector retrieval services
 - Slack channel polling into conversation episodes
 - source-provided event attendees
-- optional read-only valence/arousal inspection CLI for person-episode transcript text
+- optional read-only inspect reports for follow-up validity, affect, person timelines, and memory items
 
 Delayed intentionally:
 
@@ -113,18 +114,24 @@ For Slack polling, also add your bot token:
 SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
 
-Optional valence/arousal inspection uses external XLM-RoBERTa-large fold model directories:
+Optional inspection reports export read-only local HTML or JSON views:
 
 ```bash
-python3 -m pip install -e ".[affect]"
-tailwag inspect affect --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
+tailwag inspect followup-validity
 tailwag inspect person-timeline
 tailwag inspect memory-items
 ```
 
-The inspection commands write static HTML reports under `inspect/` by default. The committed empty pages in that directory can be opened before report generation, and generated reports link between the affect scatter, person timeline, and memory item/follow-up views. Affect scores on demand, displays centered `-1..1` valence/arousal axes, supports drag-to-zoom for dense regions, and does not write affect values back to Neo4j.
+The affect report also needs the optional dependency and external XLM-RoBERTa-large fold model directories:
 
-For the current graph model and scope boundaries, see the [architecture](docs/architecture.md). For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package setup and integration ownership, see the [Python package integration guide](docs/integration-guide.md). For local commands, see the [CLI reference](docs/cli-reference.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md). For the current Argos integration boundary, see the [Argos compatibility note](docs/argos-migration.md).
+```bash
+python3 -m pip install -e ".[affect]"
+tailwag inspect affect --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
+```
+
+The inspection commands write static HTML reports under `inspect/` by default. The committed report pages and index in that directory can be opened as static browser entry points, and regenerated reports link between follow-up validity, affect scatter, person timeline, and memory item views. HTML exports write `tailwag-inspect.css` and `tailwag-inspect.js` beside the report. Affect scores on demand, displays centered `-1..1` valence/arousal axes, supports drag-to-zoom for dense regions, and does not write affect values back to Neo4j.
+
+For the current graph model and scope boundaries, see the [architecture](docs/architecture.md). For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package setup and integration ownership, see the [Python package integration guide](docs/integration-guide.md). For local commands, see the [CLI reference](docs/cli-reference.md). For report outputs and inspect boundaries, see the [inspect reference](docs/inspect-reference.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md). For the current Argos integration boundary, see the [Argos compatibility note](docs/argos-migration.md).
 
 Face and voice embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model on biometric reference nodes; it does not store raw face images, raw audio, or generate real biometric embeddings itself. Adaptive updates store sample counts and normalized running-average aggregates on those reference nodes.
 Episode transcripts and memory item summaries are sent to OpenAI for text embeddings when the OpenAI provider is configured. Person context is assembled deterministically from durable memory items, visible follow-ups, and the target person's recent transcript lines. When `--semantic-scope` is provided for person context, the package uses vector matching to rank durable memory items; rendered episode context remains bounded to lines spoken by the target person.
