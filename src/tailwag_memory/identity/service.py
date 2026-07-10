@@ -65,6 +65,22 @@ CLARIFY_SCORE = 84.0
 AUTO_CONFIRM_SCORE = 98.0
 CLEAR_GAP_SCORE = 5.0
 MULTIPLE_MATCH_GAP = 3.0
+DIRECTORY_RECORD_FIELDS = (
+    "site_code",
+    "official_name",
+    "username",
+    "employee_email",
+    "business_title",
+    "tenure",
+    "manager_name",
+    "job_family",
+    "job_family_group",
+    "job_level",
+    "c_level",
+    "cost_center",
+    "senior_leadership_team",
+    "business_function",
+)
 
 
 def load_env_file(path: Path = Path(".snowflake_env")) -> None:
@@ -304,23 +320,10 @@ class DirectoryIdentityService:
         if not rendered_username or not rendered_name:
             return None
         rows = self.runner.run(
-            """
-            MATCH (d:EmployeeDirectoryRecord {username: $username})
+            f"""
+            MATCH (d:EmployeeDirectoryRecord {{username: $username}})
             WHERE ($site_code = '' OR d.site_code = $site_code)
-            RETURN d.site_code AS site_code,
-                   d.official_name AS official_name,
-                   d.username AS username,
-                   d.employee_email AS employee_email,
-                   d.business_title AS business_title,
-                   d.tenure AS tenure,
-                   d.manager_name AS manager_name,
-                   d.job_family AS job_family,
-                   d.job_family_group AS job_family_group,
-                   d.job_level AS job_level,
-                   d.c_level AS c_level,
-                   d.cost_center AS cost_center,
-                   d.senior_leadership_team AS senior_leadership_team,
-                   d.business_function AS business_function
+            RETURN {_directory_record_projection("d")}
             LIMIT 2
             """,
             {"username": rendered_username, "site_code": str(site_code or "").strip()},
@@ -349,8 +352,8 @@ class DirectoryIdentityService:
         if not rendered:
             return None
         rows = self.runner.run(
-            """
-            MATCH (p:Person {id: $person_id})
+            f"""
+            MATCH (p:Person {{id: $person_id}})
             OPTIONAL MATCH (p)-[:HAS_DIRECTORY_RECORD]->(d:EmployeeDirectoryRecord)
             RETURN p.id AS person_id,
                    p.display_name AS display_name,
@@ -360,20 +363,7 @@ class DirectoryIdentityService:
                    coalesce(p.status, 'active') AS status,
                    p.interaction_count AS interaction_count,
                    p.last_seen AS last_seen,
-                   d.site_code AS site_code,
-                   d.official_name AS official_name,
-                   d.username AS username,
-                   d.employee_email AS employee_email,
-                   d.business_title AS business_title,
-                   d.tenure AS tenure,
-                   d.manager_name AS manager_name,
-                   d.job_family AS job_family,
-                   d.job_family_group AS job_family_group,
-                   d.job_level AS job_level,
-                   d.c_level AS c_level,
-                   d.cost_center AS cost_center,
-                   d.senior_leadership_team AS senior_leadership_team,
-                   d.business_function AS business_function
+                   {_directory_record_projection("d")}
             LIMIT 1
             """,
             {"person_id": rendered},
@@ -453,23 +443,10 @@ class DirectoryIdentityService:
 
     def _directory_records(self, site_code: str) -> list[DirectoryPersonRecord]:
         rows = self.runner.run(
-            """
+            f"""
             MATCH (d:EmployeeDirectoryRecord)
             WHERE ($site_code = '' OR d.site_code = $site_code)
-            RETURN d.site_code AS site_code,
-                   d.official_name AS official_name,
-                   d.username AS username,
-                   d.employee_email AS employee_email,
-                   d.business_title AS business_title,
-                   d.tenure AS tenure,
-                   d.manager_name AS manager_name,
-                   d.job_family AS job_family,
-                   d.job_family_group AS job_family_group,
-                   d.job_level AS job_level,
-                   d.c_level AS c_level,
-                   d.cost_center AS cost_center,
-                   d.senior_leadership_team AS senior_leadership_team,
-                   d.business_function AS business_function
+            RETURN {_directory_record_projection("d")}
             """,
             {"site_code": str(site_code or "").strip()},
         )
@@ -568,6 +545,12 @@ def _row_to_record(row: dict[str, Any]) -> DirectoryPersonRecord:
         senior_leadership_team=str(row.get("senior_leadership_team") or ""),
         business_function=str(row.get("business_function") or ""),
         tenure=str(row.get("tenure") or ""),
+    )
+
+
+def _directory_record_projection(alias: str) -> str:
+    return ",\n                   ".join(
+        f"{alias}.{field} AS {field}" for field in DIRECTORY_RECORD_FIELDS
     )
 
 

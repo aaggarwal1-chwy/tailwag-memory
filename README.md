@@ -24,9 +24,16 @@ Implemented now:
 - `Event`
 - `Place`
 - `MemoryItem`
+- `EmployeeDirectoryRecord`
+- `FaceReference`
+- `VoiceReference`
 - `PARTICIPATED_IN`
+- `MENTIONED_IN`
 - `OCCURRED_AT`
 - `ATTENDED`
+- `HAS_DIRECTORY_RECORD`
+- `HAS_FACE_REFERENCE`
+- `HAS_VOICE_REFERENCE`
 - `HAS_MEMORY`
 - `SUPPORTED_BY`
 - `ADDRESSED_BY`
@@ -41,6 +48,7 @@ Implemented now:
 - `FaceReference` and `VoiceReference` nodes for caller-supplied biometric vectors
 - adaptive biometric reference aggregation with per-reference sample counts
 - graph and vector retrieval services
+- Snowflake-backed employee directory sync and local JSON directory import
 - Slack channel polling into conversation episodes
 - source-provided event attendees
 - optional read-only inspect reports for follow-up validity, affect, person timelines, and memory items
@@ -113,6 +121,10 @@ For Slack polling, also add your bot token:
 ```bash
 SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
+
+Directory sync is part of the base package. `tailwag directory sync --site-code ...`
+reads from Snowflake when no JSON file is supplied, using the `SNOWFLAKE_*`
+variables in `.env.example`; `--file` imports local directory rows instead.
 
 Optional inspection reports export read-only local HTML or JSON views:
 

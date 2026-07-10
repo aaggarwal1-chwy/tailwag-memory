@@ -85,6 +85,38 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         self.assertEqual(result.status, "single_match")
         self.assertEqual(result.candidates[0].username, "jamie")
 
+    def test_get_verified_profile_returns_directory_projection(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "site_code": "BOS3",
+                        "official_name": "Jamie Example",
+                        "username": "jamie",
+                        "employee_email": "jamie@example.com",
+                        "business_title": "Engineer",
+                        "tenure": "2 years",
+                        "manager_name": "Manager Example",
+                    }
+                ]
+            ]
+        )
+        service = DirectoryIdentityService(runner)
+
+        profile = service.get_verified_profile(
+            username="Jamie",
+            official_name="Jamie Example",
+            site_code="BOS3",
+        )
+
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile.person_id, "person_jamie")
+        self.assertEqual(
+            profile.directory_profile_lines,
+            ("Title: Engineer", "Manager: Manager Example", "Tenure: 2 years"),
+        )
+        self.assertIn("d.senior_leadership_team AS senior_leadership_team", runner.queries[0].query)
+
     def test_record_encounter_links_verified_person_to_directory_record(self) -> None:
         runner = RecordingQueryRunner()
         service = DirectoryIdentityService(runner)

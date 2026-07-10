@@ -89,7 +89,7 @@ Inputs:
 
 Outputs:
 
-- constraints for `Person.id`, `Episode.id`, `Event.id`, `MemoryItem.id`, and `(Place.building_code, Place.room_id)`
+- constraints for `Person.id`, `Person.email`, `Episode.id`, `Event.id`, `MemoryItem.id`, `(EmployeeDirectoryRecord.site_code, EmployeeDirectoryRecord.username)`, `FaceReference.id`, `VoiceReference.id`, and `(Place.building_code, Place.room_id)`
 - vector indexes for `Episode.transcript_embedding`, `FaceReference.embedding`, `VoiceReference.embedding`, and `MemoryItem.summary_embedding`
 - schema initialization command support
 
@@ -466,7 +466,7 @@ Non-goals:
 
 - If a task touches schema and ingestion, start with the Neo4j Schema Agent, then hand off to the Ingestion Agent.
 - If a task touches ingestion and retrieval, keep writes in the Ingestion Agent and reads in the Retrieval Agent.
-- If a change adds a new concept beyond `Person`, `Episode`, `Event`, `Place`, or approved transcript-derived `MemoryItem`, pause and update the project scope before implementation.
+- If a change adds a new concept beyond approved `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `EmployeeDirectoryRecord`, `FaceReference`, or `VoiceReference` scope, pause and update the project scope before implementation.
 - If a change adds or changes memory item semantics, trigger the Memory Item Agent before handing off to schema, embeddings, or retrieval owners.
 - If a change targets `argos-agent` Tailwag memory provider compatibility, trigger the Argos Migration Agent.
 - If code starts mixing provider logic, Cypher, CLI parsing, and domain models in one file, trigger the Code Refactor Agent.

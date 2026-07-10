@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`tailwag-memory` is intended to be used by another Python repo as a package. The calling system owns IDs, identity decisions, biometric embedding generation, raw media handling, runtime orchestration, and retention policy. Tailwag owns durable Neo4j memory storage, embeddings, memory extraction/consolidation, retrieval, person context, and source adapters.
+`tailwag-memory` is intended to be used by another Python repo as a package. The calling system owns IDs, identity decisions, biometric embedding generation, raw media handling, runtime orchestration, and retention policy. Tailwag owns durable Neo4j memory storage, embeddings, memory extraction/consolidation, retrieval, person context, employee-directory row storage, and source adapters.
 
 This guide stays at the package setup and integration-boundary level. For detailed command syntax, endpoint signatures, payload shapes, and source-adapter operation, use the focused references below.
 
@@ -48,6 +48,14 @@ export TAILWAG_FACE_EMBEDDING_MODEL=facenet
 export TAILWAG_VOICE_EMBEDDING_MODEL=speechbrain_ecapa
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
+export SNOWFLAKE_ACCOUNT=CHEWY-CHEWY
+export SNOWFLAKE_USER=<username>@CHEWY.COM
+export SNOWFLAKE_PASSWORD=
+export SNOWFLAKE_AUTHENTICATOR=externalbrowser
+export SNOWFLAKE_ROLE=X_EDLDB_USER
+export SNOWFLAKE_WAREHOUSE=SNOWFLAKE_LEARNING_WH
+export SNOWFLAKE_DATABASE=EDLDB
+export SNOWFLAKE_SCHEMA=CHEWYBI
 ```
 
 Configuration notes:
@@ -59,6 +67,7 @@ Configuration notes:
 - `TAILWAG_FACE_EMBEDDING_MODEL` and `TAILWAG_VOICE_EMBEDDING_MODEL` identify the one supported upstream biometric model per modality. Tailwag stores those names on references and rejects adaptive updates when stored references were created with a different configured model.
 - `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by memory extraction and consolidation providers.
 - `SLACK_BOT_TOKEN` is only required when polling Slack.
+- `SNOWFLAKE_*` variables are only required when using `sync_directory_from_snowflake()` or `tailwag directory sync` without `--file`. The Snowflake connector is currently a base package dependency because directory sync is part of the current CLI/API surface.
 - `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are optional paths used only by `tailwag inspect affect`.
 
 ## Setup Sequence
@@ -79,6 +88,7 @@ The consuming system should provide:
 - stable caller-owned `Person.id`, `Episode.id`, and `Event.id` values
 - person identity and re-enrollment decisions
 - consent status and retention policy
+- employee directory rows or Snowflake credentials when using Tailwag directory identity features
 - face and voice embeddings from upstream recognition models, passed through Tailwag's biometric reference APIs when durable biometric state is intended
 - raw transcript, place, participant, and event payloads
 - Slack channel IDs and bot credentials when using Slack ingestion
@@ -89,6 +99,7 @@ Tailwag provides:
 - episode, event, person, and memory item storage
 - OpenAI-backed episode and memory item embeddings
 - transcript-derived memory extraction and per-person memory consolidation
+- employee directory sync, fuzzy identity resolution, verified profile projection, and person encounter recording
 - graph, vector, biometric, and person-context retrieval
 - biometric reference enrollment/search and adaptive reference aggregation
 - Slack source adapter mapping into normal Tailwag episodes
@@ -101,7 +112,7 @@ Normal package consumers should start with:
 from tailwag_memory import TailwagMemoryClient
 ```
 
-`TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, episode recording, memory extraction/backfill, memory consolidation, prompt-ready person context, and structured semantic search across a person's episodes and memory items. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
+`TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, directory sync and identity resolution, biometric reference enrollment/search/update, turn-owner resolution, episode recording, memory extraction/backfill, memory consolidation, prompt-ready and structured person context, and structured semantic search across a person's episodes and memory items. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
 
 Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, or direct memory item operations. Their constructor and method details also live in the endpoint reference.
 

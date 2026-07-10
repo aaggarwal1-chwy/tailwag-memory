@@ -15,9 +15,16 @@ Implemented now:
 - `Event`
 - `Place`
 - `MemoryItem`
+- `EmployeeDirectoryRecord`
+- `FaceReference`
+- `VoiceReference`
 - `PARTICIPATED_IN`
+- `MENTIONED_IN`
 - `OCCURRED_AT`
 - `ATTENDED`
+- `HAS_DIRECTORY_RECORD`
+- `HAS_FACE_REFERENCE`
+- `HAS_VOICE_REFERENCE`
 - `HAS_MEMORY`
 - `SUPPORTED_BY`
 - `ADDRESSED_BY`
@@ -33,6 +40,7 @@ Implemented now:
 - caller-supplied `VoiceReference.embedding`
 - adaptive biometric reference aggregation with per-reference sample counts
 - graph and vector retrieval services
+- Snowflake-backed employee directory sync and local JSON directory import
 - Slack channel polling into conversation episodes
 - episode mention relationships
 - source-provided event attendees
@@ -73,6 +81,7 @@ Deferred intentionally:
 (:Person {
   id,
   display_name,
+  official_name,
   email,
   consent_status,
   last_seen,
@@ -86,6 +95,48 @@ Deferred intentionally:
 `Person.id` comes from the calling system. When email is present, Tailwag stores it as `lower(trim(email))`, resolves writes to an existing same-email person before creating a new node, and Neo4j enforces `email` as unique. If an incoming canonical `person_*` ID matches a Slack temporary person by email, Tailwag rekeys that Slack node in place when the canonical ID is available. `last_seen` is updated when the person participates in a newer episode, attends a newer event, or receives an explicit person-only identity upsert.
 
 Archived people keep historical graph data, and recognition/update paths exclude their biometric references. Re-enrollment should use the explicit biometric APIs after the caller decides the identity is active again.
+
+### EmployeeDirectoryRecord
+
+```cypher
+(:EmployeeDirectoryRecord {
+  <id>,
+  site_code,
+  username,
+  official_name,
+  display_name,
+  name,
+  employee_email,
+  business_title,
+  job_family,
+  job_family_group,
+  job_level,
+  c_level,
+  manager_name,
+  cost_center,
+  senior_leadership_team,
+  business_function,
+  tenure,
+  normalized_name,
+  token_sorted_name,
+  source,
+  updated_at,
+  created_at
+})
+```
+
+Directory rows are keyed by `(site_code, username)` and are loaded through
+`DirectoryIdentityService.sync_directory_people(...)`,
+`sync_directory_from_snowflake(...)`, or `tailwag directory sync`. Snowflake is
+the runtime source when the CLI sync command omits `--file`; local JSON records
+use the same normalized row shape.
+
+Current reconciliation links people to directory rows by the username portion of
+their email. Directory sync also links same-username people while loading rows.
+Biometric enrollment and explicit encounter recording can additionally link a
+specific directory row when metadata supplies both `username` and `site_code`.
+`<id>` is Neo4j Browser's internal node identifier; Tailwag does not store an
+application-level `id` property on `EmployeeDirectoryRecord`.
 
 ### Biometric References
 
@@ -226,6 +277,12 @@ Related or redundant memories can be merged into one active memory. Superseded s
   response_time
 }]->(:Event)
 
+(:Person)-[:HAS_DIRECTORY_RECORD]->(:EmployeeDirectoryRecord)
+
+(:Person)-[:HAS_FACE_REFERENCE]->(:FaceReference)
+
+(:Person)-[:HAS_VOICE_REFERENCE]->(:VoiceReference)
+
 (:Person)-[:HAS_MEMORY]->(:MemoryItem)
 
 (:MemoryItem)-[:SUPPORTED_BY]->(:Episode)
@@ -243,6 +300,15 @@ Related or redundant memories can be merged into one active memory. Superseded s
 `MENTIONED_IN.source` records how the calling system decided the person was named or referenced in the episode. It does not imply the person was present, does not update `Person.last_seen`, and does not make the person a memory-extraction target.
 
 `ATTENDED.source` records how the calling system determined attendance. For a future Outlook adapter, `source="outlook"` and `response="accepted"` can map accepted RSVP data without adding Outlook polling to current scope.
+
+`HAS_DIRECTORY_RECORD` links a person to one or more Tailwag-owned employee
+directory rows used for profile projection and identity resolution. The code
+currently reconciles generic person writes by email username; site-specific
+metadata is used only where the caller supplies a site.
+
+`HAS_FACE_REFERENCE` and `HAS_VOICE_REFERENCE` link people to active or archived
+biometric reference nodes. Search and adaptive update paths only consider active,
+consented references on non-archived people.
 
 `SUPERSEDED_BY` points from a superseded source memory to the active merged memory that replaces it.
 
@@ -337,18 +403,28 @@ Core runtime settings are loaded from environment variables or `.env`:
 | `TAILWAG_VOICE_EMBEDDING_MODEL` | `speechbrain_ecapa` | Upstream voice embedding model name stamped on voice references and adaptive updates. |
 | `TAILWAG_SYNTHESIS_MODEL` | `gpt-5.5` | OpenAI model used by memory extraction and consolidation providers. |
 | `SLACK_BOT_TOKEN` | unset | Required only when polling Slack. |
+| `SNOWFLAKE_ACCOUNT` | unset | Required by `tailwag directory sync` when reading directory rows from Snowflake. |
+| `SNOWFLAKE_USER` | unset | Snowflake user for directory sync. |
+| `SNOWFLAKE_PASSWORD` | unset | Optional Snowflake password; the code also supports external-browser authentication. |
+| `SNOWFLAKE_AUTHENTICATOR` | unset | Optional Snowflake authenticator, such as `externalbrowser`. |
+| `SNOWFLAKE_ROLE` | unset | Optional Snowflake role. |
+| `SNOWFLAKE_WAREHOUSE` | unset | Optional Snowflake warehouse. |
+| `SNOWFLAKE_DATABASE` | unset | Required by the Snowflake connector wrapper. |
+| `SNOWFLAKE_SCHEMA` | unset | Optional Snowflake schema. |
 | `TAILWAG_AFFECT_FOLD1_MODEL` | unset | Optional external XLM-RoBERTa-large fold 1 model directory for `tailwag inspect affect`. |
 | `TAILWAG_AFFECT_FOLD2_MODEL` | unset | Optional external XLM-RoBERTa-large fold 2 model directory for `tailwag inspect affect`. |
 
 ## Neo4j Browser IDs
 
-Neo4j Browser shows internal identity fields such as `<id>` and `<elementId>` in addition to this project's `id` property.
+Neo4j Browser shows internal identity fields such as `<id>` and `<elementId>` in addition to application-level key properties.
 
 - `<id>` is Neo4j's legacy internal numeric node or relationship ID.
 - `<elementId>` is Neo4j's internal string identifier for a graph element.
-- `id` is the application-level identifier supplied by the calling system.
+- `id` is the application-level identifier for `Person`, `Episode`, `Event`, `MemoryItem`, `FaceReference`, and `VoiceReference`.
+- `Place` uses `(building_code, room_id)`.
+- `EmployeeDirectoryRecord` uses `(site_code, username)` and does not store an application-level `id` property.
 
-Application code should use the `id` property for `Person`, `Episode`, and `Event`. Do not store or depend on Neo4j internal IDs.
+Application code should use application-level keys, not Neo4j internal IDs.
 
 ## Extension Path
 

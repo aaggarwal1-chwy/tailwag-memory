@@ -76,7 +76,7 @@ tailwag directory sync --site-code BOS3 --file path/to/directory-records.json
 tailwag identity resolve --site-code BOS3 --first Jamie --last Example
 ```
 
-`directory sync` reads from Snowflake when `--file` is omitted. The JSON file form is for local fixtures or offline imports of directory records.
+`directory sync` reads from Snowflake when `--file` is omitted and uses the `SNOWFLAKE_*` environment variables loaded by the package. The JSON file form is for local fixtures or offline imports of directory records and maps each object to `DirectoryPersonRecord`.
 
 Search people by caller-supplied biometric reference vectors:
 
