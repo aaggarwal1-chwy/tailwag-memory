@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+from types import SimpleNamespace
 import unittest
 
 try:
@@ -8,10 +9,19 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency guard
     TestClient = None
 
 from tailwag_memory.models import (
+    BiometricCandidate,
+    BiometricEnrollmentResult,
+    BiometricSearchResult,
+    BiometricUpdateResult,
     EpisodeInput,
     EpisodeRecordResult,
+    IdentityResolutionResult,
+    OwnerResolutionResult,
+    PersonContextResult,
     PersonInput,
     PersonMemoryExtractionResult,
+    PersonProfile,
+    VerifiedProfile,
 )
 
 API_BASE = "/argos/providers/memory/resources/memory/request"
@@ -272,6 +282,313 @@ class TailwagApiAppTest(unittest.TestCase):
             ],
         )
 
+    def test_structured_context_and_identity_routes_call_matching_client_methods(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+
+        structured = client.post(
+            f"{API_BASE}/person-context-structured",
+            headers=_auth_header(),
+            json={"person_id": "person_jamie", "current_text": "robot demo"},
+        )
+        profile = client.post(
+            f"{API_BASE}/people/profile",
+            headers=_auth_header(),
+            json={"person_id": "person_jamie"},
+        )
+        resolved = client.post(
+            f"{API_BASE}/identity/resolve",
+            headers=_auth_header(),
+            json={
+                "shared_first_name": "Jamie",
+                "shared_last_name": "Example",
+                "shared_name": "Jamie Example",
+                "site_code": "BOS3",
+            },
+        )
+        verified = client.post(
+            f"{API_BASE}/identity/verified-profile",
+            headers=_auth_header(),
+            json={"username": "jexample", "official_name": "Jamie Example", "site_code": "BOS3"},
+        )
+
+        self.assertEqual(structured.status_code, 200)
+        self.assertEqual(
+            structured.json(),
+            {
+                "person_id": "person_jamie",
+                "directory_profile_lines": ["Jamie Example"],
+                "memory_profile_lines": ["likes robot demos"],
+                "potential_followups": ["ask about robotics"],
+                "preferred_language": "English",
+            },
+        )
+        self.assertEqual(profile.json()["person_id"], "person_jamie")
+        self.assertTrue(resolved.json()["success"])
+        self.assertEqual(verified.json()["username"], "jexample")
+        self.assertEqual(
+            fake.calls,
+            [
+                (
+                    "person_context_structured",
+                    "person_jamie",
+                    {"current_text": "robot demo"},
+                ),
+                ("person_profile", "person_jamie"),
+                (
+                    "resolve_identity",
+                    {
+                        "shared_first_name": "Jamie",
+                        "shared_last_name": "Example",
+                        "shared_name": "Jamie Example",
+                        "site_code": "BOS3",
+                    },
+                ),
+                (
+                    "get_verified_profile",
+                    {
+                        "username": "jexample",
+                        "official_name": "Jamie Example",
+                        "site_code": "BOS3",
+                    },
+                ),
+            ],
+        )
+
+    def test_biometric_search_routes_delegate_and_narrow_response(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+
+        face = client.post(
+            f"{API_BASE}/biometrics/face/search",
+            headers=_auth_header(),
+            json={"embedding": [0.1, 0.2], "limit": 2, "site_code": "BOS3"},
+        )
+        voice = client.post(
+            f"{API_BASE}/biometrics/voice/search",
+            headers=_auth_header(),
+            json={"embedding": [0.3, 0.4], "limit": 2, "site_code": "BOS3"},
+        )
+
+        self.assertEqual(face.status_code, 200)
+        self.assertTrue(face.json()["recognized"])
+        self.assertEqual(face.json()["candidates"][0]["person_id"], "person_jamie")
+        self.assertNotIn("embedding", face.json()["candidates"][0])
+        self.assertEqual(voice.status_code, 200)
+        self.assertEqual(
+            fake.calls,
+            [
+                (
+                    "search_face",
+                    {"embedding": [0.1, 0.2], "limit": 2, "site_code": "BOS3"},
+                ),
+                (
+                    "search_voice",
+                    {"embedding": [0.3, 0.4], "limit": 2, "site_code": "BOS3"},
+                ),
+            ],
+        )
+
+    def test_biometric_write_routes_delegate_to_matching_client_methods(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+
+        face_enroll = client.post(
+            f"{API_BASE}/biometrics/face/references",
+            headers=_auth_header(),
+            json={
+                "person_id": "person_jamie",
+                "embedding": [0.1, 0.2],
+                "metadata": {"source": "test"},
+                "consent_status": "consented",
+            },
+        )
+        voice_enroll = client.post(
+            f"{API_BASE}/biometrics/voice/references",
+            headers=_auth_header(),
+            json={
+                "person_id": "person_jamie",
+                "embedding": [0.3, 0.4],
+                "metadata": {"source": "test"},
+                "consent_status": "revoked",
+            },
+        )
+        face_observe = client.post(
+            f"{API_BASE}/biometrics/face/observations",
+            headers=_auth_header(),
+            json={
+                "person_id": "person_jamie",
+                "embedding": [0.5, 0.6],
+                "evidence": {"owner_source": "audio_face_agree"},
+                "metadata": {"source": "runtime"},
+            },
+        )
+        voice_observe = client.post(
+            f"{API_BASE}/biometrics/voice/observations",
+            headers=_auth_header(),
+            json={
+                "person_id": "person_jamie",
+                "embedding": [0.7, 0.8],
+                "evidence": {"owner_source": "audio_face_agree"},
+                "metadata": {"source": "runtime"},
+            },
+        )
+
+        self.assertEqual(face_enroll.json()["status"], "saved")
+        self.assertEqual(voice_enroll.json()["status"], "rejected")
+        self.assertEqual(voice_enroll.json()["reason"], "consent_required")
+        self.assertTrue(face_observe.json()["accepted"])
+        self.assertTrue(voice_observe.json()["accepted"])
+        self.assertEqual(
+            [call[0] for call in fake.calls],
+            [
+                "enroll_face_reference",
+                "enroll_voice_reference",
+                "observe_face_embedding",
+                "observe_voice_embedding",
+            ],
+        )
+
+    def test_voice_reference_and_turn_owner_routes_delegate(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+
+        exists = client.post(
+            f"{API_BASE}/biometrics/voice/references/exists",
+            headers=_auth_header(),
+            json={"person_id": "person_jamie"},
+        )
+        owner = client.post(
+            f"{API_BASE}/turn-owner/resolve",
+            headers=_auth_header(),
+            json={
+                "primary_face_candidate": {
+                    "person_id": "person_jamie",
+                    "display_name": "Jamie",
+                    "score": 0.91,
+                },
+                "visible_face_candidates": [
+                    {"person_id": "person_jamie", "display_name": "Jamie", "score": 0.91}
+                ],
+                "voice_candidate": {
+                    "person_id": "person_jamie",
+                    "display_name": "Jamie",
+                    "score": 0.87,
+                },
+                "policy_context": {"source": "test"},
+            },
+        )
+
+        self.assertEqual(exists.json(), {"has_voice_reference": True})
+        self.assertEqual(owner.json()["owner_id"], "person_jamie")
+        self.assertEqual(owner.json()["owner_source"], "audio_face_agree")
+        self.assertEqual(
+            fake.calls,
+            [
+                ("has_voice_reference", "person_jamie"),
+                (
+                    "resolve_turn_owner",
+                    {
+                        "primary_face_candidate": {
+                            "person_id": "person_jamie",
+                            "display_name": "Jamie",
+                            "score": 0.91,
+                            "metadata": {},
+                        },
+                        "visible_face_candidates": [
+                            {
+                                "person_id": "person_jamie",
+                                "display_name": "Jamie",
+                                "score": 0.91,
+                                "metadata": {},
+                            }
+                        ],
+                        "voice_candidate": {
+                            "person_id": "person_jamie",
+                            "display_name": "Jamie",
+                            "score": 0.87,
+                            "metadata": {},
+                        },
+                        "policy_context": {"source": "test"},
+                    },
+                ),
+            ],
+        )
+
+    def test_biometric_routes_reject_raw_media_and_wrong_dimensions(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+
+        raw_media = client.post(
+            f"{API_BASE}/biometrics/face/references",
+            headers=_auth_header(),
+            json={
+                "person_id": "person_jamie",
+                "embedding": [0.1, 0.2],
+                "metadata": {"raw_image": "data:image/png;base64,abc"},
+            },
+        )
+        unexpected_field = client.post(
+            f"{API_BASE}/biometrics/voice/observations",
+            headers=_auth_header(),
+            json={
+                "person_id": "person_jamie",
+                "embedding": [0.1, 0.2],
+                "evidence": {"owner_source": "audio_face_agree"},
+                "confidence": 0.99,
+            },
+        )
+        wrong_dimension = client.post(
+            f"{API_BASE}/biometrics/voice/search",
+            headers=_auth_header(),
+            json={"embedding": [0.1], "limit": 2},
+        )
+
+        self.assertEqual(raw_media.status_code, 422)
+        self.assertEqual(unexpected_field.status_code, 422)
+        self.assertEqual(wrong_dimension.status_code, 422)
+
+    def test_openapi_exposes_argos_parity_routes_without_raw_media_fields(self) -> None:
+        from tailwag_memory.api.app import create_app
+
+        response = TestClient(create_app()).get("/openapi.json")
+
+        self.assertEqual(response.status_code, 200)
+        document = response.json()
+        paths = set(document["paths"])
+        self.assertIn(f"{API_BASE}/biometrics/face/search", paths)
+        self.assertIn(f"{API_BASE}/person-context-structured", paths)
+        self.assertIn(f"{API_BASE}/turn-owner/resolve", paths)
+        rendered = str(document)
+        self.assertIn("embedding", rendered)
+        self.assertNotIn("raw_image", rendered)
+        self.assertNotIn("raw_audio", rendered)
+
 
 def _auth_header() -> dict[str, str]:
     return {"Authorization": "Bearer test-token"}
@@ -280,16 +597,25 @@ def _auth_header() -> dict[str, str]:
 @dataclass
 class _FakeClient:
     calls: list = None
+    settings: object = None
 
     def __post_init__(self) -> None:
         self.calls = []
-
-    def person_context_structured(self, *args, **kwargs):
-        raise AssertionError("API must not call person_context_structured")
+        self.settings = SimpleNamespace(face_embedding_dimension=2, voice_embedding_dimension=2)
 
     def person_context(self, person_id: str, **kwargs) -> str:
         self.calls.append(("person_context", person_id, kwargs))
         return "[PERSON MEMORY]\n- likes robot demos"
+
+    def person_context_structured(self, person_id: str, **kwargs) -> PersonContextResult:
+        self.calls.append(("person_context_structured", person_id, kwargs))
+        return PersonContextResult(
+            person_id=person_id,
+            directory_profile_lines=("Jamie Example",),
+            memory_profile_lines=("likes robot demos",),
+            potential_followups=("ask about robotics",),
+            preferred_language="English",
+        )
 
     def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
         self.calls.append(("record_episode", episode, {"extract_memory": extract_memory}))
@@ -322,6 +648,141 @@ class _FakeClient:
     def rekey_person_by_email(self, email: str, new_person_id: str) -> bool:
         self.calls.append(("rekey_person_by_email", email, new_person_id))
         return True
+
+    def person_profile(self, person_id: str) -> PersonProfile:
+        self.calls.append(("person_profile", person_id))
+        return PersonProfile(
+            person_id=person_id,
+            display_name="Jamie",
+            email="jamie@example.com",
+            directory_profile_lines=("Jamie Example",),
+        )
+
+    def resolve_identity(self, **kwargs) -> IdentityResolutionResult:
+        self.calls.append(("resolve_identity", kwargs))
+        return IdentityResolutionResult(
+            success=True,
+            status="matched",
+            message="matched",
+            data={"person_id": "person_jamie"},
+        )
+
+    def get_verified_profile(self, **kwargs) -> VerifiedProfile:
+        self.calls.append(("get_verified_profile", kwargs))
+        return VerifiedProfile(
+            person_id="person_jamie",
+            official_name=kwargs["official_name"],
+            username=kwargs["username"],
+            employee_email="jamie@example.com",
+        )
+
+    def search_face(self, **kwargs) -> BiometricSearchResult:
+        self.calls.append(("search_face", kwargs))
+        return BiometricSearchResult(
+            modality="face",
+            candidates=[
+                BiometricCandidate(
+                    person_id="person_jamie",
+                    display_name="Jamie",
+                    score=0.91,
+                    reference_id="face-ref-1",
+                    metadata={"source": "test"},
+                )
+            ],
+            recognized=True,
+            status="accepted",
+            reason="matched",
+            threshold=0.6,
+            top_score=0.91,
+            margin=0.3,
+        )
+
+    def search_voice(self, **kwargs) -> BiometricSearchResult:
+        self.calls.append(("search_voice", kwargs))
+        return BiometricSearchResult(
+            modality="voice",
+            candidates=[
+                BiometricCandidate(person_id="person_jamie", display_name="Jamie", score=0.87)
+            ],
+            recognized=True,
+            status="accepted",
+            reason="matched",
+            threshold=0.5,
+            top_score=0.87,
+            margin=0.27,
+        )
+
+    def enroll_face_reference(self, **kwargs) -> BiometricEnrollmentResult:
+        self.calls.append(("enroll_face_reference", kwargs))
+        return BiometricEnrollmentResult(
+            saved=True,
+            status="saved",
+            reason="saved",
+            person_id=kwargs["person_id"],
+            reference_id="face-ref-1",
+        )
+
+    def enroll_voice_reference(self, **kwargs) -> BiometricEnrollmentResult:
+        self.calls.append(("enroll_voice_reference", kwargs))
+        if kwargs["consent_status"] != "consented":
+            return BiometricEnrollmentResult(
+                saved=False,
+                status="rejected",
+                reason="consent_required",
+                person_id=kwargs["person_id"],
+            )
+        return BiometricEnrollmentResult(
+            saved=True,
+            status="saved",
+            reason="saved",
+            person_id=kwargs["person_id"],
+            reference_id="voice-ref-1",
+        )
+
+    def observe_face_embedding(self, **kwargs) -> BiometricUpdateResult:
+        self.calls.append(("observe_face_embedding", kwargs))
+        return BiometricUpdateResult(
+            accepted=True,
+            status="updated",
+            reason="updated",
+            person_id=kwargs["person_id"],
+            reference_id="face-ref-1",
+            modality="face",
+            sample_count=2,
+            target_sample_count=5,
+            similarity=0.92,
+        )
+
+    def observe_voice_embedding(self, **kwargs) -> BiometricUpdateResult:
+        self.calls.append(("observe_voice_embedding", kwargs))
+        return BiometricUpdateResult(
+            accepted=True,
+            status="updated",
+            reason="updated",
+            person_id=kwargs["person_id"],
+            reference_id="voice-ref-1",
+            modality="voice",
+            sample_count=2,
+            target_sample_count=5,
+            similarity=0.88,
+        )
+
+    def has_voice_reference(self, person_id: str) -> bool:
+        self.calls.append(("has_voice_reference", person_id))
+        return True
+
+    def resolve_turn_owner(self, **kwargs) -> OwnerResolutionResult:
+        self.calls.append(("resolve_turn_owner", kwargs))
+        return OwnerResolutionResult(
+            audio_speaker_id="person_jamie",
+            top_score=0.87,
+            runner_up_score=0.6,
+            margin=0.27,
+            speaker_visible=True,
+            owner_id="person_jamie",
+            owner_source="audio_face_agree",
+            owner_confidence=0.87,
+        )
 
 
 if __name__ == "__main__":

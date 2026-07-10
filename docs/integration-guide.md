@@ -130,7 +130,7 @@ Slack adapter classes are imported from `tailwag_memory.slack_ingestion`, not fr
 
 Inspection helpers are imported from `tailwag_memory.inspect`, not from the top-level package. They are intended for local investigation and reporting, not for normal memory-service integration.
 
-The optional FastAPI adapter mirrors selected `TailwagMemoryClient` calls for service deployments under `/argos/providers/memory/resources/memory/request/{request_id}`. See [Optional HTTP Endpoints](memory-endpoints.md#optional-http-endpoints) for routes, auth, docs exposure, and local run commands.
+The optional FastAPI adapter mirrors the Argos-facing package operations for service deployments under `/argos/providers/memory/resources/memory/request/{request_id}`. It includes episode recording, semantic search, identity/profile lookups, structured and markdown person context, biometric search/enrollment/observation, voice-reference checks, and turn-owner resolution. Biometric HTTP routes accept embeddings only; raw images, raw audio, media URLs, and base64 media fields are rejected. See [Optional HTTP Endpoints](memory-endpoints.md#optional-http-endpoints) for the full route list, auth, docs exposure, and local run commands.
 
 ## Operational Notes
 

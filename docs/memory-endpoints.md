@@ -135,6 +135,28 @@ Returns:
 }
 ```
 
+### `POST /argos/providers/memory/resources/memory/request/person-context-structured`
+
+Request:
+
+```json
+{"person_id": "person_jamie", "current_text": "robot demo later today"}
+```
+
+Calls `TailwagMemoryClient.person_context_structured(...)`.
+
+Returns:
+
+```json
+{
+  "person_id": "person_jamie",
+  "directory_profile_lines": [],
+  "memory_profile_lines": [],
+  "potential_followups": [],
+  "preferred_language": "English"
+}
+```
+
 ### `POST /argos/providers/memory/resources/memory/request/episodes`
 
 Request:
@@ -212,6 +234,115 @@ Returns:
 ```json
 {"rekeyed": true}
 ```
+
+### `POST /argos/providers/memory/resources/memory/request/people/profile`
+
+Request:
+
+```json
+{"person_id": "person_jamie"}
+```
+
+Returns a `PersonProfile` dictionary or `null`.
+
+### `POST /argos/providers/memory/resources/memory/request/identity/resolve`
+
+Request:
+
+```json
+{
+  "shared_first_name": "Jamie",
+  "shared_last_name": "Example",
+  "shared_name": "Jamie Example",
+  "site_code": "BOS3"
+}
+```
+
+Returns the `IdentityResolutionResult` dictionary shape.
+
+### `POST /argos/providers/memory/resources/memory/request/identity/verified-profile`
+
+Request:
+
+```json
+{"username": "jexample", "official_name": "Jamie Example", "site_code": "BOS3"}
+```
+
+Returns a `VerifiedProfile` dictionary or `null`.
+
+### Biometric HTTP routes
+
+Biometric HTTP routes accept embeddings only. They do not accept raw face images,
+face crops, raw audio, waveforms, media URLs, or base64 media fields. Request
+bodies with raw-media-like fields are rejected.
+
+The vector examples below are truncated for readability. Real requests must
+send embeddings with the configured modality dimension, such as
+`TAILWAG_FACE_EMBEDDING_DIMENSION` for face routes and
+`TAILWAG_VOICE_EMBEDDING_DIMENSION` for voice routes.
+
+| Route | Client call |
+| --- | --- |
+| `POST /argos/providers/memory/resources/memory/request/biometrics/face/search` | `search_face(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics/voice/search` | `search_voice(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics/face/references` | `enroll_face_reference(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics/voice/references` | `enroll_voice_reference(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics/face/observations` | `observe_face_embedding(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics/voice/observations` | `observe_voice_embedding(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics/voice/references/exists` | `has_voice_reference(...)` |
+
+Search request:
+
+```json
+{"embedding": [0.1, 0.2], "limit": 2, "site_code": "BOS3"}
+```
+
+Enrollment request:
+
+```json
+{
+  "person_id": "person_jamie",
+  "embedding": [0.1, 0.2],
+  "metadata": {"source": "argos"},
+  "consent_status": "consented"
+}
+```
+
+Observation request:
+
+```json
+{
+  "person_id": "person_jamie",
+  "embedding": [0.1, 0.2],
+  "evidence": {"owner_source": "audio_face_agree"},
+  "metadata": {"source": "argos"}
+}
+```
+
+Voice reference existence request:
+
+```json
+{"person_id": "person_jamie"}
+```
+
+Search responses return the `BiometricSearchResult` shape with narrowed
+candidate dictionaries containing `person_id`, `display_name`, `score`, and
+`metadata`; embeddings are not echoed.
+
+### `POST /argos/providers/memory/resources/memory/request/turn-owner/resolve`
+
+Request:
+
+```json
+{
+  "primary_face_candidate": {"person_id": "person_jamie", "display_name": "Jamie", "score": 0.91},
+  "visible_face_candidates": [],
+  "voice_candidate": {"person_id": "person_jamie", "display_name": "Jamie", "score": 0.87},
+  "policy_context": {}
+}
+```
+
+Returns the `OwnerResolutionResult` dictionary shape.
 
 ## Quick Start
 

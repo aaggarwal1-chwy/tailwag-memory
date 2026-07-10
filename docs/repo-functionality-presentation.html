@@ -482,22 +482,22 @@
           <div class="slide-grid">
             <div class="copy">
               <div class="eyebrow">Graph database model</div>
-              <h1>Memory as connected records</h1>
+              <h1>Memory as connected contracts</h1>
               <p class="lead">
-                Tailwag stores assistant memory as an explainable and traceable graph: people, conversations, events, places, and durable memory items.
+                Tailwag stores durable assistant memory as explainable Neo4j records with clear caller-owned IDs, evidence links, and adapter boundaries.
               </p>
               <div class="facts">
                 <div class="fact">
                   <strong>Core nodes</strong>
-                  <span><code>Person</code>, <code>Episode</code>, <code>Event</code>, <code>Place</code>, and <code>MemoryItem</code> cover the current product memory scope.</span>
+                  <span><code>Person</code>, <code>Episode</code>, <code>Event</code>, <code>Place</code>, <code>MemoryItem</code>, directory rows, and biometric references cover the current scope.</span>
                 </div>
                 <div class="fact">
                   <strong>Traceable links</strong>
-                  <span>Relationships preserve who participated, where things happened, and what evidence supports memory.</span>
+                  <span>Relationships preserve participation, mentions, locations, directory matches, biometric references, and memory evidence.</span>
                 </div>
                 <div class="fact">
                   <strong>Focused scope</strong>
-                  <span>Built for natural conversation recall.</span>
+                  <span>Neo4j is the only persistence layer; deferred ontology, confidence, <code>org_id</code>, and secondary stores stay out of scope.</span>
                 </div>
               </div>
             </div>
@@ -544,17 +544,17 @@
                   <g>
                     <rect class="schema-node" x="28" y="88" width="128" height="98" rx="14" fill="#0f766e"></rect>
                     <text class="schema-title" x="58" y="128">Person</text>
-                    <text class="schema-subtitle" x="50" y="154">identity + profile</text>
+                    <text class="schema-subtitle" x="42" y="154">identity + directory</text>
                   </g>
                   <g>
                     <rect class="schema-node" x="294" y="88" width="150" height="98" rx="14" fill="#2563a8"></rect>
                     <text class="schema-title" x="336" y="128">Episode</text>
-                    <text class="schema-subtitle" x="318" y="154">conversation record</text>
+                    <text class="schema-subtitle" x="314" y="154">conversation + mentions</text>
                   </g>
                   <g>
                     <rect class="schema-node" x="292" y="266" width="154" height="104" rx="14" fill="#d65f3f"></rect>
                     <text class="schema-title" x="326" y="306">MemoryItem</text>
-                    <text class="schema-subtitle" x="316" y="332">durable recall unit</text>
+                    <text class="schema-subtitle" x="310" y="332">durable recall + evidence</text>
                   </g>
                   <g>
                     <rect class="schema-node" x="36" y="318" width="132" height="96" rx="14" fill="#334155"></rect>
@@ -568,7 +568,7 @@
                   </g>
                 </svg>
                 <p class="schema-note">
-                  Relationship names are the working contract: they explain why a memory was available and where it came from.
+                  Architecture is the source of truth: this deck summarizes the graph while the docs define every node, relationship, index, and deferred concept.
                 </p>
               </div>
             </div>
@@ -580,23 +580,23 @@
         <div class="slide-shell">
           <div class="slide-grid">
             <div class="copy">
-              <div class="eyebrow">Person context generation</div>
+              <div class="eyebrow">Person context and API surface</div>
               <h2>Context at the moment of use</h2>
               <p class="lead">
-                The system turns graph memory into a compact prompt block for a specific person, optionally scoped to the current task or conversation.
+                Tailwag turns graph memory into prompt-ready and structured person context, then exposes selected package operations through an optional FastAPI adapter.
               </p>
               <div class="facts">
                 <div class="fact">
                   <strong>Durable recall</strong>
-                  <span>Pulls active preferences, boundaries, facts, pets, and relevant long-lived context.</span>
+                  <span>Pulls active preferences, boundaries, facts, pets, follow-ups, directory profile lines, and recent target-person transcript lines.</span>
                 </div>
                 <div class="fact">
-                  <strong>Time-aware follow-ups</strong>
-                  <span>Shows reminders only when their visibility window makes them useful.</span>
+                  <strong>HTTP adapter</strong>
+                  <span>Routes live under <code>/argos/providers/memory/resources/memory/request</code> and require bearer auth except <code>/health</code>.</span>
                 </div>
                 <div class="fact">
-                  <strong>Recent evidence</strong>
-                  <span>Adds bounded recent lines spoken by the target person, not the whole transcript.</span>
+                  <strong>Embedding-only biometrics</strong>
+                  <span>FastAPI biometric routes accept vectors for search, enrollment, observation, and voice-reference checks; raw media fields are rejected.</span>
                 </div>
               </div>
             </div>
@@ -606,21 +606,21 @@
                   <div class="badge">1</div>
                   <div>
                     <b>Start with <code>person_id</code></b>
-                    <span>Look up the person's active memory items and recent episode evidence.</span>
+                    <span>Look up active memory items, verified directory lines, follow-ups, and recent episode evidence.</span>
                   </div>
                 </div>
                 <div class="pipe-step">
                   <div class="badge">2</div>
                   <div>
                     <b>Use current conversation context when available</b>
-                    <span>Rank durable memories toward the current conversation or task.</span>
+                    <span>Rank durable memories toward the current task and keep rendered episode context bounded to the target speaker.</span>
                   </div>
                 </div>
                 <div class="pipe-step">
                   <div class="badge">3</div>
                   <div>
-                    <b>Render prompt-ready context</b>
-                    <span>Return a concise markdown block the assistant can use directly.</span>
+                    <b>Return the caller's needed shape</b>
+                    <span>Use markdown context, structured context, semantic search, or Argos-facing HTTP routes as appropriate.</span>
                   </div>
                 </div>
                 <div class="context-preview">
@@ -645,23 +645,23 @@ Recent Episodes:
         <div class="slide-shell">
           <div class="slide-grid">
             <div class="copy">
-              <div class="eyebrow">Memory item distillation</div>
-              <h2>From conversation to durable recall</h2>
+              <div class="eyebrow">Sources, identity, and inspection</div>
+              <h2>From activity to durable recall</h2>
               <p class="lead">
-                Tailwag separates lasting person memory from ordinary conversation details, then keeps the useful parts supported, resolved, or merged.
+                Source adapters and operator tools feed the same memory contracts without adding source-specific graph labels or write-side inspection behavior.
               </p>
               <div class="facts">
                 <div class="fact">
-                  <strong>Memory types</strong>
-                  <span><code>preference</code>, <code>boundary</code>, <code>pet</code>, <code>fact</code>, and <code>followup</code> are the approved durable categories.</span>
+                  <strong>Slack adapter</strong>
+                  <span>Channels map to virtual places, threads become episodes, speakers participate, and mention-only users get <code>MENTIONED_IN</code>.</span>
                 </div>
                 <div class="fact">
-                  <strong>Evidence first</strong>
-                  <span>New memories link back to supporting episodes instead of becoming unexplained profile claims.</span>
+                  <strong>Directory sync</strong>
+                  <span>Snowflake or local JSON rows become <code>EmployeeDirectoryRecord</code> nodes and support identity/profile projection.</span>
                 </div>
                 <div class="fact">
-                  <strong>Lifecycle-aware</strong>
-                  <span>Follow-ups can be supported or addressed; related memories can be merged without losing audit history.</span>
+                  <strong>Read-only inspection</strong>
+                  <span>Follow-up validity, affect, person timeline, and memory item reports export HTML/JSON without changing Neo4j records.</span>
                 </div>
               </div>
             </div>
@@ -670,41 +670,41 @@ Recent Episodes:
                 <div class="memory-types">
                   <div class="memory-type">
                     <b>Preference</b>
-                    <span>Likes, choices, habits, and preferred interaction style.</span>
+                    <span>Durable person choices and interaction style.</span>
                   </div>
                   <div class="memory-type">
                     <b>Boundary</b>
                     <span>Things to avoid, respect, or handle carefully.</span>
                   </div>
                   <div class="memory-type">
-                    <b>Pet</b>
-                    <span>Companion-animal context that can matter in conversation.</span>
-                  </div>
-                  <div class="memory-type">
                     <b>Fact</b>
-                    <span>Narrow, person-useful facts rather than broad directory data.</span>
+                    <span>Narrow person-useful facts, not directory or ontology claims.</span>
                   </div>
                   <div class="memory-type">
                     <b>Follow-up</b>
-                    <span>Time-bounded open loops that should surface later.</span>
+                    <span>Time-bounded open loops surfaced only while useful.</span>
                   </div>
                   <div class="memory-type">
-                    <b>Merge</b>
-                    <span>Repeated evidence can produce a cleaner active memory.</span>
+                    <b>Biometrics</b>
+                    <span>Caller-supplied face and voice vectors on reference nodes.</span>
+                  </div>
+                  <div class="memory-type">
+                    <b>Inspect</b>
+                    <span>Static reports for operators, not a runtime API surface.</span>
                   </div>
                 </div>
                 <div class="distill-path">
                   <div class="distill-step">
-                    <b>Episode</b>
-                    Conversation evidence enters the graph.
+                    <b>Source</b>
+                    Slack, live conversation, event, or directory evidence enters through approved inputs.
                   </div>
                   <div class="distill-step">
-                    <b>Extract</b>
-                    Useful durable claims become memory items.
+                    <b>Store</b>
+                    Neo4j records preserve identities, places, references, mentions, and evidence links.
                   </div>
                   <div class="distill-step">
-                    <b>Consolidate</b>
-                    Support, address, or merge as new evidence arrives.
+                    <b>Use</b>
+                    Retrieval, context, API routes, and inspect reports read from the same graph.
                   </div>
                 </div>
               </div>

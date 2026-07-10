@@ -402,6 +402,8 @@ Core runtime settings are loaded from environment variables or `.env`:
 | `TAILWAG_FACE_EMBEDDING_MODEL` | `facenet` | Upstream face embedding model name stamped on face references and adaptive updates. |
 | `TAILWAG_VOICE_EMBEDDING_MODEL` | `speechbrain_ecapa` | Upstream voice embedding model name stamped on voice references and adaptive updates. |
 | `TAILWAG_SYNTHESIS_MODEL` | `gpt-5.5` | OpenAI model used by memory extraction and consolidation providers. |
+| `TAILWAG_API_BEARER_TOKEN` | unset | Required for optional FastAPI memory routes. `GET /health` remains unauthenticated. |
+| `TAILWAG_API_DOCS_ENABLED` | `false` | Enables `/docs`, `/redoc`, and `/openapi.json` when set to `1`, `true`, `yes`, or `on`. |
 | `SLACK_BOT_TOKEN` | unset | Required only when polling Slack. |
 | `SNOWFLAKE_ACCOUNT` | unset | Required by `tailwag directory sync` when reading directory rows from Snowflake. |
 | `SNOWFLAKE_USER` | unset | Snowflake user for directory sync. |

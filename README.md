@@ -17,55 +17,17 @@ Neo4j-only hybrid memory service with OpenAI-backed embeddings and deterministic
 
 ## Current Scope
 
-Implemented now:
+Tailwag stores caller-owned people, places, episodes, events, directory rows,
+biometric references, and transcript-derived memory items in Neo4j. It provides
+OpenAI-backed text embeddings, graph/vector retrieval, prompt-ready and
+structured person context, Slack ingestion, Snowflake/local directory sync,
+optional FastAPI routes, and read-only inspect reports.
 
-- `Person`
-- `Episode`
-- `Event`
-- `Place`
-- `MemoryItem`
-- `EmployeeDirectoryRecord`
-- `FaceReference`
-- `VoiceReference`
-- `PARTICIPATED_IN`
-- `MENTIONED_IN`
-- `OCCURRED_AT`
-- `ATTENDED`
-- `HAS_DIRECTORY_RECORD`
-- `HAS_FACE_REFERENCE`
-- `HAS_VOICE_REFERENCE`
-- `HAS_MEMORY`
-- `SUPPORTED_BY`
-- `ADDRESSED_BY`
-- `SUPERSEDED_BY`
-- OpenAI-backed episode embeddings
-- OpenAI-backed memory item embeddings
-- Neo4j 5.26 local Docker runtime
-- Neo4j constraints and vector indexes for episode text, biometric reference vectors, and `MemoryItem.summary_embedding`
-- deterministic/vector-derived person context with durable memory sections and the target person's recent transcript lines
-- transcript-derived person memory items
-- per-person memory consolidation and merged memories from repeated or related episode evidence into `MemoryItem`
-- `FaceReference` and `VoiceReference` nodes for caller-supplied biometric vectors
-- adaptive biometric reference aggregation with per-reference sample counts
-- graph and vector retrieval services
-- Snowflake-backed employee directory sync and local JSON directory import
-- Slack channel polling into conversation episodes
-- source-provided event attendees
-- optional read-only inspect reports for follow-up validity, affect, person timelines, and memory items
-
-Delayed intentionally:
-
-- `Robot`
-- `ObjectConcept`
-- `Activity`
-- `Utterance`
-- `SemanticFact`
-- asynchronous semantic consolidation queue or orchestrator
-- confidence ratings and confidence properties
-- `org_id`
-- external vector databases
-- Postgres or other secondary persistence
-- Outlook/Microsoft Graph polling and distribution list expansion
+The authoritative implemented/deferred scope, graph model, relationship list,
+and runtime configuration table live in [Architecture](docs/architecture.md).
+Python APIs and optional HTTP route shapes live in
+[Memory Endpoints Reference](docs/memory-endpoints.md), and command shapes live
+in [CLI Reference](docs/cli-reference.md).
 
 ## Local Setup
 
@@ -156,6 +118,8 @@ docker compose --profile api up -d
 Directory sync is part of the base package. `tailwag directory sync --site-code ...`
 reads from Snowflake when no JSON file is supplied, using the `SNOWFLAKE_*`
 variables in `.env.example`; `--file` imports local directory rows instead.
+Use `--email-domain` with Snowflake username rows when Tailwag should synthesize
+employee email addresses.
 
 Optional inspection reports export read-only local HTML or JSON views:
 
@@ -172,13 +136,17 @@ python3 -m pip install -e ".[affect]"
 tailwag inspect affect --fold1-model /path/to/fold1 --fold2-model /path/to/fold2
 ```
 
-The inspection commands write static HTML reports under `inspect/` by default. The committed report pages and index in that directory can be opened as static browser entry points, and regenerated reports link between follow-up validity, affect scatter, person timeline, and memory item views. HTML exports write `tailwag-inspect.css` and `tailwag-inspect.js` beside the report. Affect scores on demand, displays centered `-1..1` valence/arousal axes, supports drag-to-zoom for dense regions, and does not write affect values back to Neo4j.
+The inspection commands write static HTML reports under `inspect/` by default.
+For generated assets, navigation, filters, and read-only boundaries, see the
+[Inspect reference](docs/inspect-reference.md).
 
 For the current graph model and scope boundaries, see the [architecture](docs/architecture.md). For the Python call surface and parameters, see the [memory endpoints reference](docs/memory-endpoints.md). For package setup and integration ownership, see the [Python package integration guide](docs/integration-guide.md). For local commands, see the [CLI reference](docs/cli-reference.md). For report outputs and inspect boundaries, see the [inspect reference](docs/inspect-reference.md). For Slack channel setup, polling state, and inspection queries, see the [Slack ingestion guide](docs/slack-ingestion.md). For the current Argos integration boundary, see the [Argos compatibility note](docs/argos-migration.md).
 
-Face and voice embeddings are biometric identifiers. The package stores vectors supplied by the calling system or an upstream recognition model on biometric reference nodes; it does not store raw face images, raw audio, or generate real biometric embeddings itself. Adaptive updates store sample counts and normalized running-average aggregates on those reference nodes.
-Episode transcripts and memory item summaries are sent to OpenAI for text embeddings when the OpenAI provider is configured. Person context is assembled deterministically from durable memory items, visible follow-ups, and the target person's recent transcript lines. When `--semantic-scope` is provided for person context, the package uses vector matching to rank durable memory items; rendered episode context remains bounded to lines spoken by the target person.
-Memory item extraction sends caller-provided transcripts and a small set of existing candidate memory items to OpenAI when high-level episode recording or explicit memory backfill is used. Memory consolidation sends bounded, person-scoped episode evidence clusters and existing memory items to OpenAI. `MemoryItem` is the narrow approved semantic-memory path for durable person preferences, boundaries, pets, facts, and follow-ups; it is not a broad ontology or triple store.
+Face and voice embeddings are biometric identifiers. Tailwag stores vectors
+supplied by the calling system or an upstream recognition model on biometric
+reference nodes; it does not store raw face images, raw audio, or generate real
+biometric embeddings itself. See [Architecture](docs/architecture.md) for
+privacy and scope boundaries.
 
 ## Tests
 
