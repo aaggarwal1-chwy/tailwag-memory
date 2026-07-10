@@ -16,6 +16,8 @@ class Settings:
     face_embedding_dimension: int = 512
     voice_embedding_dimension: int = 192
     embedding_model: str = "text-embedding-3-small"
+    face_embedding_model: str = "facenet"
+    voice_embedding_model: str = "speechbrain_ecapa"
     openai_api_key: str | None = None
     synthesis_model: str = "gpt-5.5"
     slack_bot_token: str | None = None
@@ -50,6 +52,8 @@ def load_settings() -> Settings:
         face_embedding_dimension=parse_positive_int_env("TAILWAG_FACE_EMBEDDING_DIMENSION", 512),
         voice_embedding_dimension=parse_positive_int_env("TAILWAG_VOICE_EMBEDDING_DIMENSION", 192),
         embedding_model=os.getenv("TAILWAG_EMBEDDING_MODEL", "text-embedding-3-small"),
+        face_embedding_model=_optional_env("TAILWAG_FACE_EMBEDDING_MODEL") or "facenet",
+        voice_embedding_model=_optional_env("TAILWAG_VOICE_EMBEDDING_MODEL") or "speechbrain_ecapa",
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         synthesis_model=os.getenv("TAILWAG_SYNTHESIS_MODEL", "gpt-5.5"),
         slack_bot_token=os.getenv("SLACK_BOT_TOKEN"),

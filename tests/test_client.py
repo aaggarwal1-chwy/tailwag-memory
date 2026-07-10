@@ -114,6 +114,30 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(result, "person_jamie")
         self.assertEqual(calls, [("canonical", runner, "jamie@example.com")])
 
+    def test_biometric_enrollment_uses_configured_models(self) -> None:
+        runner = RecordingQueryRunner()
+        client = TailwagMemoryClient(
+            runner,
+            test_settings(
+                face_embedding_model="facenet-vggface2",
+                voice_embedding_model="ecapa",
+            ),
+        )
+
+        client.enroll_face_reference(
+            person_id="person_jamie",
+            embedding=[0.1] * 512,
+        )
+        face_query = runner.queries[-1]
+        self.assertEqual(face_query.parameters["model"], "facenet-vggface2")
+
+        client.enroll_voice_reference(
+            person_id="person_jamie",
+            embedding=[0.2] * 192,
+        )
+        voice_query = runner.queries[-1]
+        self.assertEqual(voice_query.parameters["model"], "ecapa")
+
     def test_record_episode_ingests_and_extracts_memory_by_default(self) -> None:
         runner = RecordingQueryRunner()
         calls = []

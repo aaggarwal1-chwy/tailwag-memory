@@ -117,12 +117,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     biometric_subparsers = biometric_parser.add_subparsers(dest="biometric_command", required=True)
     biometric_face_parser = biometric_subparsers.add_parser("search-face")
     biometric_face_parser.add_argument("--embedding-file", required=True, help="JSON file containing face embedding vector")
-    biometric_face_parser.add_argument("--model", default="facenet", help="embedding model name")
     biometric_face_parser.add_argument("--site-code", help="optional site filter")
     biometric_face_parser.add_argument("--limit", type=int, default=2, help="maximum candidates")
     biometric_voice_parser = biometric_subparsers.add_parser("search-voice")
     biometric_voice_parser.add_argument("--embedding-file", required=True, help="JSON file containing voice embedding vector")
-    biometric_voice_parser.add_argument("--model", default="speechbrain_ecapa", help="embedding model name")
     biometric_voice_parser.add_argument("--site-code", help="optional site filter")
     biometric_voice_parser.add_argument("--limit", type=int, default=2, help="maximum candidates")
 
@@ -332,14 +330,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.biometric_command == "search-face":
                 result = client.search_face(
                     embedding=embedding,
-                    model=args.model,
                     limit=args.limit,
                     site_code=args.site_code,
                 )
             else:
                 result = client.search_voice(
                     embedding=embedding,
-                    model=args.model,
                     limit=args.limit,
                     site_code=args.site_code,
                 )

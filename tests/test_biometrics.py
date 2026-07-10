@@ -7,12 +7,11 @@ import json
 class BiometricReferenceServiceTest(unittest.TestCase):
     def test_enroll_face_reference_writes_reference_node(self) -> None:
         runner = RecordingQueryRunner()
-        service = BiometricReferenceService(runner)
+        service = BiometricReferenceService(runner, face_embedding_model="facenet-vggface2")
 
         result = service.enroll_face_reference(
             person_id="person_jamie",
             embedding=[0.1] * 512,
-            model="facenet-vggface2",
             metadata={"quality": "good"},
         )
 
@@ -37,7 +36,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         service.enroll_face_reference(
             person_id="person_jamie",
             embedding=[0.1] * 512,
-            model="facenet-vggface2",
             metadata={
                 "display_name": "Jamie Example",
                 "official_name": "Jamie Official",
@@ -57,7 +55,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         service.enroll_face_reference(
             person_id="person_jamie",
             embedding=[0.1] * 512,
-            model="facenet-vggface2",
             metadata={
                 "display_name": "Jamie Example",
                 "directory_profile_lines": ("Title: Engineer",),
@@ -81,7 +78,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         service.enroll_face_reference(
             person_id="person_jamie",
             embedding=[0.1] * 512,
-            model="facenet-vggface2",
             metadata={
                 "metadata": {
                     "username": "jamie",
@@ -104,7 +100,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         service.enroll_face_reference(
             person_id="person_jamie",
             embedding=[0.1] * 512,
-            model="facenet-vggface2",
             metadata={"official_name": "Jamie Example"},
         )
 
@@ -133,7 +128,7 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         )
         service = BiometricReferenceService(runner)
 
-        result = service.search_voice(embedding=[0.2] * 192, model="ecapa")
+        result = service.search_voice(embedding=[0.2] * 192)
 
         self.assertTrue(result.recognized)
         self.assertEqual(result.candidates[0].person_id, "person_jamie")
@@ -159,7 +154,7 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         )
         service = BiometricReferenceService(runner)
 
-        result = service.search_voice(embedding=[0.2] * 192, model="ecapa")
+        result = service.search_voice(embedding=[0.2] * 192)
 
         self.assertFalse(result.recognized)
         self.assertEqual(result.status, "rejected")
@@ -170,7 +165,7 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         runner = RecordingQueryRunner()
         service = BiometricReferenceService(runner)
 
-        service.search_face(embedding=[0.1] * 512, model="facenet-vggface2", site_code="BOS3")
+        service.search_face(embedding=[0.1] * 512, site_code="BOS3")
 
         self.assertIn(
             "directory IS NULL OR directory.site_code = $site_code",
@@ -194,12 +189,11 @@ class BiometricReferenceServiceTest(unittest.TestCase):
                 [],
             ]
         )
-        service = BiometricReferenceService(runner)
+        service = BiometricReferenceService(runner, face_embedding_model="facenet-vggface2")
 
         result = service.observe_face_embedding(
             person_id="person_jamie",
             embedding=[1.0, 0.0, 0.0],
-            model="facenet-vggface2",
             evidence={
                 "owner_id": "person_jamie",
                 "owner_source": "audio_face_agree",
@@ -245,7 +239,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         result = service.observe_voice_embedding(
             person_id="person_jamie",
             embedding=[1.0, 0.0],
-            model="ecapa",
             evidence={
                 "owner_id": "person_jamie",
                 "owner_source": "audio_face_agree",
@@ -284,7 +277,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         result = service.observe_face_embedding(
             person_id="person_jamie",
             embedding=[0.0, 1.0],
-            model="facenet-vggface2",
             evidence={
                 "owner_id": "person_jamie",
                 "owner_source": "audio_face_agree",
@@ -317,12 +309,11 @@ class BiometricReferenceServiceTest(unittest.TestCase):
                 ]
             ]
         )
-        service = BiometricReferenceService(runner)
+        service = BiometricReferenceService(runner, face_embedding_model="other-face-model")
 
         result = service.observe_face_embedding(
             person_id="person_jamie",
             embedding=[1.0, 0.0],
-            model="other-face-model",
             evidence={
                 "owner_id": "person_jamie",
                 "owner_source": "audio_face_agree",
@@ -345,7 +336,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         result = service.observe_face_embedding(
             person_id="person_jamie",
             embedding=[1.0, 0.0],
-            model="facenet-vggface2",
             evidence={
                 "owner_id": "person_jamie",
                 "owner_source": "face",
@@ -367,7 +357,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         result = service.observe_voice_embedding(
             person_id="person_jamie",
             embedding=[1.0, 0.0],
-            model="ecapa",
             evidence={
                 "owner_id": "person_jamie",
                 "owner_source": "face",
@@ -398,12 +387,11 @@ class BiometricReferenceServiceTest(unittest.TestCase):
                 [],
             ]
         )
-        service = BiometricReferenceService(runner)
+        service = BiometricReferenceService(runner, voice_embedding_model="ecapa")
 
         result = service.observe_voice_embedding(
             person_id="person_jamie",
             embedding=[1.0, 0.0],
-            model="ecapa",
             evidence={
                 "owner_id": "person_jamie",
                 "owner_source": "audio_face_agree",

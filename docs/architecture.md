@@ -333,6 +333,8 @@ Core runtime settings are loaded from environment variables or `.env`:
 | `TAILWAG_EMBEDDING_DIMENSION` | `64` | Vector dimension used by episode and memory item text embedding indexes. |
 | `TAILWAG_FACE_EMBEDDING_DIMENSION` | `512` | Vector dimension used by the `FaceReference.embedding` index. |
 | `TAILWAG_VOICE_EMBEDDING_DIMENSION` | `192` | Vector dimension used by the `VoiceReference.embedding` index. |
+| `TAILWAG_FACE_EMBEDDING_MODEL` | `facenet` | Upstream face embedding model name stamped on face references and adaptive updates. |
+| `TAILWAG_VOICE_EMBEDDING_MODEL` | `speechbrain_ecapa` | Upstream voice embedding model name stamped on voice references and adaptive updates. |
 | `TAILWAG_SYNTHESIS_MODEL` | `gpt-5.5` | OpenAI model used by memory extraction and consolidation providers. |
 | `SLACK_BOT_TOKEN` | unset | Required only when polling Slack. |
 | `TAILWAG_AFFECT_FOLD1_MODEL` | unset | Optional external XLM-RoBERTa-large fold 1 model directory for `tailwag inspect affect`. |

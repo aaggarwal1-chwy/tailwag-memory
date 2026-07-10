@@ -161,15 +161,13 @@ class TailwagMemoryClient:
         *,
         person_id: str,
         embedding: list[float],
-        model: str,
         metadata: dict[str, object] | None = None,
         consent_status: str = "consented",
     ) -> BiometricEnrollmentResult:
         """Store one face reference vector for a person."""
-        return BiometricReferenceService(self.runner).enroll_face_reference(
+        return self._biometrics().enroll_face_reference(
             person_id=person_id,
             embedding=embedding,
-            model=model,
             metadata=dict(metadata or {}),
             consent_status=consent_status,
         )
@@ -178,14 +176,12 @@ class TailwagMemoryClient:
         self,
         *,
         embedding: list[float],
-        model: str,
         limit: int = 2,
         site_code: str | None = None,
     ) -> BiometricSearchResult:
         """Search consented face references."""
-        return BiometricReferenceService(self.runner).search_face(
+        return self._biometrics().search_face(
             embedding=embedding,
-            model=model,
             limit=limit,
             site_code=site_code,
         )
@@ -195,15 +191,13 @@ class TailwagMemoryClient:
         *,
         person_id: str,
         embedding: list[float],
-        model: str,
         metadata: dict[str, object] | None = None,
         consent_status: str = "consented",
     ) -> BiometricEnrollmentResult:
         """Store one voice reference vector for a person."""
-        return BiometricReferenceService(self.runner).enroll_voice_reference(
+        return self._biometrics().enroll_voice_reference(
             person_id=person_id,
             embedding=embedding,
-            model=model,
             metadata=dict(metadata or {}),
             consent_status=consent_status,
         )
@@ -212,36 +206,32 @@ class TailwagMemoryClient:
         self,
         *,
         embedding: list[float],
-        model: str,
         limit: int = 2,
         site_code: str | None = None,
     ) -> BiometricSearchResult:
         """Search consented voice references."""
-        return BiometricReferenceService(self.runner).search_voice(
+        return self._biometrics().search_voice(
             embedding=embedding,
-            model=model,
             limit=limit,
             site_code=site_code,
         )
 
     def has_voice_reference(self, person_id: str) -> bool:
         """Return whether a person has at least one active voice reference."""
-        return BiometricReferenceService(self.runner).has_voice_reference(person_id)
+        return self._biometrics().has_voice_reference(person_id)
 
     def observe_face_embedding(
         self,
         *,
         person_id: str,
         embedding: list[float],
-        model: str,
         evidence: dict[str, object],
         metadata: dict[str, object] | None = None,
     ) -> BiometricUpdateResult:
         """Offer one face observation for adaptive reference aggregation."""
-        return BiometricReferenceService(self.runner).observe_face_embedding(
+        return self._biometrics().observe_face_embedding(
             person_id=person_id,
             embedding=embedding,
-            model=model,
             evidence=dict(evidence or {}),
             metadata=dict(metadata or {}),
         )
@@ -251,15 +241,13 @@ class TailwagMemoryClient:
         *,
         person_id: str,
         embedding: list[float],
-        model: str,
         evidence: dict[str, object],
         metadata: dict[str, object] | None = None,
     ) -> BiometricUpdateResult:
         """Offer one voice observation for adaptive reference aggregation."""
-        return BiometricReferenceService(self.runner).observe_voice_embedding(
+        return self._biometrics().observe_voice_embedding(
             person_id=person_id,
             embedding=embedding,
-            model=model,
             evidence=dict(evidence or {}),
             metadata=dict(metadata or {}),
         )
@@ -459,6 +447,14 @@ class TailwagMemoryClient:
                 api_key=self.settings.openai_api_key,
                 model=self.settings.synthesis_model,
             ),
+        )
+
+    def _biometrics(self) -> BiometricReferenceService:
+        """Build a biometric reference service using configured embedding models."""
+        return BiometricReferenceService(
+            self.runner,
+            face_embedding_model=self.settings.face_embedding_model,
+            voice_embedding_model=self.settings.voice_embedding_model,
         )
 
 

@@ -161,11 +161,11 @@ class DirectoryIdentityService:
     ) -> DirectorySyncResult:
         rendered_site = str(site_code or "").strip()
         written_at = utc_now_iso()
-        normalized = [
-            _normalize_record(record, rendered_site)
-            for record in records
-            if _normalize_record(record, rendered_site).username
-        ]
+        normalized = []
+        for record in records:
+            normalized_record = _normalize_record(record, rendered_site)
+            if normalized_record.username:
+                normalized.append(normalized_record)
         self.runner.run(
             """
             UNWIND $records AS record

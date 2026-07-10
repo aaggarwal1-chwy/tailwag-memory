@@ -27,6 +27,8 @@ export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
 export TAILWAG_FACE_EMBEDDING_DIMENSION=512
 export TAILWAG_VOICE_EMBEDDING_DIMENSION=192
+export TAILWAG_FACE_EMBEDDING_MODEL=facenet
+export TAILWAG_VOICE_EMBEDDING_MODEL=speechbrain_ecapa
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 export TAILWAG_AFFECT_FOLD1_MODEL=/path/to/fold1
@@ -515,12 +517,12 @@ Follow-up support and addressing are handled internally by transcript extraction
 
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
-| `enroll_face_reference(...)` | `person_id`, face vector, model, metadata, consent | `BiometricEnrollmentResult` | Store the first or explicit face reference sample. |
-| `search_face(...)` | face vector, model, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `FaceReference` nodes. |
-| `enroll_voice_reference(...)` | `person_id`, voice vector, model, metadata, consent | `BiometricEnrollmentResult` | Store the first or explicit voice reference sample. |
-| `search_voice(...)` | voice vector, model, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `VoiceReference` nodes. |
-| `observe_face_embedding(...)` | `person_id`, face vector, model, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe face observation for adaptive aggregation. |
-| `observe_voice_embedding(...)` | `person_id`, voice vector, model, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe voice observation for adaptive aggregation. |
+| `enroll_face_reference(...)` | `person_id`, face vector, metadata, consent | `BiometricEnrollmentResult` | Store the first or explicit face reference sample using the configured face model. |
+| `search_face(...)` | face vector, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `FaceReference` nodes. |
+| `enroll_voice_reference(...)` | `person_id`, voice vector, metadata, consent | `BiometricEnrollmentResult` | Store the first or explicit voice reference sample using the configured voice model. |
+| `search_voice(...)` | voice vector, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `VoiceReference` nodes. |
+| `observe_face_embedding(...)` | `person_id`, face vector, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe face observation for adaptive aggregation using the configured face model. |
+| `observe_voice_embedding(...)` | `person_id`, voice vector, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe voice observation for adaptive aggregation using the configured voice model. |
 
 Only active consented references for non-archived people are searched or updated.
 Enrollment initializes `sample_count=1`, `accepted_update_count=0`,

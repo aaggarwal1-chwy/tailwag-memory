@@ -41,6 +41,8 @@ export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
 export TAILWAG_FACE_EMBEDDING_DIMENSION=512
 export TAILWAG_VOICE_EMBEDDING_DIMENSION=192
+export TAILWAG_FACE_EMBEDDING_MODEL=facenet
+export TAILWAG_VOICE_EMBEDDING_MODEL=speechbrain_ecapa
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 ```
@@ -51,6 +53,7 @@ Configuration notes:
 - `OPENAI_API_KEY` is required when production code uses OpenAI-backed text embeddings, memory extraction, consolidation, or vector search.
 - `TAILWAG_EMBEDDING_DIMENSION` must match Neo4j text vector indexes for episode and memory item embeddings.
 - `TAILWAG_FACE_EMBEDDING_DIMENSION` and `TAILWAG_VOICE_EMBEDDING_DIMENSION` must match the configured face and voice reference vector indexes.
+- `TAILWAG_FACE_EMBEDDING_MODEL` and `TAILWAG_VOICE_EMBEDDING_MODEL` identify the one supported upstream biometric model per modality. Tailwag stores those names on references and rejects adaptive updates when stored references were created with a different configured model.
 - `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by memory extraction and consolidation providers.
 - `SLACK_BOT_TOKEN` is only required when polling Slack.
 - `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are optional paths used only by `tailwag inspect affect`.

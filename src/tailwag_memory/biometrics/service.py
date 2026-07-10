@@ -25,20 +25,29 @@ DEFAULT_FACE_UPDATE_THRESHOLD = 0.72
 DEFAULT_VOICE_UPDATE_THRESHOLD = 0.55
 DEFAULT_UPDATE_EVIDENCE_MARGIN = 0.20
 DEFAULT_TARGET_SAMPLE_COUNT = 5
+DEFAULT_FACE_MODEL = "facenet"
+DEFAULT_VOICE_MODEL = "speechbrain_ecapa"
 
 
 class BiometricReferenceService:
     """Store and search consented face and voice references."""
 
-    def __init__(self, runner: QueryRunner) -> None:
+    def __init__(
+        self,
+        runner: QueryRunner,
+        *,
+        face_embedding_model: str = DEFAULT_FACE_MODEL,
+        voice_embedding_model: str = DEFAULT_VOICE_MODEL,
+    ) -> None:
         self.runner = runner
+        self.face_embedding_model = str(face_embedding_model or "").strip() or DEFAULT_FACE_MODEL
+        self.voice_embedding_model = str(voice_embedding_model or "").strip() or DEFAULT_VOICE_MODEL
 
     def enroll_face_reference(
         self,
         *,
         person_id: str,
         embedding: list[float],
-        model: str,
         metadata: dict[str, Any] | None = None,
         consent_status: str = "consented",
     ) -> BiometricEnrollmentResult:
@@ -46,7 +55,6 @@ class BiometricReferenceService:
             modality="face",
             person_id=person_id,
             embedding=embedding,
-            model=model,
             metadata=metadata,
             consent_status=consent_status,
         )
@@ -56,7 +64,6 @@ class BiometricReferenceService:
         *,
         person_id: str,
         embedding: list[float],
-        model: str,
         metadata: dict[str, Any] | None = None,
         consent_status: str = "consented",
     ) -> BiometricEnrollmentResult:
@@ -64,7 +71,6 @@ class BiometricReferenceService:
             modality="voice",
             person_id=person_id,
             embedding=embedding,
-            model=model,
             metadata=metadata,
             consent_status=consent_status,
         )
@@ -73,14 +79,12 @@ class BiometricReferenceService:
         self,
         *,
         embedding: list[float],
-        model: str,
         limit: int = 2,
         site_code: str | None = None,
     ) -> BiometricSearchResult:
         return self._search(
             modality="face",
             embedding=embedding,
-            model=model,
             limit=limit,
             site_code=site_code,
         )
@@ -89,14 +93,12 @@ class BiometricReferenceService:
         self,
         *,
         embedding: list[float],
-        model: str,
         limit: int = 2,
         site_code: str | None = None,
     ) -> BiometricSearchResult:
         return self._search(
             modality="voice",
             embedding=embedding,
-            model=model,
             limit=limit,
             site_code=site_code,
         )
@@ -121,7 +123,6 @@ class BiometricReferenceService:
         *,
         person_id: str,
         embedding: list[float],
-        model: str,
         evidence: dict[str, Any],
         metadata: dict[str, Any] | None = None,
     ) -> BiometricUpdateResult:
@@ -129,7 +130,6 @@ class BiometricReferenceService:
             modality="face",
             person_id=person_id,
             embedding=embedding,
-            model=model,
             evidence=evidence,
             metadata=metadata,
         )
@@ -139,7 +139,6 @@ class BiometricReferenceService:
         *,
         person_id: str,
         embedding: list[float],
-        model: str,
         evidence: dict[str, Any],
         metadata: dict[str, Any] | None = None,
     ) -> BiometricUpdateResult:
@@ -147,7 +146,6 @@ class BiometricReferenceService:
             modality="voice",
             person_id=person_id,
             embedding=embedding,
-            model=model,
             evidence=evidence,
             metadata=metadata,
         )
@@ -158,7 +156,6 @@ class BiometricReferenceService:
         modality: str,
         person_id: str,
         embedding: list[float],
-        model: str,
         metadata: dict[str, Any] | None,
         consent_status: str,
     ) -> BiometricEnrollmentResult:
@@ -176,6 +173,7 @@ class BiometricReferenceService:
                 reason="consent_required",
                 person_id=rendered_person_id,
             )
+        model = self._model_for_modality(modality)
         meta = dict(metadata or {})
         PersonIngestionService(self.runner).upsert(
             PersonInput(
@@ -267,7 +265,6 @@ class BiometricReferenceService:
         modality: str,
         person_id: str,
         embedding: list[float],
-        model: str,
         evidence: dict[str, Any],
         metadata: dict[str, Any] | None,
     ) -> BiometricUpdateResult:
@@ -286,6 +283,7 @@ class BiometricReferenceService:
                 person_id=rendered_person_id,
                 modality=modality,
             )
+        model = self._model_for_modality(modality)
         label = "FaceReference" if modality == "face" else "VoiceReference"
         rel = "HAS_FACE_REFERENCE" if modality == "face" else "HAS_VOICE_REFERENCE"
         rows = self.runner.run(
@@ -431,12 +429,16 @@ class BiometricReferenceService:
             similarity=similarity,
         )
 
+    def _model_for_modality(self, modality: str) -> str:
+        if modality == "face":
+            return self.face_embedding_model
+        return self.voice_embedding_model
+
     def _search(
         self,
         *,
         modality: str,
         embedding: list[float],
-        model: str,
         limit: int,
         site_code: str | None,
     ) -> BiometricSearchResult:
@@ -471,7 +473,6 @@ class BiometricReferenceService:
                 "limit": bounded_limit,
                 "embedding": vector,
                 "site_code": str(site_code or "").strip() or None,
-                "model": str(model or "").strip(),
             },
         )
         candidates = [_candidate_from_row(row) for row in rows]

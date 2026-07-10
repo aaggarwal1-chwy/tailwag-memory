@@ -81,8 +81,8 @@ tailwag identity resolve --site-code BOS3 --first Jamie --last Example
 Search people by caller-supplied biometric reference vectors:
 
 ```bash
-tailwag biometric search-face --embedding-file path/to/face-vector.json --model facenet --site-code BOS3
-tailwag biometric search-voice --embedding-file path/to/voice-vector.json --model speechbrain_ecapa --site-code BOS3
+tailwag biometric search-face --embedding-file path/to/face-vector.json --site-code BOS3
+tailwag biometric search-voice --embedding-file path/to/voice-vector.json --site-code BOS3
 ```
 
 ## Inspect Utilities
