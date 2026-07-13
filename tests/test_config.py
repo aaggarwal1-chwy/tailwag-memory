@@ -24,6 +24,8 @@ class ConfigTest(unittest.TestCase):
             "NEO4J_PASSWORD": "password",
             "TAILWAG_EMBEDDING_DIMENSION": "128",
             "TAILWAG_EMBEDDING_MODEL": "text-embedding-3-large",
+            "TAILWAG_FACE_EMBEDDING_MODEL": " facenet-vggface2 ",
+            "TAILWAG_VOICE_EMBEDDING_MODEL": "ecapa",
             "TAILWAG_SYNTHESIS_MODEL": "gpt-5.5",
             "OPENAI_API_KEY": "test-key",
             "SLACK_BOT_TOKEN": "xoxb-test-token",
@@ -36,6 +38,8 @@ class ConfigTest(unittest.TestCase):
 
         self.assertEqual(settings.embedding_dimension, 128)
         self.assertEqual(settings.embedding_model, "text-embedding-3-large")
+        self.assertEqual(settings.face_embedding_model, "facenet-vggface2")
+        self.assertEqual(settings.voice_embedding_model, "ecapa")
         self.assertEqual(settings.synthesis_model, "gpt-5.5")
         self.assertEqual(settings.openai_api_key, "test-key")
         self.assertEqual(settings.slack_bot_token, "xoxb-test-token")

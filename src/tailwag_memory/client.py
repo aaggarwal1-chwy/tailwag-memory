@@ -8,6 +8,8 @@ from .db import Neo4jQueryRunner
 from .embeddings import OpenAIEmbeddingProvider
 from .episode_normalization import normalize_robot_speaker_labels
 from .ingestion import EpisodeIngestionService, PersonIngestionService
+from .biometrics import BiometricReferenceService
+from .identity import DirectoryIdentityService
 from .memory_context import PersonMemoryContextService
 from .memory_items import (
     DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
@@ -18,13 +20,24 @@ from .memory_items import (
 )
 from .memory_item_service import MemoryItemService
 from .models import (
+    BiometricEnrollmentResult,
+    BiometricSearchResult,
+    BiometricUpdateResult,
+    DirectoryPersonRecord,
+    DirectorySyncResult,
     EpisodeInput,
     EpisodeMemoryExtractionResult,
     EpisodeRecordResult,
+    IdentityResolutionResult,
     MemoryConsolidationResult,
+    OwnerResolutionResult,
+    PersonContextResult,
     PersonInput,
+    PersonProfile,
     SearchQuery,
+    VerifiedProfile,
 )
+from .ownership import TurnOwnerResolutionService
 from .retrieval import EpisodeRetrievalService, PersonContextRetrievalService
 
 
@@ -75,6 +88,186 @@ class TailwagMemoryClient:
         """Return one canonical Argos person id for an email when unambiguous."""
         return PersonIngestionService(self.runner).canonical_id_by_email(email)
 
+    def sync_directory_people(
+        self,
+        site_code: str,
+        records: list[DirectoryPersonRecord] | list[dict[str, object]],
+    ) -> DirectorySyncResult:
+        """Store normalized employee-directory rows for a site."""
+        return DirectoryIdentityService(self.runner).sync_directory_people(site_code, records)
+
+    def sync_directory_from_snowflake(
+        self,
+        site_code: str,
+        *,
+        email_domain: str = "",
+    ) -> DirectorySyncResult:
+        """Load a site directory from Snowflake into Tailwag."""
+        return DirectoryIdentityService(self.runner).sync_directory_from_snowflake(
+            site_code,
+            email_domain=email_domain,
+        )
+
+    def resolve_identity(
+        self,
+        *,
+        shared_first_name: str,
+        shared_last_name: str,
+        shared_name: str = "",
+        site_code: str = "",
+    ) -> IdentityResolutionResult:
+        """Resolve a spoken employee name against Tailwag-owned directory rows."""
+        return DirectoryIdentityService(self.runner).resolve_identity(
+            shared_first_name=shared_first_name,
+            shared_last_name=shared_last_name,
+            shared_name=shared_name,
+            site_code=site_code,
+        )
+
+    def get_verified_profile(
+        self,
+        *,
+        username: str,
+        official_name: str,
+        site_code: str = "",
+    ) -> VerifiedProfile | None:
+        """Return a verified directory profile for enrollment rehydration."""
+        return DirectoryIdentityService(self.runner).get_verified_profile(
+            username=username,
+            official_name=official_name,
+            site_code=site_code,
+        )
+
+    def person_profile(self, person_id: str) -> PersonProfile | None:
+        """Return a prompt/runtime person profile."""
+        return DirectoryIdentityService(self.runner).person_profile(person_id)
+
+    def record_encounter(
+        self,
+        person_id: str,
+        *,
+        observed_at: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> PersonProfile:
+        """Update a person's last_seen and interaction count."""
+        return DirectoryIdentityService(self.runner).record_encounter(
+            person_id=person_id,
+            observed_at=observed_at,
+            metadata=dict(metadata or {}),
+        )
+
+    def enroll_face_reference(
+        self,
+        *,
+        person_id: str,
+        embedding: list[float],
+        metadata: dict[str, object] | None = None,
+        consent_status: str = "consented",
+    ) -> BiometricEnrollmentResult:
+        """Store one face reference vector for a person."""
+        return self._biometrics().enroll_face_reference(
+            person_id=person_id,
+            embedding=embedding,
+            metadata=dict(metadata or {}),
+            consent_status=consent_status,
+        )
+
+    def search_face(
+        self,
+        *,
+        embedding: list[float],
+        limit: int = 2,
+        site_code: str | None = None,
+    ) -> BiometricSearchResult:
+        """Search consented face references."""
+        return self._biometrics().search_face(
+            embedding=embedding,
+            limit=limit,
+            site_code=site_code,
+        )
+
+    def enroll_voice_reference(
+        self,
+        *,
+        person_id: str,
+        embedding: list[float],
+        metadata: dict[str, object] | None = None,
+        consent_status: str = "consented",
+    ) -> BiometricEnrollmentResult:
+        """Store one voice reference vector for a person."""
+        return self._biometrics().enroll_voice_reference(
+            person_id=person_id,
+            embedding=embedding,
+            metadata=dict(metadata or {}),
+            consent_status=consent_status,
+        )
+
+    def search_voice(
+        self,
+        *,
+        embedding: list[float],
+        limit: int = 2,
+        site_code: str | None = None,
+    ) -> BiometricSearchResult:
+        """Search consented voice references."""
+        return self._biometrics().search_voice(
+            embedding=embedding,
+            limit=limit,
+            site_code=site_code,
+        )
+
+    def has_voice_reference(self, person_id: str) -> bool:
+        """Return whether a person has at least one active voice reference."""
+        return self._biometrics().has_voice_reference(person_id)
+
+    def observe_face_embedding(
+        self,
+        *,
+        person_id: str,
+        embedding: list[float],
+        evidence: dict[str, object],
+        metadata: dict[str, object] | None = None,
+    ) -> BiometricUpdateResult:
+        """Offer one face observation for adaptive reference aggregation."""
+        return self._biometrics().observe_face_embedding(
+            person_id=person_id,
+            embedding=embedding,
+            evidence=dict(evidence or {}),
+            metadata=dict(metadata or {}),
+        )
+
+    def observe_voice_embedding(
+        self,
+        *,
+        person_id: str,
+        embedding: list[float],
+        evidence: dict[str, object],
+        metadata: dict[str, object] | None = None,
+    ) -> BiometricUpdateResult:
+        """Offer one voice observation for adaptive reference aggregation."""
+        return self._biometrics().observe_voice_embedding(
+            person_id=person_id,
+            embedding=embedding,
+            evidence=dict(evidence or {}),
+            metadata=dict(metadata or {}),
+        )
+
+    def resolve_turn_owner(
+        self,
+        *,
+        primary_face_candidate: object | None = None,
+        visible_face_candidates: list[object] | tuple[object, ...] | None = None,
+        voice_candidate: object | None = None,
+        policy_context: dict[str, object] | None = None,
+    ) -> OwnerResolutionResult:
+        """Resolve final turn ownership from identity evidence."""
+        return TurnOwnerResolutionService().resolve_turn_owner(
+            primary_face_candidate=primary_face_candidate,
+            visible_face_candidates=visible_face_candidates,
+            voice_candidate=voice_candidate,
+            policy_context=dict(policy_context or {}),
+        )
+
     def person_context(
         self,
         person_id: str,
@@ -100,6 +293,24 @@ class TailwagMemoryClient:
             semantic_scope=semantic_scope,
         )
         return "\n\n".join(part for part in [memory_context, retrieved_context] if part)
+
+    def person_context_structured(
+        self,
+        person_id: str,
+        *,
+        current_text: str | None = None,
+    ) -> PersonContextResult:
+        """Return structured prompt context for a person."""
+        profile = self.person_profile(person_id)
+        rendered = self.person_context(person_id, current_text=current_text)
+        memory_lines, followup_lines, preferred_language = _parse_context(rendered)
+        return PersonContextResult(
+            person_id=str(person_id or "").strip(),
+            directory_profile_lines=profile.directory_profile_lines if profile else (),
+            memory_profile_lines=memory_lines,
+            potential_followups=followup_lines,
+            preferred_language=preferred_language,
+        )
 
     def search_semantic_memory(
         self,
@@ -237,3 +448,53 @@ class TailwagMemoryClient:
                 model=self.settings.synthesis_model,
             ),
         )
+
+    def _biometrics(self) -> BiometricReferenceService:
+        """Build a biometric reference service using configured embedding models."""
+        return BiometricReferenceService(
+            self.runner,
+            face_embedding_model=self.settings.face_embedding_model,
+            voice_embedding_model=self.settings.voice_embedding_model,
+        )
+
+
+def _parse_context(value: object) -> tuple[tuple[str, ...], tuple[str, ...], str]:
+    profile: list[str] = []
+    followups: list[str] = []
+    preferred_language = "English"
+    section = ""
+    for raw_line in str(value or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            continue
+        if line.endswith(":") and not line.startswith("-"):
+            section = line[:-1].strip().casefold()
+            continue
+        text = line[1:].strip() if line.startswith("-") else line
+        text = " ".join(text.split()).lstrip("#-*[]>` ").strip()
+        if not text:
+            continue
+        lowered = text.casefold()
+        if lowered.startswith("preferred language"):
+            _, _, language = text.partition(":")
+            if language.strip():
+                preferred_language = language.strip(" .")
+        if section in {"potential follow-ups", "potential followups", "followups"}:
+            followups.append(text)
+        else:
+            profile.append(text)
+    return tuple(_dedupe(profile)), tuple(_dedupe(followups)), preferred_language
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result

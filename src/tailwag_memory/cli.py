@@ -20,11 +20,10 @@ from .memory_items import (
     DEFAULT_CONSOLIDATION_SEED_LIMIT,
     DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
 )
-from .models import EpisodeInput, EventInput, SearchQuery
+from .models import DirectoryPersonRecord, EpisodeInput, EventInput, SearchQuery
 from .retrieval import (
     EpisodeRetrievalService,
     EventRetrievalService,
-    PersonRecognitionService,
 )
 from .schema import initialize_schema
 from .slack_ingestion import SlackMemoryPoller, SlackWebApiClient
@@ -59,6 +58,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     schema_subparsers = schema_parser.add_subparsers(dest="schema_command", required=True)
     schema_subparsers.add_parser("init", help="create Neo4j constraints and vector indexes")
 
+    directory_parser = subparsers.add_parser("directory")
+    directory_subparsers = directory_parser.add_subparsers(dest="directory_command", required=True)
+    directory_sync_parser = directory_subparsers.add_parser("sync")
+    directory_sync_parser.add_argument("--site-code", required=True, help="directory site code")
+    directory_sync_parser.add_argument("--file", help="JSON file containing directory records")
+    directory_sync_parser.add_argument("--email-domain", default="", help="email domain for Snowflake username rows")
+
+    identity_parser = subparsers.add_parser("identity")
+    identity_subparsers = identity_parser.add_subparsers(dest="identity_command", required=True)
+    identity_resolve_parser = identity_subparsers.add_parser("resolve")
+    identity_resolve_parser.add_argument("--site-code", default="", help="directory site code")
+    identity_resolve_parser.add_argument("--first", required=True, help="shared first name")
+    identity_resolve_parser.add_argument("--last", required=True, help="shared last name")
+    identity_resolve_parser.add_argument("--name", default="", help="optional shared full name")
+
     db_parser = subparsers.add_parser("db")
     db_subparsers = db_parser.add_subparsers(dest="db_command", required=True)
     wipe_parser = db_subparsers.add_parser("wipe")
@@ -89,12 +103,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     person_parser = subparsers.add_parser("person")
     person_subparsers = person_parser.add_subparsers(dest="person_command", required=True)
-    face_parser = person_subparsers.add_parser("search-face")
-    face_parser.add_argument("--embedding-file", required=True, help="JSON file containing the face embedding vector")
-    face_parser.add_argument("--limit", type=int, default=10, help="maximum consented people to print")
-    audio_parser = person_subparsers.add_parser("search-audio")
-    audio_parser.add_argument("--embedding-file", required=True, help="JSON file containing the audio embedding vector")
-    audio_parser.add_argument("--limit", type=int, default=10, help="maximum consented people to print")
     context_parser = person_subparsers.add_parser("context")
     context_parser.add_argument("--person-id", required=True, help="person id to summarize")
     context_parser.add_argument("--limit", type=int, default=10, help="maximum context items to retrieve")
@@ -102,6 +110,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     context_parser.add_argument("--current-text", help="optional current utterance or task for memory item retrieval")
     context_parser.add_argument("--memory-limit", type=int, default=12, help="maximum durable memory items per section")
     context_parser.add_argument("--recent-episode-limit", type=int, default=5, help="maximum recent episodes inspected for target-person transcript lines")
+    profile_parser = person_subparsers.add_parser("profile")
+    profile_parser.add_argument("--person-id", required=True, help="person id to inspect")
+
+    biometric_parser = subparsers.add_parser("biometric")
+    biometric_subparsers = biometric_parser.add_subparsers(dest="biometric_command", required=True)
+    biometric_face_parser = biometric_subparsers.add_parser("search-face")
+    biometric_face_parser.add_argument("--embedding-file", required=True, help="JSON file containing face embedding vector")
+    biometric_face_parser.add_argument("--site-code", help="optional site filter")
+    biometric_face_parser.add_argument("--limit", type=int, default=2, help="maximum candidates")
+    biometric_voice_parser = biometric_subparsers.add_parser("search-voice")
+    biometric_voice_parser.add_argument("--embedding-file", required=True, help="JSON file containing voice embedding vector")
+    biometric_voice_parser.add_argument("--site-code", help="optional site filter")
+    biometric_voice_parser.add_argument("--limit", type=int, default=2, help="maximum candidates")
 
     search_parser = subparsers.add_parser("search")
     search_parser.add_argument("text", help="query text")
@@ -193,8 +214,41 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "schema":
-            initialize_schema(runner, settings.embedding_dimension)
+            initialize_schema(
+                runner,
+                settings.embedding_dimension,
+                face_embedding_dimension=settings.face_embedding_dimension,
+                voice_embedding_dimension=settings.voice_embedding_dimension,
+            )
             print("Schema initialized.")
+            return 0
+
+        if args.command == "directory":
+            client = TailwagMemoryClient(runner, settings)
+            if args.file:
+                payload = json.loads(Path(args.file).read_text())
+                records = [
+                    DirectoryPersonRecord(**item) if isinstance(item, dict) else item
+                    for item in payload
+                ]
+                result = client.sync_directory_people(args.site_code, records)
+            else:
+                result = client.sync_directory_from_snowflake(
+                    args.site_code,
+                    email_domain=args.email_domain,
+                )
+            print(json.dumps(asdict(result), sort_keys=True))
+            return 0
+
+        if args.command == "identity":
+            client = TailwagMemoryClient(runner, settings)
+            result = client.resolve_identity(
+                shared_first_name=args.first,
+                shared_last_name=args.last,
+                shared_name=args.name,
+                site_code=args.site_code,
+            )
+            print(json.dumps(asdict(result), sort_keys=True))
             return 0
 
         if args.command == "db":
@@ -251,6 +305,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "person":
+            if args.person_command == "profile":
+                client = TailwagMemoryClient(runner, settings)
+                profile = client.person_profile(args.person_id)
+                print(json.dumps(asdict(profile) if profile else None, sort_keys=True))
+                return 0
             if args.person_command == "context":
                 client = TailwagMemoryClient(runner, settings)
                 print(
@@ -265,14 +324,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 0
 
+        if args.command == "biometric":
+            client = TailwagMemoryClient(runner, settings)
             embedding = json.loads(Path(args.embedding_file).read_text())
-            service = PersonRecognitionService(runner)
-            if args.person_command == "search-face":
-                results = service.by_face_embedding(embedding, limit=args.limit)
+            if args.biometric_command == "search-face":
+                result = client.search_face(
+                    embedding=embedding,
+                    limit=args.limit,
+                    site_code=args.site_code,
+                )
             else:
-                results = service.by_audio_embedding(embedding, limit=args.limit)
-            for result in results:
-                print(json.dumps(result.__dict__, sort_keys=True))
+                result = client.search_voice(
+                    embedding=embedding,
+                    limit=args.limit,
+                    site_code=args.site_code,
+                )
+            print(json.dumps(asdict(result), sort_keys=True))
             return 0
 
         if args.command == "search":

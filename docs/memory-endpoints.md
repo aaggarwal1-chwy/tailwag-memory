@@ -25,8 +25,20 @@ export NEO4J_PASSWORD=tailwag-memory
 export OPENAI_API_KEY=sk-your-token-here
 export TAILWAG_EMBEDDING_MODEL=text-embedding-3-small
 export TAILWAG_EMBEDDING_DIMENSION=64
+export TAILWAG_FACE_EMBEDDING_DIMENSION=512
+export TAILWAG_VOICE_EMBEDDING_DIMENSION=192
+export TAILWAG_FACE_EMBEDDING_MODEL=facenet
+export TAILWAG_VOICE_EMBEDDING_MODEL=speechbrain_ecapa
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export SLACK_BOT_TOKEN=xoxb-your-token-here
+export SNOWFLAKE_ACCOUNT=CHEWY-CHEWY
+export SNOWFLAKE_USER=<username>@CHEWY.COM
+export SNOWFLAKE_PASSWORD=
+export SNOWFLAKE_AUTHENTICATOR=externalbrowser
+export SNOWFLAKE_ROLE=X_EDLDB_USER
+export SNOWFLAKE_WAREHOUSE=SNOWFLAKE_LEARNING_WH
+export SNOWFLAKE_DATABASE=EDLDB
+export SNOWFLAKE_SCHEMA=CHEWYBI
 export TAILWAG_AFFECT_FOLD1_MODEL=/path/to/fold1
 export TAILWAG_AFFECT_FOLD2_MODEL=/path/to/fold2
 ```
@@ -40,12 +52,17 @@ settings = load_settings()
 runner = Neo4jQueryRunner(settings)
 
 try:
-    initialize_schema(runner, settings.embedding_dimension)
+    initialize_schema(
+        runner,
+        settings.embedding_dimension,
+        face_embedding_dimension=settings.face_embedding_dimension,
+        voice_embedding_dimension=settings.voice_embedding_dimension,
+    )
 finally:
     runner.close()
 ```
 
-`OPENAI_API_KEY` is required when production code uses the OpenAI provider for embeddings, memory extraction, consolidation, or vector search. `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by extraction and consolidation providers. `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are only needed for optional affect inspection with `tailwag-memory[affect]`. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
+`OPENAI_API_KEY` is required when production code uses the OpenAI provider for embeddings, memory extraction, consolidation, or vector search. `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by extraction and consolidation providers. `SNOWFLAKE_*` variables are required only for Snowflake-backed directory sync; local JSON directory imports do not need them. `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are only needed for optional affect inspection with `tailwag-memory[affect]`. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
 
 ## Quick Start
 
@@ -120,8 +137,8 @@ Notes:
 - This endpoint does not generate OpenAI text embeddings and does not require `OPENAI_API_KEY`.
 - Omitted profile fields preserve existing `Person` values.
 - Person-only upserts mark the person active, clear `archived_at`, and update `last_seen` to the write time.
-- Standalone profile writes use `id`, `display_name`, `email`, `consent_status`, `face_embedding`, and `audio_embedding`; `role` and `source` remain episode/event relationship provenance.
-- Non-consented `consent_status` values clear stored biometric vectors through the same consent-aware person upsert rules used by episode and event ingestion.
+- Standalone profile writes use `id`, `display_name`, `email`, and `consent_status`; `role` and `source` remain episode/event relationship provenance.
+- Biometric vectors are not written through `PersonInput`. Use the biometric reference APIs so consent, reference status, and adaptive sample counts stay centralized on `FaceReference` and `VoiceReference` nodes.
 
 ### `archive_person(person_id)`
 
@@ -138,7 +155,7 @@ Returns: `bool`, true when a matching person was archived.
 Notes:
 
 - Archiving preserves historical graph data, including prior episode, event, and memory item relationships.
-- Archiving removes stored biometric vectors by clearing `face_embedding` and `audio_embedding`.
+- Archived people are excluded from biometric search and adaptive update paths.
 - Archived people are excluded from biometric recognition.
 - Archived people are not deleted; callers should keep using caller-owned IDs if they need to re-enroll or inspect historical context.
 - Archive is not a full retention deletion mechanism; retention and deletion policy remains caller-owned.
@@ -181,6 +198,109 @@ Notes:
 - This is a read-only identity resolver. It does not create, rekey, or merge people.
 - `SlackMemoryPoller` uses this method automatically when its `episode_recorder` exposes it and no explicit `person_id_resolver` is supplied.
 - The method returns `None` for blank email, no match, multiple matches, or a non-canonical match.
+
+### `sync_directory_people(site_code, records)`
+
+Stores normalized employee-directory rows for one site.
+
+Parameters:
+
+| Name | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `site_code` | `str` | yes | Directory site code stored on each row unless an input row supplies its own `site_code`. |
+| `records` | `list[DirectoryPersonRecord] \| list[dict[str, object]]` | yes | Directory rows to normalize and merge into Neo4j. |
+
+Returns: `DirectorySyncResult`.
+
+Notes:
+
+- Rows are keyed by `(site_code, username)`.
+- Sync writes `EmployeeDirectoryRecord` nodes and links existing `Person` nodes whose email username matches the directory username.
+- This endpoint does not call Snowflake; use `sync_directory_from_snowflake()` for that.
+
+### `sync_directory_from_snowflake(site_code, *, email_domain="")`
+
+Loads employee-directory rows from Snowflake, maps them to `DirectoryPersonRecord`,
+and stores them with `sync_directory_people(...)`.
+
+Parameters:
+
+| Name | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `site_code` | `str` | yes | Location code passed to the Snowflake query and stored on resulting records. |
+| `email_domain` | `str` | no | Optional domain used to synthesize `employee_email` from Snowflake usernames. |
+
+Returns: `DirectorySyncResult`.
+
+Notes:
+
+- The code reads `.snowflake_env`, then `.env`, then process environment for unset Snowflake variables.
+- Required connector values are `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, and `SNOWFLAKE_DATABASE`; password/authenticator/role/warehouse/schema are optional inputs to the connector wrapper.
+- The base package currently depends on `snowflake-connector-python`.
+
+### `resolve_identity(*, shared_first_name, shared_last_name, shared_name="", site_code="")`
+
+Fuzzy-matches a spoken or shared name against stored directory rows.
+
+Returns: `IdentityResolutionResult` with `success`, `status`, `message`,
+optional `data`, and up to three ranked `IdentityCandidate` values.
+
+Status values produced by the current code include `invalid_input`,
+`directory_unavailable`, `no_match`, `multiple_matches`, `needs_clarification`,
+and `single_match`.
+
+### `get_verified_profile(*, username, official_name, site_code="")`
+
+Returns a `VerifiedProfile` when exactly one directory row matches the username
+and optional site and its normalized official name equals the supplied official
+name. The returned `person_id` is `person_<username>`.
+
+### `person_profile(person_id)`
+
+Returns a `PersonProfile` projection for one person, including any linked
+directory profile lines. If more than one directory record is linked, the
+current query returns one row with `LIMIT 1`.
+
+### `record_encounter(person_id, *, observed_at=None, metadata=None)`
+
+Creates or updates a person encounter without recording an episode. It updates
+`last_seen`, increments `interaction_count`, and can link a directory row when
+`metadata` contains `username` and `site_code`.
+
+Returns: `PersonProfile`.
+
+### Biometric client methods
+
+`TailwagMemoryClient` exposes convenience wrappers around
+`BiometricReferenceService`:
+
+| Endpoint | Parameters | Returns |
+| --- | --- | --- |
+| `enroll_face_reference(...)` | `person_id`, face vector, metadata, consent | `BiometricEnrollmentResult` |
+| `search_face(...)` | face vector, optional site, limit | `BiometricSearchResult` |
+| `enroll_voice_reference(...)` | `person_id`, voice vector, metadata, consent | `BiometricEnrollmentResult` |
+| `search_voice(...)` | voice vector, optional site, limit | `BiometricSearchResult` |
+| `has_voice_reference(person_id)` | person ID | `bool` |
+| `observe_face_embedding(...)` | `person_id`, face vector, evidence, metadata | `BiometricUpdateResult` |
+| `observe_voice_embedding(...)` | `person_id`, voice vector, evidence, metadata | `BiometricUpdateResult` |
+
+The client passes `TAILWAG_FACE_EMBEDDING_MODEL` and
+`TAILWAG_VOICE_EMBEDDING_MODEL` from settings into the biometric service.
+
+### `resolve_turn_owner(...)`
+
+Resolves the owner of one turn from already-thresholded face and voice identity
+evidence.
+
+Parameters are `primary_face_candidate`, `visible_face_candidates`,
+`voice_candidate`, and `policy_context`.
+
+Returns: `OwnerResolutionResult`.
+
+Current policy prefers an accepted voice candidate when present, marks
+`owner_source="audio_face_agree"` when the primary face and voice person IDs
+match, falls back to face when voice is absent, and otherwise returns
+`owner_source="unknown"`.
 
 ### `record_episode(episode, *, extract_memory=True)`
 
@@ -256,6 +376,14 @@ Potential Follow-Ups:
 Recent Episodes:
 - 2026-06-16: Jamie: Luna has a vet visit tomorrow.
 ```
+
+### `person_context_structured(person_id, *, current_text=None)`
+
+Returns a `PersonContextResult` parsed from `person_context(...)` plus directory
+profile lines from `person_profile(...)`.
+
+Fields are `person_id`, `directory_profile_lines`, `memory_profile_lines`,
+`potential_followups`, and `preferred_language`.
 
 ### `search_semantic_memory(*, text, person_id, building_code=None, limit=5, now=None)`
 
@@ -338,14 +466,46 @@ Caller-supplied person data.
 | --- | --- | --- | --- | --- |
 | `id` | `str` | yes | none | Caller-owned person ID. |
 | `display_name` | `str \| None` | no | `None` | Human-readable name. |
+| `official_name` | `str \| None` | no | `None` | Optional directory-backed or verified legal/workplace name. |
 | `email` | `str \| None` | no | `None` | Optional identity evidence. Nonblank emails are stored as `lower(trim(email))`; Tailwag uses this normalized value to attach same-email writes and Neo4j enforces it as unique. |
-| `consent_status` | `str \| None` | no | `None` | Consent state. Non-consented values clear stored biometric vectors. |
-| `face_embedding` | `list[float] \| None` | no | `None` | Caller-supplied face vector. Must match configured dimension. |
-| `audio_embedding` | `list[float] \| None` | no | `None` | Caller-supplied audio vector. Must match configured dimension. |
+| `consent_status` | `str \| None` | no | `None` | Consent state used by identity and biometric reference policies. |
 | `role` | `str` | no | `"participant"` | Role on an episode or attendee context. |
 | `source` | `str` | no | `"caller"` | Provenance for participation or memory extraction. |
 
 Omitted profile fields preserve existing `Person` values on later writes. When a write supplies an email already owned by another person, Tailwag updates and links that existing person instead of creating a duplicate. Incoming canonical `person_*` IDs rekey matching `slack:*` temporary people when safe.
+
+`EpisodeInput.from_dict(...)` and `EventInput.from_dict(...)` currently map
+`id`, `display_name`, `email`, `consent_status`, `role`, and `source` for nested
+people; callers that need `official_name` should construct `PersonInput`
+instances directly.
+
+### `DirectoryPersonRecord`
+
+Employee-directory row owned by Tailwag.
+
+| Field | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `official_name` | `str` | yes | none | Directory official name. |
+| `username` | `str` | yes | none | Directory username, normalized to lowercase by service helpers. |
+| `site_code` | `str` | no | `""` | Directory site/location code. |
+| `employee_email` | `str` | no | `""` | Directory email. |
+| `business_title` | `str` | no | `""` | Directory title. |
+| `job_family` | `str` | no | `""` | Directory job family. |
+| `job_family_group` | `str` | no | `""` | Directory job family group. |
+| `job_level` | `str` | no | `""` | Directory job level. |
+| `c_level` | `str` | no | `""` | Directory C-level field. |
+| `manager_name` | `str` | no | `""` | Directory manager name. |
+| `cost_center` | `str` | no | `""` | Directory cost center. |
+| `senior_leadership_team` | `str` | no | `""` | Directory leadership team. |
+| `business_function` | `str` | no | `""` | Directory function. |
+| `tenure` | `str` | no | `""` | Time in job profile. |
+
+Persisted `EmployeeDirectoryRecord` nodes also include derived fields used by
+Neo4j Browser display and fuzzy matching: `display_name`, `name`,
+`normalized_name`, `token_sorted_name`, `source="snowflake"`, `created_at`, and
+`updated_at`. Neo4j Browser also shows an internal `<id>` for the node, but
+Tailwag does not store an application-level `id` property; `(site_code,
+username)` is the directory record key.
 
 ### `PlaceInput`
 
@@ -452,7 +612,7 @@ Methods:
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
 | `upsert(person)` | `PersonInput` | `str` | Create or update a person profile. Omitted fields preserve existing values. |
-| `archive(person_id)` | person ID | `bool` | Mark the person archived and clear stored biometric vectors while keeping historical graph data. |
+| `archive(person_id)` | person ID | `bool` | Mark the person archived while keeping historical graph data and excluding their biometric references from recognition. |
 | `rekey_by_email(email, new_person_id)` | email, new person ID | `bool` | Replace one Slack-owned email-matched person's ID with a canonical ID while preserving graph relationships; false when the email or canonical ID is not unique-safe. |
 | `canonical_id_by_email(email)` | email | `str \| None` | Return the one canonical `person_*` ID for an exact email match, or `None` when the match is absent, ambiguous, or not canonical. |
 
@@ -506,14 +666,48 @@ Follow-up support and addressing are handled internally by transcript extraction
 | --- | --- | --- | --- |
 | `by_place(building_code, room_id, limit=10)` | place key | `list[EventResult]` | Recent events at a place. |
 
-### `PersonRecognitionService(runner)`
+### `DirectoryIdentityService(runner)`
+
+Imported from `tailwag_memory.identity`.
+
+Methods mirror the high-level client directory methods:
 
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
-| `by_face_embedding(embedding, limit=10)` | face vector | `list[PersonRecognitionResult]` | Consented people ranked by face similarity. |
-| `by_audio_embedding(embedding, limit=10)` | audio vector | `list[PersonRecognitionResult]` | Consented people ranked by audio similarity. |
+| `sync_directory_people(...)` | site code, records | `DirectorySyncResult` | Store normalized directory rows and link same-email people by username. |
+| `sync_directory_from_snowflake(...)` | site code, optional email domain | `DirectorySyncResult` | Load rows from Snowflake and store them. |
+| `resolve_identity(...)` | first, last, optional full name and site | `IdentityResolutionResult` | Fuzzy-match directory rows. |
+| `get_verified_profile(...)` | username, official name, optional site | `VerifiedProfile \| None` | Return one verified profile for enrollment rehydration. |
+| `person_profile(person_id)` | person ID | `PersonProfile \| None` | Return person profile plus directory lines. |
+| `record_encounter(...)` | person ID, optional time and metadata | `PersonProfile` | Update last seen and interaction count. |
 
-Only people with `consent_status="consented"` are returned.
+### `BiometricReferenceService(runner, *, face_embedding_model="facenet", voice_embedding_model="speechbrain_ecapa")`
+
+Imported from `tailwag_memory.biometrics`.
+
+| Endpoint | Parameters | Returns | Meaning |
+| --- | --- | --- | --- |
+| `enroll_face_reference(...)` | `person_id`, face vector, metadata, consent | `BiometricEnrollmentResult` | Store the first or explicit face reference sample using the configured face model. |
+| `search_face(...)` | face vector, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `FaceReference` nodes. |
+| `enroll_voice_reference(...)` | `person_id`, voice vector, metadata, consent | `BiometricEnrollmentResult` | Store the first or explicit voice reference sample using the configured voice model. |
+| `search_voice(...)` | voice vector, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `VoiceReference` nodes. |
+| `observe_face_embedding(...)` | `person_id`, face vector, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe face observation for adaptive aggregation using the configured face model. |
+| `observe_voice_embedding(...)` | `person_id`, voice vector, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe voice observation for adaptive aggregation using the configured voice model. |
+
+Only active consented references for non-archived people are searched or updated.
+Enrollment initializes `sample_count=1`, `accepted_update_count=0`,
+`target_sample_count=5`, and `aggregate_method=normalized_running_average`.
+Observation updates reject missing references, completed references, weak evidence,
+model mismatch, dimension mismatch, low similarity, non-consented references, and
+archived people.
+
+Default adaptive thresholds are `0.72` for face similarity, `0.55` for voice
+similarity, and `0.20` for cross-modal evidence margin. Adaptive face and voice
+updates both require face and voice agreement on the same owner before Tailwag
+considers the offered embedding. Tailwag updates accepted references with a
+normalized running average and returns `BiometricUpdateResult` fields including
+`accepted`, `status`, `reason`, `sample_count`, `target_sample_count`, and
+`similarity`.
 
 ### `PersonContextRetrievalService(runner, embeddings=None)`
 
@@ -652,7 +846,16 @@ Common return types:
 | --- | --- |
 | `EpisodeMemoryResult` | `episode_id`, `transcript`, optional `start_time`, `end_time`, `building_code`, `room_id`, and `score`. |
 | `EventResult` | `event_id`, `description`, `start_time`, `end_time`, `building_code`, `room_id`. |
-| `PersonRecognitionResult` | `person_id`, `display_name`, `consent_status`, `last_seen`, optional `score`. |
+| `BiometricEnrollmentResult` | `saved`, `status`, `reason`, `person_id`, `reference_id`. |
+| `BiometricSearchResult` | candidates, recognition status/reason, threshold, top score, runner-up score, and margin. |
+| `BiometricUpdateResult` | update accepted/status/reason, person/reference IDs, modality, sample counts, and similarity. |
+| `DirectorySyncResult` | site code, records seen, and records written. |
+| `IdentityCandidate` | official name, username, email, title, tenure, manager, and score. |
+| `IdentityResolutionResult` | success flag, status, message, optional data, and ranked candidates. |
+| `VerifiedProfile` | person ID, official name, username, email, title, tenure, manager, directory lines, and metadata. |
+| `PersonProfile` | person ID, display name, email, consent/status, interaction count, last seen, directory lines, and metadata. |
+| `OwnerResolutionResult` | audio speaker ID, scores, margin, speaker visibility, owner ID/source/confidence, and unresolved reason. |
+| `PersonContextResult` | person ID, directory lines, memory lines, potential follow-ups, and preferred language. |
 | `PersonContextSource` | `person_id`, `display_name`, `items`. |
 | `PersonContextItem` | `item_id`, `item_type`, `text`, timestamps, place, role, source, score, transcript lines. |
 | `MemoryItemResult` | `memory_id`, `person_id`, `kind`, `key`, `summary`, `source`, status/timestamps, metadata, optional `score`. |
@@ -667,7 +870,7 @@ Common return types:
 
 - Caller-owned IDs are the stable integration keys. Do not use Neo4j internal IDs.
 - Run schema initialization before ingestion or retrieval.
-- The configured embedding dimension must match Neo4j vector indexes and supplied biometric vectors for vector search compatibility.
+- The configured text embedding dimension must match Neo4j text vector indexes. Biometric reference dimensions are stored per reference and must match their model-specific vector indexes.
 - Do not pass raw face images or raw audio into Tailwag. Pass embeddings only.
 - Direct memory item writes are advanced. Prefer episode recording plus extraction for live systems.
 - `fact` memories must remain narrow person-prompt context, not broad ontology facts.

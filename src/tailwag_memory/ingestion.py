@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .db import QueryRunner
+from .directory_reconciliation import person_directory_reconciliation_cypher
 from .embeddings import EmbeddingProvider
 from .episode_normalization import normalize_robot_speaker_labels
 from .models import EpisodeInput, EventInput, PersonInput, utc_now_iso
@@ -81,7 +82,6 @@ def _person_upsert_cypher(
     *,
     set_lifecycle_fields: bool = False,
     monotonic_last_seen: bool = True,
-    preserve_archived_biometrics: bool = True,
     update_last_seen: bool = True,
 ) -> str:
     """Return Cypher for consent-aware person upserts."""
@@ -103,26 +103,19 @@ def _person_upsert_cypher(
         if set_lifecycle_fields
         else ""
     )
-    archived_face_guard = "\n                      WHEN p.status = 'archived' THEN p.face_embedding" if preserve_archived_biometrics else ""
-    archived_audio_guard = "\n                      WHEN p.status = 'archived' THEN p.audio_embedding" if preserve_archived_biometrics else ""
-    return f"""
+    return (
+        f"""
                 MERGE (p:Person {{id: {person_variable}.{id_property}}})
                 SET p.display_name = coalesce({person_variable}.display_name, p.display_name),
+                    p.official_name = coalesce({person_variable}.official_name, p.official_name),
+                    p.name = coalesce(p.name, {person_variable}.id),
                     p.email = coalesce({person_variable}.email, p.email),
                     p.consent_status = coalesce({person_variable}.consent_status, p.consent_status),
-                    p.face_embedding = CASE
-                      WHEN {person_variable}.consent_status IS NOT NULL AND {person_variable}.consent_status <> 'consented' THEN NULL
-                      {archived_face_guard}
-                      ELSE coalesce({person_variable}.face_embedding, p.face_embedding)
-                    END,
-                    p.audio_embedding = CASE
-                      WHEN {person_variable}.consent_status IS NOT NULL AND {person_variable}.consent_status <> 'consented' THEN NULL
-                      {archived_audio_guard}
-                      ELSE coalesce({person_variable}.audio_embedding, p.audio_embedding)
-                    END,
                     p.created_at = coalesce(p.created_at, $created_at),
                     p.last_seen = {last_seen_assignment}{lifecycle_fields}
                 """
+        + person_directory_reconciliation_cypher("p")
+    )
 
 
 class PersonIngestionService:
@@ -138,10 +131,9 @@ class PersonIngestionService:
         person_data = {
             "id": person.id,
             "display_name": person.display_name,
+            "official_name": person.official_name,
             "email": _normalize_email(person.email),
             "consent_status": person.consent_status,
-            "face_embedding": person.face_embedding,
-            "audio_embedding": person.audio_embedding,
         }
         person_data = _resolve_person_data_by_email(self.runner, person_data, updated_at=written_at)
 
@@ -154,7 +146,6 @@ class PersonIngestionService:
                 "id",
                 set_lifecycle_fields=True,
                 monotonic_last_seen=False,
-                preserve_archived_biometrics=False,
             )
             + """
             RETURN p.id AS person_id
@@ -179,9 +170,12 @@ class PersonIngestionService:
             MATCH (p:Person {id: $person_id})
             SET p.status = 'archived',
                 p.archived_at = $archived_at,
-                p.updated_at = $updated_at,
-                p.face_embedding = NULL,
-                p.audio_embedding = NULL
+                p.updated_at = $updated_at
+            WITH p
+            OPTIONAL MATCH (p)-[:HAS_FACE_REFERENCE|HAS_VOICE_REFERENCE]->(ref)
+            SET ref.status = 'archived',
+                ref.archived_at = $archived_at,
+                ref.updated_at = $updated_at
             RETURN p.id AS person_id
             """,
             {
@@ -252,8 +246,6 @@ class EpisodeIngestionService:
                     "display_name": person.display_name,
                     "email": _normalize_email(person.email),
                     "consent_status": person.consent_status,
-                    "face_embedding": person.face_embedding,
-                    "audio_embedding": person.audio_embedding,
                     "role": person.role,
                     "source": person.source,
                 },
@@ -270,8 +262,6 @@ class EpisodeIngestionService:
                     "display_name": mention.person.display_name,
                     "email": _normalize_email(mention.person.email),
                     "consent_status": mention.person.consent_status,
-                    "face_embedding": mention.person.face_embedding,
-                    "audio_embedding": mention.person.audio_embedding,
                     "source": mention.source,
                 },
                 updated_at=written_at,
@@ -377,8 +367,6 @@ class EventIngestionService:
                     "display_name": attendee.person.display_name,
                     "email": _normalize_email(attendee.person.email),
                     "consent_status": attendee.person.consent_status,
-                    "face_embedding": attendee.person.face_embedding,
-                    "audio_embedding": attendee.person.audio_embedding,
                     "source": attendee.source,
                     "response": attendee.response,
                     "response_time": attendee.response_time,

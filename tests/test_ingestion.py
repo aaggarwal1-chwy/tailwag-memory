@@ -19,14 +19,12 @@ def _episode() -> EpisodeInput:
         transcript="Jamie: Are there spare laptop chargers?",
         retention_class="standard",
         place=PlaceInput(building_code="MAIN", room_id="101"),
-        participants=[
+            participants=[
             PersonInput(
                 id="person_external_jamie",
                 display_name="Jamie",
                 email="jamie@example.com",
                 consent_status="consented",
-                face_embedding=[0.1] * 8,
-                audio_embedding=[0.2] * 8,
                 role="speaker",
                 source="test",
             )
@@ -43,10 +41,12 @@ class PersonUpsertCypherTest(unittest.TestCase):
         self.assertIn("MERGE (p:Person {id: attendee.person_id})", attendee_clause)
         self.assertIn("p.email = coalesce(person.email, p.email)", participant_clause)
         self.assertIn("p.email = coalesce(attendee.email, p.email)", attendee_clause)
-        self.assertIn("person.consent_status <> 'consented'", participant_clause)
-        self.assertIn("attendee.consent_status <> 'consented'", attendee_clause)
-        self.assertIn("p.status = 'archived' THEN p.face_embedding", participant_clause)
-        self.assertIn("p.status = 'archived' THEN p.audio_embedding", attendee_clause)
+        self.assertIn("EmployeeDirectoryRecord", participant_clause)
+        self.assertIn("HAS_DIRECTORY_RECORD", participant_clause)
+        self.assertIn("WITH *", participant_clause)
+        self.assertIn("toLower(split(p.email, '@')[0])", participant_clause)
+        self.assertNotIn("face_embedding", participant_clause)
+        self.assertNotIn("audio_embedding", attendee_clause)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", participant_clause)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", attendee_clause)
 
@@ -62,8 +62,6 @@ class PersonIngestionServiceTest(unittest.TestCase):
                 display_name="Jamie",
                 email="jamie@example.com",
                 consent_status="consented",
-                face_embedding=[0.1] * 8,
-                audio_embedding=[0.2] * 8,
             )
         )
 
@@ -76,8 +74,8 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertEqual(query.parameters["person"]["display_name"], "Jamie")
         self.assertEqual(query.parameters["person"]["email"], "jamie@example.com")
         self.assertEqual(query.parameters["person"]["consent_status"], "consented")
-        self.assertEqual(query.parameters["person"]["face_embedding"], [0.1] * 8)
-        self.assertEqual(query.parameters["person"]["audio_embedding"], [0.2] * 8)
+        self.assertNotIn("face_embedding", query.parameters["person"])
+        self.assertNotIn("audio_embedding", query.parameters["person"])
         self.assertEqual(query.parameters["created_at"], query.parameters["updated_at"])
         self.assertEqual(query.parameters["last_seen"], query.parameters["updated_at"])
         self.assertIn("WITH $person AS person", query.query)
@@ -87,9 +85,22 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertIn("p.last_seen = $last_seen", query.query)
         self.assertIn("p.status = 'active'", query.query)
         self.assertIn("p.archived_at = NULL", query.query)
-        self.assertIn("person.consent_status <> 'consented'", query.query)
+        self.assertNotIn("face_embedding", query.query)
+        self.assertNotIn("audio_embedding", query.query)
         self.assertNotIn("p.status = 'archived' THEN p.face_embedding", query.query)
         self.assertNotIn("p.status = 'archived' THEN p.audio_embedding", query.query)
+
+    def test_upsert_reconciles_existing_directory_record_by_email_username(self) -> None:
+        runner = RecordingQueryRunner()
+        service = PersonIngestionService(runner)
+
+        service.upsert(PersonInput(id="person_external_jamie", email="jamie@example.com"))
+
+        query = runner.queries[1]
+        self.assertIn("EmployeeDirectoryRecord", query.query)
+        self.assertIn("HAS_DIRECTORY_RECORD", query.query)
+        self.assertIn("p.email CONTAINS '@'", query.query)
+        self.assertIn("toLower(split(p.email, '@')[0])", query.query)
 
     def test_upsert_query_excludes_org_identity_and_confidence(self) -> None:
         runner = RecordingQueryRunner()
@@ -143,8 +154,8 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertIn("p.status = 'archived'", query.query)
         self.assertIn("p.archived_at = $archived_at", query.query)
         self.assertIn("p.updated_at = $updated_at", query.query)
-        self.assertIn("p.face_embedding = NULL", query.query)
-        self.assertIn("p.audio_embedding = NULL", query.query)
+        self.assertIn("HAS_FACE_REFERENCE|HAS_VOICE_REFERENCE", query.query)
+        self.assertIn("ref.status = 'archived'", query.query)
         self.assertNotIn("DELETE", query.query)
         self.assertNotIn("DETACH", query.query)
         self.assertNotIn("p.display_name", query.query)
@@ -247,8 +258,8 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         participant = query.parameters["participants"][0]
         self.assertEqual(participant["id"], "person_external_jamie")
         self.assertEqual(participant["email"], "jamie@example.com")
-        self.assertEqual(participant["face_embedding"], [0.1] * 8)
-        self.assertEqual(participant["audio_embedding"], [0.2] * 8)
+        self.assertNotIn("face_embedding", participant)
+        self.assertNotIn("audio_embedding", participant)
         self.assertEqual(query.parameters["last_seen"], "2026-06-15T10:05:00+00:00")
         self.assertIn("DELETE old_place", query.query)
         self.assertIn("DELETE old_rel", query.query)
@@ -256,8 +267,10 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", query.query)
         self.assertIn("e.updated_at = $updated_at", query.query)
         self.assertIn("p.display_name = coalesce(person.display_name, p.display_name)", query.query)
+        self.assertIn("p.name = coalesce(p.name, person.id)", query.query)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", query.query)
-        self.assertIn("person.consent_status <> 'consented'", query.query)
+        self.assertNotIn("face_embedding", query.query)
+        self.assertNotIn("audio_embedding", query.query)
 
     def test_ingest_episode_writes_mentions_without_participation(self) -> None:
         runner = RecordingQueryRunner()
@@ -449,8 +462,8 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertIsNone(participant["display_name"])
         self.assertIsNone(participant["email"])
         self.assertIsNone(participant["consent_status"])
-        self.assertIsNone(participant["face_embedding"])
-        self.assertIsNone(participant["audio_embedding"])
+        self.assertNotIn("face_embedding", participant)
+        self.assertNotIn("audio_embedding", participant)
 
 
 class EventIngestionServiceTest(unittest.TestCase):
@@ -520,7 +533,8 @@ class EventIngestionServiceTest(unittest.TestCase):
         self.assertEqual(attendee["response_time"], "2026-06-15T18:00:00+00:00")
         self.assertIn("MERGE (p)-[r:ATTENDED]->(e)", query.query)
         self.assertIn("p.email = coalesce(attendee.email, p.email)", query.query)
-        self.assertIn("attendee.consent_status <> 'consented'", query.query)
+        self.assertNotIn("face_embedding", query.query)
+        self.assertNotIn("audio_embedding", query.query)
 
     def test_ingest_event_attaches_attendee_to_existing_email_person(self) -> None:
         runner = RecordingQueryRunner(results=[[{"person_id": "person_jamie"}]])

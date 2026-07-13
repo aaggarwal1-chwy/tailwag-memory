@@ -16,8 +16,7 @@ Owns:
 Inputs:
 - caller-provided Episode.id, Event.id, and Person.id
 - participant roles and relationship provenance sources
-- optional caller-supplied face embeddings
-- optional caller-supplied audio embeddings
+- caller-supplied biometric vectors only through biometric reference APIs
 - episode summary and transcript
 - event description and start/end times
 - building_code and room_id
@@ -26,7 +25,7 @@ Outputs:
 - persisted episodes and events
 - upserted people and places
 - updated Person.last_seen
-- stored Person.face_embedding and Person.audio_embedding when supplied
+- stored FaceReference and VoiceReference nodes when biometric APIs are called
 - graph relationships
 - episode embeddings
 

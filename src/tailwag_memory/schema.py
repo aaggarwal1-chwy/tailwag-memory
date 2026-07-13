@@ -3,11 +3,20 @@ from __future__ import annotations
 from .db import QueryRunner
 
 
-def schema_statements(embedding_dimension: int) -> list[str]:
+def schema_statements(
+    embedding_dimension: int,
+    *,
+    face_embedding_dimension: int = 512,
+    voice_embedding_dimension: int = 192,
+) -> list[str]:
     """Return idempotent Neo4j schema statements for the configured dimension."""
 
     if not isinstance(embedding_dimension, int) or embedding_dimension <= 0:
         raise ValueError("embedding_dimension must be a positive integer")
+    if not isinstance(face_embedding_dimension, int) or face_embedding_dimension <= 0:
+        raise ValueError("face_embedding_dimension must be a positive integer")
+    if not isinstance(voice_embedding_dimension, int) or voice_embedding_dimension <= 0:
+        raise ValueError("voice_embedding_dimension must be a positive integer")
     return [
         """
         CREATE CONSTRAINT person_id IF NOT EXISTS
@@ -30,6 +39,18 @@ def schema_statements(embedding_dimension: int) -> list[str]:
         FOR (m:MemoryItem) REQUIRE m.id IS UNIQUE
         """,
         """
+        CREATE CONSTRAINT employee_directory_record_key IF NOT EXISTS
+        FOR (d:EmployeeDirectoryRecord) REQUIRE (d.site_code, d.username) IS UNIQUE
+        """,
+        """
+        CREATE CONSTRAINT face_reference_id IF NOT EXISTS
+        FOR (r:FaceReference) REQUIRE r.id IS UNIQUE
+        """,
+        """
+        CREATE CONSTRAINT voice_reference_id IF NOT EXISTS
+        FOR (r:VoiceReference) REQUIRE r.id IS UNIQUE
+        """,
+        """
         CREATE CONSTRAINT place_key IF NOT EXISTS
         FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE
         """,
@@ -44,21 +65,21 @@ def schema_statements(embedding_dimension: int) -> list[str]:
         }}
         """,
         f"""
-        CREATE VECTOR INDEX person_face_embedding IF NOT EXISTS
-        FOR (p:Person) ON (p.face_embedding)
+        CREATE VECTOR INDEX face_reference_embedding IF NOT EXISTS
+        FOR (r:FaceReference) ON (r.embedding)
         OPTIONS {{
           indexConfig: {{
-            `vector.dimensions`: {embedding_dimension},
+            `vector.dimensions`: {face_embedding_dimension},
             `vector.similarity_function`: 'cosine'
           }}
         }}
         """,
         f"""
-        CREATE VECTOR INDEX person_audio_embedding IF NOT EXISTS
-        FOR (p:Person) ON (p.audio_embedding)
+        CREATE VECTOR INDEX voice_reference_embedding IF NOT EXISTS
+        FOR (r:VoiceReference) ON (r.embedding)
         OPTIONS {{
           indexConfig: {{
-            `vector.dimensions`: {embedding_dimension},
+            `vector.dimensions`: {voice_embedding_dimension},
             `vector.similarity_function`: 'cosine'
           }}
         }}
@@ -76,8 +97,18 @@ def schema_statements(embedding_dimension: int) -> list[str]:
     ]
 
 
-def initialize_schema(runner: QueryRunner, embedding_dimension: int) -> None:
+def initialize_schema(
+    runner: QueryRunner,
+    embedding_dimension: int,
+    *,
+    face_embedding_dimension: int = 512,
+    voice_embedding_dimension: int = 192,
+) -> None:
     """Run all schema statements against the supplied query runner."""
 
-    for statement in schema_statements(embedding_dimension):
+    for statement in schema_statements(
+        embedding_dimension,
+        face_embedding_dimension=face_embedding_dimension,
+        voice_embedding_dimension=voice_embedding_dimension,
+    ):
         runner.run(statement)

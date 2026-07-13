@@ -17,8 +17,8 @@ Inputs:
 - vector dimension configuration
 
 Outputs:
-- constraints for Person.id, Episode.id, Event.id, MemoryItem.id, and Place(building_code, room_id)
-- vector indexes for Episode.summary_embedding, Episode.transcript_embedding, Person.face_embedding, Person.audio_embedding, and MemoryItem.summary_embedding
+- constraints for Person.id, Person.email, Episode.id, Event.id, MemoryItem.id, EmployeeDirectoryRecord(site_code, username), FaceReference.id, VoiceReference.id, and Place(building_code, room_id)
+- vector indexes for Episode.transcript_embedding, FaceReference.embedding, VoiceReference.embedding, and MemoryItem.summary_embedding
 - schema initialization command support
 
 Non-goals:
