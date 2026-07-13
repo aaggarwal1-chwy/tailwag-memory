@@ -161,6 +161,90 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(result.reason, "below_threshold")
         self.assertEqual(result.threshold, 0.50)
 
+    def test_search_voice_converts_neo4j_score_to_raw_cosine_before_threshold(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "person_id": "person_jamie",
+                        "display_name": "Jamie",
+                        "consent_status": "consented",
+                        "reference_id": "voice:1",
+                        "model": "ecapa",
+                        "metadata_json": "{}",
+                        "neo4j_score": 0.568,
+                    }
+                ]
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.search_voice(embedding=[0.2] * 192)
+
+        self.assertFalse(result.recognized)
+        self.assertEqual(result.reason, "below_threshold")
+        self.assertAlmostEqual(result.top_score, 0.136)
+        self.assertAlmostEqual(result.candidates[0].score, 0.136)
+
+    def test_search_voice_margin_uses_raw_cosine_scale(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "person_id": "person_jamie",
+                        "display_name": "Jamie",
+                        "consent_status": "consented",
+                        "reference_id": "voice:1",
+                        "model": "ecapa",
+                        "metadata_json": "{}",
+                        "neo4j_score": 0.78,
+                    },
+                    {
+                        "person_id": "person_riley",
+                        "display_name": "Riley",
+                        "consent_status": "consented",
+                        "reference_id": "voice:2",
+                        "model": "ecapa",
+                        "metadata_json": "{}",
+                        "neo4j_score": 0.61,
+                    },
+                ]
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.search_voice(embedding=[0.2] * 192, limit=2)
+
+        self.assertTrue(result.recognized)
+        self.assertAlmostEqual(result.top_score, 0.56)
+        self.assertAlmostEqual(result.runner_up_score, 0.22)
+        self.assertAlmostEqual(result.margin, 0.34)
+
+    def test_search_face_converts_neo4j_score_to_raw_cosine_before_threshold(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "person_id": "person_jamie",
+                        "display_name": "Jamie",
+                        "consent_status": "consented",
+                        "reference_id": "face:1",
+                        "model": "facenet",
+                        "metadata_json": "{}",
+                        "neo4j_score": 0.73,
+                    }
+                ]
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.search_face(embedding=[0.1] * 512)
+
+        self.assertFalse(result.recognized)
+        self.assertEqual(result.reason, "below_threshold")
+        self.assertAlmostEqual(result.top_score, 0.46)
+        self.assertAlmostEqual(result.threshold, 0.60)
+
     def test_search_face_site_filter_keeps_directoryless_enrolled_people(self) -> None:
         runner = RecordingQueryRunner()
         service = BiometricReferenceService(runner)

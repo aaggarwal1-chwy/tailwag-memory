@@ -29,6 +29,11 @@ DEFAULT_FACE_MODEL = "facenet"
 DEFAULT_VOICE_MODEL = "speechbrain_ecapa"
 
 
+def _neo4j_cosine_score_to_raw(score: float) -> float:
+    """Convert Neo4j cosine vector index scores back to raw cosine similarity."""
+    return (float(score) * 2.0) - 1.0
+
+
 class BiometricReferenceService:
     """Store and search consented face and voice references."""
 
@@ -464,8 +469,8 @@ class BiometricReferenceService:
                    ref.id AS reference_id,
                    ref.model AS model,
                    ref.metadata_json AS metadata_json,
-                   score AS score
-            ORDER BY score DESC
+                   score AS neo4j_score
+            ORDER BY neo4j_score DESC
             LIMIT $limit
             """,
             {
@@ -475,7 +480,7 @@ class BiometricReferenceService:
                 "site_code": str(site_code or "").strip() or None,
             },
         )
-        candidates = [_candidate_from_row(row) for row in rows]
+        candidates = [_candidate_from_vector_row(row) for row in rows]
         top_score = candidates[0].score if candidates else 0.0
         runner_up_score = candidates[1].score if len(candidates) > 1 else 0.0
         margin = max(0.0, top_score - runner_up_score)
@@ -516,6 +521,14 @@ def _candidate_from_row(row: dict[str, Any]) -> BiometricCandidate:
         model=str(row.get("model") or ""),
         metadata=dict(metadata),
     )
+
+
+def _candidate_from_vector_row(row: dict[str, Any]) -> BiometricCandidate:
+    rendered = dict(row)
+    rendered["score"] = _neo4j_cosine_score_to_raw(
+        float(rendered.get("neo4j_score", rendered.get("score", 0.0)) or 0.0)
+    )
+    return _candidate_from_row(rendered)
 
 
 def result_to_dict(result: BiometricSearchResult) -> dict[str, Any]:
