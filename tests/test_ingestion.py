@@ -1,3 +1,5 @@
+from pathlib import Path
+import re
 from tests.helpers import RecordingQueryRunner
 from tailwag_memory.embeddings import MockOpenAIEmbeddingProvider
 from tailwag_memory.ingestion import (
@@ -8,6 +10,47 @@ from tailwag_memory.ingestion import (
 )
 from tailwag_memory.models import EpisodeInput, EpisodeMentionInput, EventAttendeeInput, EventInput, PersonInput, PlaceInput
 import unittest
+
+
+DEPRECATED_IMPORTING_CALL_RE = re.compile(
+    r"CALL\s*\{(?:\{)?\s*WITH\s+(?P<variable>[A-Za-z_][A-Za-z0-9_]*)"
+)
+
+
+def _assert_no_deprecated_importing_call(testcase: unittest.TestCase, query: str) -> None:
+    match = DEPRECATED_IMPORTING_CALL_RE.search(query)
+    if not match:
+        return
+    variable = match.group("variable")
+    testcase.fail(
+        "Deprecated Neo4j importing CALL subquery detected. "
+        f"Use `CALL ({variable}) {{ ... }}` and remove the import-only "
+        f"`WITH {variable}` to avoid the DBMS warning."
+    )
+
+
+class CypherWarningRegressionTest(unittest.TestCase):
+    def test_source_does_not_reintroduce_deprecated_importing_call_subqueries(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        source_root = project_root / "src" / "tailwag_memory"
+        offenders: list[str] = []
+
+        for path in sorted(source_root.rglob("*.py")):
+            text = path.read_text()
+            for match in DEPRECATED_IMPORTING_CALL_RE.finditer(text):
+                line = text.count("\n", 0, match.start()) + 1
+                variable = match.group("variable")
+                relative_path = path.relative_to(project_root)
+                offenders.append(
+                    f"{relative_path}:{line}: use `CALL ({variable}) {{ ... }}` "
+                    f"and remove the import-only `WITH {variable}`"
+                )
+
+        self.assertFalse(
+            offenders,
+            "Deprecated Neo4j importing CALL subqueries can emit DBMS warnings. "
+            "Fix them with scoped CALL syntax:\n" + "\n".join(offenders),
+        )
 
 
 def _episode() -> EpisodeInput:
@@ -43,8 +86,11 @@ class PersonUpsertCypherTest(unittest.TestCase):
         self.assertIn("p.email = coalesce(attendee.email, p.email)", attendee_clause)
         self.assertIn("EmployeeDirectoryRecord", participant_clause)
         self.assertIn("HAS_DIRECTORY_RECORD", participant_clause)
+        self.assertIn("CALL (p) {", participant_clause)
         self.assertIn("WITH *", participant_clause)
         self.assertIn("toLower(split(p.email, '@')[0])", participant_clause)
+        _assert_no_deprecated_importing_call(self, participant_clause)
+        _assert_no_deprecated_importing_call(self, attendee_clause)
         self.assertIn("WHEN person.official_name IS NOT NULL THEN person.official_name", participant_clause)
         self.assertIn("person.display_name <> person.id", participant_clause)
         self.assertIn("attendee.display_name <> attendee.person_id", attendee_clause)
@@ -120,8 +166,10 @@ class PersonIngestionServiceTest(unittest.TestCase):
         query = runner.queries[1]
         self.assertIn("EmployeeDirectoryRecord", query.query)
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
+        self.assertIn("CALL (p) {", query.query)
         self.assertIn("p.email CONTAINS '@'", query.query)
         self.assertIn("toLower(split(p.email, '@')[0])", query.query)
+        _assert_no_deprecated_importing_call(self, query.query)
 
     def test_upsert_query_excludes_org_identity_and_confidence(self) -> None:
         runner = RecordingQueryRunner()
@@ -284,6 +332,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertEqual(query.parameters["last_seen"], "2026-06-15T10:05:00+00:00")
         self.assertIn("DELETE old_place", query.query)
         self.assertIn("DELETE old_rel", query.query)
+        self.assertIn("CALL (e) {", query.query)
         self.assertIn("UNWIND $participants AS person", query.query)
         self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", query.query)
         self.assertIn("e.updated_at = $updated_at", query.query)
@@ -292,6 +341,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", query.query)
         self.assertNotIn("face_embedding", query.query)
         self.assertNotIn("audio_embedding", query.query)
+        _assert_no_deprecated_importing_call(self, query.query)
 
     def test_ingest_carries_official_name_to_participant_upsert(self) -> None:
         runner = RecordingQueryRunner()
@@ -348,10 +398,12 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertEqual(query.parameters["mentioned_person_ids"], ["person_chandra"])
         self.assertEqual(query.parameters["mentioned_people"][0]["person_id"], "person_chandra")
         self.assertEqual(query.parameters["mentioned_people"][0]["source"], "slack")
+        self.assertEqual(query.query.count("CALL (e) {"), 2)
         self.assertIn("MERGE (p)-[r:MENTIONED_IN]->(e)", query.query)
         self.assertIn("SET r.source = mentioned.source", query.query)
         self.assertIn("DELETE old_mention", query.query)
         self.assertIn("p.last_seen = p.last_seen", query.query)
+        _assert_no_deprecated_importing_call(self, query.query)
 
     def test_ingest_episode_resolves_mentioned_person_by_email(self) -> None:
         runner = RecordingQueryRunner(results=[[{"person_id": "person_chandra"}]])

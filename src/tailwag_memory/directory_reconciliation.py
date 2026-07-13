@@ -5,8 +5,7 @@ def person_directory_reconciliation_cypher(person_variable: str = "p") -> str:
     """Return Cypher that links a Person to directory rows by email username."""
     return f"""
                 WITH *
-                CALL {{
-                  WITH {person_variable}
+                CALL ({person_variable}) {{
                   WITH {person_variable},
                        CASE
                          WHEN {person_variable}.email IS NULL OR NOT {person_variable}.email CONTAINS '@' THEN ''

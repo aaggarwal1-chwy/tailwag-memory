@@ -309,8 +309,7 @@ class EpisodeIngestionService:
             WITH e, old_mentioned, old_mention
             FOREACH (_ IN CASE WHEN old_mentioned IS NOT NULL AND NOT old_mentioned.id IN $mentioned_person_ids THEN [1] ELSE [] END | DELETE old_mention)
             WITH DISTINCT e
-            CALL {
-              WITH e
+            CALL (e) {
               UNWIND $participants AS person
             """
             + _person_upsert_cypher("person", "id")
@@ -320,8 +319,7 @@ class EpisodeIngestionService:
                     r.source = person.source
               RETURN count(*) AS participant_write_count
             }
-            CALL {
-              WITH e
+            CALL (e) {
               UNWIND $mentioned_people AS mentioned
             """
             + _person_upsert_cypher("mentioned", "person_id", update_last_seen=False)
