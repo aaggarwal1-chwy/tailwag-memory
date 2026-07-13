@@ -17,16 +17,16 @@ This guide stays at the package setup and integration-boundary level. For detail
 
 ## Install From Another Local Repo
 
-From the consuming repo, install Tailwag in editable mode:
+From the consuming repo, install Tailwag in editable mode, replacing `/path/to/tailwag-memory` with the local checkout path:
 
 ```bash
-python -m pip install -e /Users/aaggarwal1/Desktop/code/tailwag-memory
+python -m pip install -e /path/to/tailwag-memory
 ```
 
 For local affect inspection with external XLM-RoBERTa-large fold model directories:
 
 ```bash
-python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[affect]"
+python -m pip install -e "/path/to/tailwag-memory[affect]"
 ```
 
 Other inspect reports use the base install. See [Inspect Reference](inspect-reference.md) for follow-up validity, person timeline, memory item, and affect report behavior.
@@ -34,7 +34,7 @@ Other inspect reports use the base install. See [Inspect Reference](inspect-refe
 For HTTP serving with FastAPI:
 
 ```bash
-python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[api]"
+python -m pip install -e "/path/to/tailwag-memory[api]"
 ```
 
 ## Runtime Configuration

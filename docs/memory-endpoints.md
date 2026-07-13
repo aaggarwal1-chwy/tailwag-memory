@@ -12,10 +12,10 @@ Inspection utilities are imported from `tailwag_memory.inspect`, not from the to
 
 ## Runtime Setup
 
-Install the package from the consuming repo:
+Install the package from the consuming repo, replacing `/path/to/tailwag-memory` with the local checkout path:
 
 ```bash
-python -m pip install -e /Users/aaggarwal1/Desktop/code/tailwag-memory
+python -m pip install -e /path/to/tailwag-memory
 ```
 
 Set runtime configuration:
@@ -75,7 +75,7 @@ finally:
 Install the API extra:
 
 ```bash
-python -m pip install -e "/Users/aaggarwal1/Desktop/code/tailwag-memory[api]"
+python -m pip install -e "/path/to/tailwag-memory[api]"
 ```
 
 Run the service:
