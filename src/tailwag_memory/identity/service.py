@@ -374,7 +374,7 @@ class DirectoryIdentityService:
         record = _row_to_record(row) if row.get("username") else None
         return PersonProfile(
             person_id=str(row.get("person_id") or rendered),
-            display_name=str(row.get("display_name") or (record.official_name if record else "") or rendered),
+            display_name=_profile_display_name(row, record, rendered),
             email=str(row.get("email") or row.get("employee_email") or ""),
             consent_status=str(row.get("consent_status") or ""),
             status=str(row.get("status") or "active"),
@@ -401,7 +401,11 @@ class DirectoryIdentityService:
         self.runner.run(
             """
             MERGE (p:Person {id: $person_id})
-            SET p.display_name = coalesce($display_name, p.display_name, $person_id),
+            SET p.display_name = CASE
+                  WHEN $official_name IS NOT NULL THEN $official_name
+                  WHEN $display_name IS NOT NULL AND $display_name <> $person_id THEN $display_name
+                  ELSE p.display_name
+                END,
                 p.official_name = coalesce($official_name, p.official_name),
                 p.name = coalesce(p.name, $person_id),
                 p.email = coalesce($email, p.email),
@@ -640,6 +644,23 @@ def _safe_int(value: Any) -> int:
         return int(value or 0)
     except Exception:
         return 0
+
+
+def _profile_display_name(
+    row: dict[str, Any],
+    record: DirectoryPersonRecord | None,
+    fallback_person_id: str,
+) -> str:
+    person_id = str(row.get("person_id") or fallback_person_id or "").strip()
+    display_name = str(row.get("display_name") or "").strip()
+    if display_name and display_name != person_id:
+        return display_name
+    official_name = str(row.get("person_official_name") or "").strip()
+    if official_name:
+        return official_name
+    if record is not None and record.official_name:
+        return record.official_name
+    return person_id or fallback_person_id
 
 
 def _optional(value: Any) -> str | None:

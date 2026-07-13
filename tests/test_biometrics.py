@@ -47,6 +47,21 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(person_query.parameters["person"]["display_name"], "Jamie Example")
         self.assertEqual(person_query.parameters["person"]["official_name"], "Jamie Official")
         self.assertEqual(person_query.parameters["person"]["email"], "jamie@example.com")
+        self.assertIn("WHEN person.official_name IS NOT NULL THEN person.official_name", person_query.query)
+
+    def test_enroll_voice_reference_without_name_metadata_does_not_use_person_id_as_display_name(self) -> None:
+        runner = RecordingQueryRunner()
+        service = BiometricReferenceService(runner)
+
+        service.enroll_voice_reference(
+            person_id="person_jamie",
+            embedding=[0.1] * 192,
+            metadata={"attempt_kind": "silent"},
+        )
+
+        person_query = next(query for query in runner.queries if "person" in query.parameters)
+        self.assertIsNone(person_query.parameters["person"]["display_name"])
+        self.assertIsNone(person_query.parameters["person"]["official_name"])
 
     def test_enroll_face_reference_serializes_nested_metadata_for_neo4j(self) -> None:
         runner = RecordingQueryRunner()

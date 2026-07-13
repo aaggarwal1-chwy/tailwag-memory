@@ -187,7 +187,7 @@ class BiometricReferenceService:
                     _metadata_value(meta, "display_name")
                     or _metadata_value(meta, "name")
                     or _metadata_value(meta, "official_name")
-                    or rendered_person_id
+                    or None
                 ),
                 official_name=_metadata_value(meta, "official_name") or None,
                 email=(

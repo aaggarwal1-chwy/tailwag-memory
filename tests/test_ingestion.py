@@ -45,6 +45,9 @@ class PersonUpsertCypherTest(unittest.TestCase):
         self.assertIn("HAS_DIRECTORY_RECORD", participant_clause)
         self.assertIn("WITH *", participant_clause)
         self.assertIn("toLower(split(p.email, '@')[0])", participant_clause)
+        self.assertIn("WHEN person.official_name IS NOT NULL THEN person.official_name", participant_clause)
+        self.assertIn("person.display_name <> person.id", participant_clause)
+        self.assertIn("attendee.display_name <> attendee.person_id", attendee_clause)
         self.assertNotIn("face_embedding", participant_clause)
         self.assertNotIn("audio_embedding", attendee_clause)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", participant_clause)
@@ -89,6 +92,24 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertNotIn("audio_embedding", query.query)
         self.assertNotIn("p.status = 'archived' THEN p.face_embedding", query.query)
         self.assertNotIn("p.status = 'archived' THEN p.audio_embedding", query.query)
+
+    def test_upsert_uses_official_name_as_display_name_even_when_display_is_id(self) -> None:
+        runner = RecordingQueryRunner()
+        service = PersonIngestionService(runner)
+
+        service.upsert(
+            PersonInput(
+                id="person_external_jamie",
+                display_name="person_external_jamie",
+                official_name="Jamie Example",
+            )
+        )
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["person"]["display_name"], "person_external_jamie")
+        self.assertEqual(query.parameters["person"]["official_name"], "Jamie Example")
+        self.assertIn("WHEN person.official_name IS NOT NULL THEN person.official_name", query.query)
+        self.assertIn("person.display_name <> person.id", query.query)
 
     def test_upsert_reconciles_existing_directory_record_by_email_username(self) -> None:
         runner = RecordingQueryRunner()
@@ -266,11 +287,39 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertIn("UNWIND $participants AS person", query.query)
         self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", query.query)
         self.assertIn("e.updated_at = $updated_at", query.query)
-        self.assertIn("p.display_name = coalesce(person.display_name, p.display_name)", query.query)
+        self.assertIn("WHEN person.official_name IS NOT NULL THEN person.official_name", query.query)
         self.assertIn("p.name = coalesce(p.name, person.id)", query.query)
         self.assertIn("datetime(p.last_seen) < datetime($last_seen)", query.query)
         self.assertNotIn("face_embedding", query.query)
         self.assertNotIn("audio_embedding", query.query)
+
+    def test_ingest_carries_official_name_to_participant_upsert(self) -> None:
+        runner = RecordingQueryRunner()
+        service = EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        service.ingest(
+            EpisodeInput(
+                id="episode_external_001",
+                episode_type="conversation",
+                start_time="2026-06-15T10:00:00+00:00",
+                end_time="2026-06-15T10:05:00+00:00",
+                transcript="Jamie: Are there spare laptop chargers?",
+                retention_class="standard",
+                place=PlaceInput(building_code="MAIN", room_id="101"),
+                participants=[
+                    PersonInput(
+                        id="person_external_jamie",
+                        display_name="person_external_jamie",
+                        official_name="Jamie Example",
+                        role="speaker",
+                    )
+                ],
+            )
+        )
+
+        participant = runner.queries[0].parameters["participants"][0]
+        self.assertEqual(participant["display_name"], "person_external_jamie")
+        self.assertEqual(participant["official_name"], "Jamie Example")
 
     def test_ingest_episode_writes_mentions_without_participation(self) -> None:
         runner = RecordingQueryRunner()

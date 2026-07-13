@@ -132,9 +132,49 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
 
         query = runner.queries[0]
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
+        self.assertIn("WHEN $official_name IS NOT NULL THEN $official_name", query.query)
+        self.assertIn("$display_name <> $person_id", query.query)
         self.assertIn("p.name = coalesce(p.name, $person_id)", query.query)
         self.assertEqual(query.parameters["directory_username"], "jamie")
         self.assertEqual(query.parameters["directory_site_code"], "BOS3")
+
+    def test_record_encounter_prefers_official_name_over_display_name(self) -> None:
+        runner = RecordingQueryRunner()
+        service = DirectoryIdentityService(runner)
+
+        service.record_encounter(
+            person_id="person_jamie",
+            metadata={
+                "display_name": "person_jamie",
+                "official_name": "Jamie Example",
+            },
+        )
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["display_name"], "person_jamie")
+        self.assertEqual(query.parameters["official_name"], "Jamie Example")
+        self.assertIn("WHEN $official_name IS NOT NULL THEN $official_name", query.query)
+
+    def test_person_profile_returns_official_name_when_display_name_is_person_id(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "person_id": "person_jamie",
+                        "display_name": "person_jamie",
+                        "person_official_name": "Jamie Example",
+                        "email": "jamie@example.com",
+                        "status": "active",
+                    }
+                ]
+            ]
+        )
+        service = DirectoryIdentityService(runner)
+
+        profile = service.person_profile("person_jamie")
+
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile.display_name, "Jamie Example")
 
     def test_record_encounter_reconciles_directory_record_by_email_username(self) -> None:
         runner = RecordingQueryRunner()
