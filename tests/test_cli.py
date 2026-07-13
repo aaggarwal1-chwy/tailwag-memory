@@ -69,6 +69,92 @@ class CliTest(unittest.TestCase):
         self.assertTrue(runner.closed)
         self.assertIn("Neo4j data wiped.", stdout.getvalue())
 
+    def test_db_delete_node_requires_confirmation(self) -> None:
+        with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["db", "delete-node", "--label", "Person", "--id", "person_jamie"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("db delete-node requires --yes", stderr.getvalue())
+        runner_class.assert_not_called()
+
+    def test_db_delete_node_rejects_unsupported_labels_before_db_runner(self) -> None:
+        with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["db", "delete-node", "--label", "Event", "--id", "event_1", "--yes"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("invalid choice", stderr.getvalue())
+        runner_class.assert_not_called()
+
+    def test_db_delete_node_requires_id_before_db_runner(self) -> None:
+        with patch("tailwag_memory.cli.Neo4jQueryRunner") as runner_class:
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["db", "delete-node", "--label", "Person", "--yes"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("the following arguments are required: --id", stderr.getvalue())
+        runner_class.assert_not_called()
+
+    def test_db_delete_node_prints_json_result_and_closes_runner(self) -> None:
+        settings = test_settings(embedding_dimension=64)
+        runner = RecordingQueryRunner(
+            results=[
+                [{"node_id": "person_jamie"}],
+                [
+                    {
+                        "persons_deleted": 1,
+                        "episodes_deleted": 1,
+                        "memory_items_deleted": 2,
+                    }
+                ],
+            ],
+            settings=settings,
+        )
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                stdout = StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(["db", "delete-node", "--label", "Person", "--id", "person_jamie", "--yes"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(runner.closed)
+        self.assertEqual(runner.queries[0].parameters, {"node_id": "person_jamie"})
+        self.assertEqual(runner.queries[1].parameters, {"node_id": "person_jamie"})
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["label"], "Person")
+        self.assertEqual(output["id"], "person_jamie")
+        self.assertEqual(output["status"], "deleted")
+        self.assertEqual(output["deleted_counts"]["persons_deleted"], 1)
+        self.assertEqual(output["deleted_counts"]["episodes_deleted"], 1)
+        self.assertEqual(output["deleted_counts"]["memory_items_deleted"], 2)
+
+    def test_db_delete_node_missing_node_prints_not_found(self) -> None:
+        settings = test_settings(embedding_dimension=64)
+        runner = RecordingQueryRunner(results=[[]], settings=settings)
+
+        with patch("tailwag_memory.cli.load_settings", return_value=settings):
+            with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                stdout = StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = main(["db", "delete-node", "--label", "Episode", "--id", "episode_missing", "--yes"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(runner.closed)
+        self.assertEqual(len(runner.queries), 1)
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["label"], "Episode")
+        self.assertEqual(output["id"], "episode_missing")
+        self.assertEqual(output["status"], "not_found")
+        self.assertEqual(output["deleted_counts"], {})
+
     def test_slack_poll_missing_token_exits_before_db_runner(self) -> None:
         settings = test_settings(embedding_dimension=64, slack_bot_token=None)
 

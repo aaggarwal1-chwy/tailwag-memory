@@ -367,6 +367,34 @@ Event ingestion stores or updates the event, upserts the place, creates the even
 
 Person-only ingestion supports explicit identity/profile refreshes through `upsert_person()`, lifecycle archival through `archive_person()`, and Slack-to-canonical identity convergence through `rekey_person_by_email()`. Biometric writes use the reference APIs, not `PersonInput`.
 
+## CLI Targeted Deletes
+
+`tailwag db delete-node` is a CLI-only maintenance workflow for permanent targeted
+deletes. It is intentionally not exposed as an HTTP endpoint or public
+`TailwagMemoryClient` API. The command supports only `Person`, `Episode`, and
+`MemoryItem` by application-level `id` and requires `--yes`.
+
+Person deletion removes the `Person`, every `MemoryItem` owned through
+`HAS_MEMORY`, and any `FaceReference` or `VoiceReference` owned only by that
+person. Episodes where the deleted person is the only participant are deleted
+with episode-delete memory cleanup; shared episodes are preserved and lose only
+that person's `PARTICIPATED_IN` and `MENTIONED_IN` relationships. `Event` and
+`EmployeeDirectoryRecord` nodes are shared/reference data and are preserved;
+person deletion removes only the deleted person's `ATTENDED` and
+`HAS_DIRECTORY_RECORD` relationships.
+
+Episode deletion preserves linked people. Memory items supported only by the
+deleted episode are deleted; memory items with other supporting episodes keep
+those supports and lose only the deleted episode's `SUPPORTED_BY` link.
+`ADDRESSED_BY` links to the deleted episode are removed. The linked `Place` is
+deleted only when no other `Episode` or `Event` still has an `OCCURRED_AT`
+relationship to it.
+
+Memory item deletion removes the selected `MemoryItem` and every replacement
+reachable through outgoing `SUPERSEDED_BY` relationships. It does not delete
+linked people, episodes, events, directory records, biometric references, or
+places.
+
 ## Read Paths
 
 Tailwag provides graph lookups for episodes by person, episodes by place, events by place, and biometric person recognition. Vector retrieval supports episode transcript search, hybrid person/place-filtered episode search, and memory item summary search.

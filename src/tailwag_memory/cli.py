@@ -10,6 +10,7 @@ from typing import Sequence
 from .client import TailwagMemoryClient
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
+from .deletion import NodeDeletionService, SUPPORTED_DELETE_LABELS
 from .embeddings import OpenAIEmbeddingProvider
 from .inspect.cli_handlers import add_inspect_subcommands, run_inspect_command, validate_inspect_args
 from .ingestion import EventIngestionService
@@ -80,6 +81,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--yes",
         action="store_true",
         help="confirm destructive deletion of all Neo4j nodes and relationships",
+    )
+    delete_node_parser = db_subparsers.add_parser("delete-node")
+    delete_node_parser.add_argument(
+        "--label",
+        required=True,
+        choices=SUPPORTED_DELETE_LABELS,
+        help="node label to delete",
+    )
+    delete_node_parser.add_argument("--id", required=True, help="application-level node id to delete")
+    delete_node_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm permanent targeted deletion and type-specific cascades",
     )
 
     episode_parser = subparsers.add_parser("episode")
@@ -200,6 +214,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "db" and args.db_command == "wipe" and not args.yes:
         parser.error("db wipe requires --yes because it deletes all Neo4j data.")
+    if args.command == "db" and args.db_command == "delete-node" and not args.yes:
+        parser.error("db delete-node requires --yes because it permanently deletes graph data.")
     if args.command == "slack" and args.slack_command == "poll" and args.force_backfill and args.backfill_hours is None:
         parser.error("slack poll --force-backfill requires --backfill-hours.")
     if args.command == "slack" and args.slack_command == "poll" and args.force_backfill and not args.once:
@@ -252,8 +268,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "db":
-            runner.run("MATCH (n) DETACH DELETE n")
-            print("Neo4j data wiped.")
+            if args.db_command == "wipe":
+                runner.run("MATCH (n) DETACH DELETE n")
+                print("Neo4j data wiped.")
+                return 0
+            result = NodeDeletionService(runner).delete_node(label=args.label, node_id=args.id)
+            print(json.dumps(asdict(result), sort_keys=True))
             return 0
 
         if args.command == "episode":
