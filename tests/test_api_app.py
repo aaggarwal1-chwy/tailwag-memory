@@ -52,11 +52,41 @@ class TailwagApiAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok", "service": "tailwag-memory"})
 
+    def test_provider_health_uses_bearer_token_and_does_not_create_client(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        app = create_app()
+
+        def fail_client():
+            raise AssertionError("provider health should not create a Tailwag client")
+
+        app.dependency_overrides[get_client] = fail_client
+        client = TestClient(app)
+
+        unauthenticated = client.get("/argos/providers/memory/resources/memory/health")
+        authenticated = client.get(
+            "/argos/providers/memory/resources/memory/health",
+            headers=_auth_header(),
+        )
+
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(authenticated.status_code, 200)
+        self.assertEqual(
+            authenticated.json(),
+            {
+                "ok": True,
+                "service": "tailwag-memory",
+                "provider": "memory",
+                "resource": "memory",
+            },
+        )
+
     def test_memory_routes_require_bearer_token(self) -> None:
         from tailwag_memory.api.app import create_app
 
         client = TestClient(create_app())
-        response = client.post(f"{API_BASE}/person-context", json={"person_id": "person_jamie"})
+        response = client.post(f"{API_BASE}/person_context", json={"person_id": "person_jamie"})
 
         self.assertEqual(response.status_code, 401)
 
@@ -65,17 +95,17 @@ class TailwagApiAppTest(unittest.TestCase):
 
         client = TestClient(create_app())
         wrong_provider = client.post(
-            "/argos/providers/search/resources/memory/request/person-context",
+            "/argos/providers/search/resources/memory/request/person_context",
             headers=_auth_header(),
             json={"person_id": "person_jamie"},
         )
         wrong_resource = client.post(
-            "/argos/providers/memory/resources/search/request/person-context",
+            "/argos/providers/memory/resources/search/request/person_context",
             headers=_auth_header(),
             json={"person_id": "person_jamie"},
         )
         legacy_root = client.post(
-            "/person-context",
+            "/person_context",
             headers=_auth_header(),
             json={"person_id": "person_jamie"},
         )
@@ -113,7 +143,7 @@ class TailwagApiAppTest(unittest.TestCase):
         app.dependency_overrides[get_client] = lambda: fake
 
         response = TestClient(app).post(
-            f"{API_BASE}/person-context",
+            f"{API_BASE}/person_context",
             headers=_auth_header(),
             json={
                 "person_id": "person_jamie",
@@ -176,7 +206,7 @@ class TailwagApiAppTest(unittest.TestCase):
             "extract_memory": False,
         }
 
-        response = TestClient(app).post(f"{API_BASE}/episodes", headers=_auth_header(), json=payload)
+        response = TestClient(app).post(f"{API_BASE}/episodes_record", headers=_auth_header(), json=payload)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -205,7 +235,7 @@ class TailwagApiAppTest(unittest.TestCase):
         from tailwag_memory.api.app import create_app
 
         response = TestClient(create_app()).post(
-            f"{API_BASE}/episodes",
+            f"{API_BASE}/episodes_record",
             headers=_auth_header(),
             json={"episode": {"id": "episode_1"}, "extract_memory": False},
         )
@@ -222,17 +252,17 @@ class TailwagApiAppTest(unittest.TestCase):
         client = TestClient(app)
 
         upsert = client.post(
-            f"{API_BASE}/people",
+            f"{API_BASE}/people_upsert",
             headers=_auth_header(),
             json={"person": {"id": "person_jamie", "display_name": "Jamie"}},
         )
         archive = client.post(
-            f"{API_BASE}/people/archive",
+            f"{API_BASE}/people_archive",
             headers=_auth_header(),
             json={"person_id": "person_jamie"},
         )
         rekey = client.post(
-            f"{API_BASE}/people/rekey-by-email",
+            f"{API_BASE}/people_rekey_by_email",
             headers=_auth_header(),
             json={"email": "jamie@example.com", "new_person_id": "person_jamie"},
         )
@@ -251,7 +281,7 @@ class TailwagApiAppTest(unittest.TestCase):
         app.dependency_overrides[get_client] = lambda: fake
 
         response = TestClient(app).post(
-            f"{API_BASE}/semantic-search",
+            f"{API_BASE}/semantic_search",
             headers=_auth_header(),
             json={"text": "demos", "person_id": "person_jamie", "building_code": "MAIN", "limit": 2},
         )
@@ -292,17 +322,17 @@ class TailwagApiAppTest(unittest.TestCase):
         client = TestClient(app)
 
         structured = client.post(
-            f"{API_BASE}/person-context-structured",
+            f"{API_BASE}/person_context_structured",
             headers=_auth_header(),
             json={"person_id": "person_jamie", "current_text": "robot demo"},
         )
         profile = client.post(
-            f"{API_BASE}/people/profile",
+            f"{API_BASE}/people_profile",
             headers=_auth_header(),
             json={"person_id": "person_jamie"},
         )
         resolved = client.post(
-            f"{API_BASE}/identity/resolve",
+            f"{API_BASE}/identity_resolve",
             headers=_auth_header(),
             json={
                 "shared_first_name": "Jamie",
@@ -312,7 +342,7 @@ class TailwagApiAppTest(unittest.TestCase):
             },
         )
         verified = client.post(
-            f"{API_BASE}/identity/verified-profile",
+            f"{API_BASE}/identity_verified_profile",
             headers=_auth_header(),
             json={"username": "jexample", "official_name": "Jamie Example", "site_code": "BOS3"},
         )
@@ -370,12 +400,12 @@ class TailwagApiAppTest(unittest.TestCase):
         client = TestClient(app)
 
         face = client.post(
-            f"{API_BASE}/biometrics/face/search",
+            f"{API_BASE}/biometrics_face_search",
             headers=_auth_header(),
             json={"embedding": [0.1, 0.2], "limit": 2, "site_code": "BOS3"},
         )
         voice = client.post(
-            f"{API_BASE}/biometrics/voice/search",
+            f"{API_BASE}/biometrics_voice_search",
             headers=_auth_header(),
             json={"embedding": [0.3, 0.4], "limit": 2, "site_code": "BOS3"},
         )
@@ -409,7 +439,7 @@ class TailwagApiAppTest(unittest.TestCase):
         client = TestClient(app)
 
         face_enroll = client.post(
-            f"{API_BASE}/biometrics/face/references",
+            f"{API_BASE}/biometrics_face_references",
             headers=_auth_header(),
             json={
                 "person_id": "person_jamie",
@@ -419,7 +449,7 @@ class TailwagApiAppTest(unittest.TestCase):
             },
         )
         voice_enroll = client.post(
-            f"{API_BASE}/biometrics/voice/references",
+            f"{API_BASE}/biometrics_voice_references",
             headers=_auth_header(),
             json={
                 "person_id": "person_jamie",
@@ -429,7 +459,7 @@ class TailwagApiAppTest(unittest.TestCase):
             },
         )
         face_observe = client.post(
-            f"{API_BASE}/biometrics/face/observations",
+            f"{API_BASE}/biometrics_face_observations",
             headers=_auth_header(),
             json={
                 "person_id": "person_jamie",
@@ -439,7 +469,7 @@ class TailwagApiAppTest(unittest.TestCase):
             },
         )
         voice_observe = client.post(
-            f"{API_BASE}/biometrics/voice/observations",
+            f"{API_BASE}/biometrics_voice_observations",
             headers=_auth_header(),
             json={
                 "person_id": "person_jamie",
@@ -474,12 +504,12 @@ class TailwagApiAppTest(unittest.TestCase):
         client = TestClient(app)
 
         exists = client.post(
-            f"{API_BASE}/biometrics/voice/references/exists",
+            f"{API_BASE}/biometrics_voice_references_exists",
             headers=_auth_header(),
             json={"person_id": "person_jamie"},
         )
         owner = client.post(
-            f"{API_BASE}/turn-owner/resolve",
+            f"{API_BASE}/turn_owner_resolve",
             headers=_auth_header(),
             json={
                 "primary_face_candidate": {
@@ -545,7 +575,7 @@ class TailwagApiAppTest(unittest.TestCase):
         client = TestClient(app)
 
         raw_media = client.post(
-            f"{API_BASE}/biometrics/face/references",
+            f"{API_BASE}/biometrics_face_references",
             headers=_auth_header(),
             json={
                 "person_id": "person_jamie",
@@ -554,7 +584,7 @@ class TailwagApiAppTest(unittest.TestCase):
             },
         )
         unexpected_field = client.post(
-            f"{API_BASE}/biometrics/voice/observations",
+            f"{API_BASE}/biometrics_voice_observations",
             headers=_auth_header(),
             json={
                 "person_id": "person_jamie",
@@ -564,7 +594,7 @@ class TailwagApiAppTest(unittest.TestCase):
             },
         )
         wrong_dimension = client.post(
-            f"{API_BASE}/biometrics/voice/search",
+            f"{API_BASE}/biometrics_voice_search",
             headers=_auth_header(),
             json={"embedding": [0.1], "limit": 2},
         )
@@ -581,9 +611,9 @@ class TailwagApiAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         document = response.json()
         paths = set(document["paths"])
-        self.assertIn(f"{API_BASE}/biometrics/face/search", paths)
-        self.assertIn(f"{API_BASE}/person-context-structured", paths)
-        self.assertIn(f"{API_BASE}/turn-owner/resolve", paths)
+        self.assertIn(f"{API_BASE}/biometrics_face_search", paths)
+        self.assertIn(f"{API_BASE}/person_context_structured", paths)
+        self.assertIn(f"{API_BASE}/turn_owner_resolve", paths)
         rendered = str(document)
         self.assertIn("embedding", rendered)
         self.assertNotIn("raw_image", rendered)

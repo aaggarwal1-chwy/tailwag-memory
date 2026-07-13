@@ -98,7 +98,7 @@ Memory API URLs follow the Argos provider/resource/request convention:
 /argos/providers/{provider_id}/resources/{resource_id}/request/{request_id}
 ```
 
-For these Tailwag routes, `provider_id` and `resource_id` must both be `memory`. The `request_id` is the operation name, such as `person-context` or `episodes`.
+For these Tailwag routes, `provider_id` and `resource_id` must both be `memory`. The `request_id` is the operation name, such as `person_context` or `episodes_record`.
 
 ### `GET /health`
 
@@ -108,7 +108,7 @@ Returns:
 {"status": "ok", "service": "tailwag-memory"}
 ```
 
-### `POST /argos/providers/memory/resources/memory/request/person-context`
+### `POST /argos/providers/memory/resources/memory/request/person_context`
 
 Request:
 
@@ -135,7 +135,7 @@ Returns:
 }
 ```
 
-### `POST /argos/providers/memory/resources/memory/request/person-context-structured`
+### `POST /argos/providers/memory/resources/memory/request/person_context_structured`
 
 Request:
 
@@ -157,7 +157,7 @@ Returns:
 }
 ```
 
-### `POST /argos/providers/memory/resources/memory/request/episodes`
+### `POST /argos/providers/memory/resources/memory/request/episodes_record`
 
 Request:
 
@@ -179,7 +179,7 @@ Request:
 
 Returns the `EpisodeRecordResult` dictionary shape.
 
-### `POST /argos/providers/memory/resources/memory/request/semantic-search`
+### `POST /argos/providers/memory/resources/memory/request/semantic_search`
 
 Request:
 
@@ -193,7 +193,7 @@ Returns the existing semantic search shape:
 {"episodes": [], "memory_items": []}
 ```
 
-### `POST /argos/providers/memory/resources/memory/request/people`
+### `POST /argos/providers/memory/resources/memory/request/people_upsert`
 
 Request:
 
@@ -207,7 +207,7 @@ Returns:
 {"person_id": "person_jamie"}
 ```
 
-### `POST /argos/providers/memory/resources/memory/request/people/archive`
+### `POST /argos/providers/memory/resources/memory/request/people_archive`
 
 Request:
 
@@ -221,7 +221,7 @@ Returns:
 {"archived": true}
 ```
 
-### `POST /argos/providers/memory/resources/memory/request/people/rekey-by-email`
+### `POST /argos/providers/memory/resources/memory/request/people_rekey_by_email`
 
 Request:
 
@@ -235,7 +235,7 @@ Returns:
 {"rekeyed": true}
 ```
 
-### `POST /argos/providers/memory/resources/memory/request/people/profile`
+### `POST /argos/providers/memory/resources/memory/request/people_profile`
 
 Request:
 
@@ -245,7 +245,7 @@ Request:
 
 Returns a `PersonProfile` dictionary or `null`.
 
-### `POST /argos/providers/memory/resources/memory/request/identity/resolve`
+### `POST /argos/providers/memory/resources/memory/request/identity_resolve`
 
 Request:
 
@@ -260,7 +260,7 @@ Request:
 
 Returns the `IdentityResolutionResult` dictionary shape.
 
-### `POST /argos/providers/memory/resources/memory/request/identity/verified-profile`
+### `POST /argos/providers/memory/resources/memory/request/identity_verified_profile`
 
 Request:
 
@@ -283,13 +283,13 @@ send embeddings with the configured modality dimension, such as
 
 | Route | Client call |
 | --- | --- |
-| `POST /argos/providers/memory/resources/memory/request/biometrics/face/search` | `search_face(...)` |
-| `POST /argos/providers/memory/resources/memory/request/biometrics/voice/search` | `search_voice(...)` |
-| `POST /argos/providers/memory/resources/memory/request/biometrics/face/references` | `enroll_face_reference(...)` |
-| `POST /argos/providers/memory/resources/memory/request/biometrics/voice/references` | `enroll_voice_reference(...)` |
-| `POST /argos/providers/memory/resources/memory/request/biometrics/face/observations` | `observe_face_embedding(...)` |
-| `POST /argos/providers/memory/resources/memory/request/biometrics/voice/observations` | `observe_voice_embedding(...)` |
-| `POST /argos/providers/memory/resources/memory/request/biometrics/voice/references/exists` | `has_voice_reference(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_face_search` | `search_face(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_voice_search` | `search_voice(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_face_references` | `enroll_face_reference(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_voice_references` | `enroll_voice_reference(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_face_observations` | `observe_face_embedding(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_voice_observations` | `observe_voice_embedding(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_voice_references_exists` | `has_voice_reference(...)` |
 
 Search request:
 
@@ -329,7 +329,7 @@ Search responses return the `BiometricSearchResult` shape with narrowed
 candidate dictionaries containing `person_id`, `display_name`, `score`, and
 `metadata`; embeddings are not echoed.
 
-### `POST /argos/providers/memory/resources/memory/request/turn-owner/resolve`
+### `POST /argos/providers/memory/resources/memory/request/turn_owner_resolve`
 
 Request:
 

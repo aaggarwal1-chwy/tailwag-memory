@@ -47,6 +47,13 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "tailwag-memory"}
 
+    @app.get(
+        "/argos/providers/memory/resources/memory/health",
+        dependencies=[Depends(require_bearer_token)],
+    )
+    def provider_health() -> dict[str, object]:
+        return {"ok": True, "service": "tailwag-memory", "provider": "memory", "resource": "memory"}
+
     app.include_router(_memory_router())
     return app
 
@@ -68,7 +75,7 @@ def _memory_router() -> APIRouter:
         dependencies=[Depends(require_bearer_token)],
     )
 
-    @router.post("/person-context", response_model=PersonContextResponse)
+    @router.post("/person_context", response_model=PersonContextResponse)
     def person_context(
         payload: PersonContextRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -88,7 +95,7 @@ def _memory_router() -> APIRouter:
             generated_at=utc_now_iso(),
         )
 
-    @router.post("/episodes")
+    @router.post("/episodes_record")
     def episodes(
         payload: EpisodeRecordRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -99,7 +106,7 @@ def _memory_router() -> APIRouter:
         )
         return asdict(result)
 
-    @router.post("/person-context-structured")
+    @router.post("/person_context_structured")
     def person_context_structured(
         payload: PersonContextStructuredRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -111,7 +118,7 @@ def _memory_router() -> APIRouter:
             )
         )
 
-    @router.post("/semantic-search")
+    @router.post("/semantic_search")
     def semantic_search(
         payload: SemanticSearchRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -124,7 +131,7 @@ def _memory_router() -> APIRouter:
             now=payload.now,
         )
 
-    @router.post("/people")
+    @router.post("/people_upsert")
     def upsert_person(
         payload: PersonUpsertRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -132,21 +139,21 @@ def _memory_router() -> APIRouter:
         person_id = client.upsert_person(PersonInput(**payload.person.as_kwargs()))
         return {"person_id": person_id}
 
-    @router.post("/people/archive")
+    @router.post("/people_archive")
     def archive_person(
         payload: PersonArchiveRequest,
         client: TailwagMemoryClient = Depends(get_client),
     ) -> dict[str, bool]:
         return {"archived": client.archive_person(payload.person_id)}
 
-    @router.post("/people/rekey-by-email")
+    @router.post("/people_rekey_by_email")
     def rekey_person_by_email(
         payload: PersonRekeyByEmailRequest,
         client: TailwagMemoryClient = Depends(get_client),
     ) -> dict[str, bool]:
         return {"rekeyed": client.rekey_person_by_email(payload.email, payload.new_person_id)}
 
-    @router.post("/people/profile")
+    @router.post("/people_profile")
     def person_profile(
         payload: PersonProfileRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -154,7 +161,7 @@ def _memory_router() -> APIRouter:
         result = client.person_profile(payload.person_id)
         return _plain(result) if result is not None else None
 
-    @router.post("/identity/resolve")
+    @router.post("/identity_resolve")
     def resolve_identity(
         payload: IdentityResolveRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -168,7 +175,7 @@ def _memory_router() -> APIRouter:
             )
         )
 
-    @router.post("/identity/verified-profile")
+    @router.post("/identity_verified_profile")
     def verified_profile(
         payload: VerifiedProfileRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -180,7 +187,7 @@ def _memory_router() -> APIRouter:
         )
         return _plain(result) if result is not None else None
 
-    @router.post("/biometrics/face/search")
+    @router.post("/biometrics_face_search")
     def search_face(
         payload: BiometricSearchRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -198,7 +205,7 @@ def _memory_router() -> APIRouter:
             )
         )
 
-    @router.post("/biometrics/voice/search")
+    @router.post("/biometrics_voice_search")
     def search_voice(
         payload: BiometricSearchRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -216,7 +223,7 @@ def _memory_router() -> APIRouter:
             )
         )
 
-    @router.post("/biometrics/face/references")
+    @router.post("/biometrics_face_references")
     def enroll_face_reference(
         payload: BiometricEnrollmentRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -235,7 +242,7 @@ def _memory_router() -> APIRouter:
             )
         )
 
-    @router.post("/biometrics/voice/references")
+    @router.post("/biometrics_voice_references")
     def enroll_voice_reference(
         payload: BiometricEnrollmentRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -254,7 +261,7 @@ def _memory_router() -> APIRouter:
             )
         )
 
-    @router.post("/biometrics/face/observations")
+    @router.post("/biometrics_face_observations")
     def observe_face_embedding(
         payload: BiometricObservationRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -273,7 +280,7 @@ def _memory_router() -> APIRouter:
             )
         )
 
-    @router.post("/biometrics/voice/observations")
+    @router.post("/biometrics_voice_observations")
     def observe_voice_embedding(
         payload: BiometricObservationRequest,
         client: TailwagMemoryClient = Depends(get_client),
@@ -292,14 +299,14 @@ def _memory_router() -> APIRouter:
             )
         )
 
-    @router.post("/biometrics/voice/references/exists")
+    @router.post("/biometrics_voice_references_exists")
     def has_voice_reference(
         payload: VoiceReferenceExistsRequest,
         client: TailwagMemoryClient = Depends(get_client),
     ) -> dict[str, bool]:
         return {"has_voice_reference": client.has_voice_reference(payload.person_id)}
 
-    @router.post("/turn-owner/resolve")
+    @router.post("/turn_owner_resolve")
     def resolve_turn_owner(
         payload: TurnOwnerResolveRequest,
         client: TailwagMemoryClient = Depends(get_client),
