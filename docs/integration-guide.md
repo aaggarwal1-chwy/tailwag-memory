@@ -122,7 +122,7 @@ Normal package consumers should start with:
 from tailwag_memory import TailwagMemoryClient
 ```
 
-`TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, directory sync and identity resolution, biometric reference enrollment/search/update, turn-owner resolution, episode recording, memory extraction/backfill, memory consolidation, prompt-ready and structured person context, and structured semantic search across a person's episodes and memory items. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
+`TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, directory sync and identity resolution, biometric reference enrollment/search/update, turn-owner resolution, episode recording, memory extraction/backfill, memory consolidation, prompt-ready person context, and structured semantic search across a person's episodes and memory items. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
 
 Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, or direct memory item operations. Their constructor and method details also live in the endpoint reference.
 
@@ -130,7 +130,7 @@ Slack adapter classes are imported from `tailwag_memory.slack_ingestion`, not fr
 
 Inspection helpers are imported from `tailwag_memory.inspect`, not from the top-level package. They are intended for local investigation and reporting, not for normal memory-service integration.
 
-The optional FastAPI adapter mirrors the Argos-facing package operations for service deployments under `/argos/providers/memory/resources/memory/request/{request_id}`. It includes episode recording, semantic search, identity/profile lookups, structured and markdown person context, biometric search/enrollment/observation, voice-reference checks, and turn-owner resolution. Biometric HTTP routes accept embeddings only; raw images, raw audio, media URLs, and base64 media fields are rejected. See [Optional HTTP Endpoints](memory-endpoints.md#optional-http-endpoints) for the full route list, auth, docs exposure, and local run commands.
+The optional FastAPI adapter mirrors the Argos-facing package operations for service deployments under `/argos/providers/memory/resources/memory/request/{request_id}`. It includes episode recording, semantic search, identity/profile lookups, markdown person context, biometric search/enrollment/observation, voice-reference checks, and turn-owner resolution. Biometric HTTP routes accept embeddings only; raw images, raw audio, media URLs, and base64 media fields are rejected. See [Optional HTTP Endpoints](memory-endpoints.md#optional-http-endpoints) for the full route list, auth, docs exposure, and local run commands.
 
 ## Operational Notes
 

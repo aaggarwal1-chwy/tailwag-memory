@@ -17,7 +17,6 @@ from tailwag_memory.api.schemas import (
     PersonArchiveRequest,
     PersonContextRequest,
     PersonContextResponse,
-    PersonContextStructuredRequest,
     PersonProfileRequest,
     PersonRekeyByEmailRequest,
     PersonUpsertRequest,
@@ -105,18 +104,6 @@ def _memory_router() -> APIRouter:
             extract_memory=payload.extract_memory,
         )
         return asdict(result)
-
-    @router.post("/person_context_structured")
-    def person_context_structured(
-        payload: PersonContextStructuredRequest,
-        client: TailwagMemoryClient = Depends(get_client),
-    ) -> dict[str, object]:
-        return _plain(
-            client.person_context_structured(
-                payload.person_id,
-                current_text=payload.current_text,
-            )
-        )
 
     @router.post("/semantic_search")
     def semantic_search(

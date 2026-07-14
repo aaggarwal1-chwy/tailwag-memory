@@ -110,13 +110,6 @@ class PersonContextResponse(StrictRequest):
     generated_at: str | None = None
 
 
-class PersonContextStructuredRequest(StrictRequest):
-    """Request body for structured prompt context."""
-
-    person_id: str
-    current_text: str | None = None
-
-
 class EpisodeRecordRequest(StrictRequest):
     """Request body for recording one episode."""
 

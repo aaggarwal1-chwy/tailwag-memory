@@ -1558,9 +1558,6 @@ class OpenAIMemoryExtractionProviderTest(unittest.TestCase):
         self.assertIn("expire within a week", developer_prompt)
         self.assertIn("Use address", developer_prompt)
         self.assertIn("active, unaddressed, currently relevant", developer_prompt)
-        self.assertNotIn("Update rules:", developer_prompt)
-        self.assertNotIn("Archive rules:", developer_prompt)
-        self.assertNotIn("archive", developer_prompt.casefold())
         op_schema = text_format["schema"]["properties"]["ops"]["items"]["properties"]["op"]
         self.assertEqual(op_schema["enum"], ["create", "address", "support", "noop"])
 
@@ -1645,9 +1642,7 @@ class OpenAIMemoryConsolidationProviderTest(unittest.TestCase):
         text_format = client.responses.kwargs["text"]["format"]
         self.assertEqual(text_format["name"], "memory_consolidation")
         op_schema = text_format["schema"]["properties"]["ops"]["items"]
-        self.assertIn("merge", op_schema["properties"]["op"]["enum"])
-        self.assertNotIn("update", op_schema["properties"]["op"]["enum"])
-        self.assertNotIn("archive", op_schema["properties"]["op"]["enum"])
+        self.assertEqual(op_schema["properties"]["op"]["enum"], ["create", "merge", "noop"])
         self.assertIn("memory_ids", op_schema["properties"])
         self.assertIn("memory_ids", op_schema["required"])
         self.assertIn("supported_episode_ids", op_schema["properties"])

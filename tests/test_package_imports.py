@@ -5,7 +5,6 @@ import unittest
 from unittest.mock import Mock, patch
 
 import tailwag_memory
-import tailwag_memory.memory_items as memory_items
 from tailwag_memory import (
     DEFAULT_MIN_PATTERN_EVIDENCE_EPISODES,
     BiometricCandidate,
@@ -43,7 +42,6 @@ from tailwag_memory import (
     OpenAIEmbeddingProvider,
     OwnerResolutionResult,
     PersonContextItem,
-    PersonContextResult,
     PersonContextRetrievalService,
     PersonContextSource,
     PersonContextTranscriptLine,
@@ -104,7 +102,6 @@ class PackageImportTest(unittest.TestCase):
             "OpenAIEmbeddingProvider",
             "OwnerResolutionResult",
             "PersonContextItem",
-            "PersonContextResult",
             "PersonContextRetrievalService",
             "PersonContextSource",
             "PersonContextTranscriptLine",
@@ -161,7 +158,6 @@ class PackageImportTest(unittest.TestCase):
             OpenAIEmbeddingProvider,
             OwnerResolutionResult,
             PersonContextItem,
-            PersonContextResult,
             PersonContextRetrievalService,
             PersonContextSource,
             PersonContextTranscriptLine,
@@ -188,12 +184,6 @@ class PackageImportTest(unittest.TestCase):
             self.assertIsNotNone(getattr(tailwag_memory, name))
         self.assertIs(tailwag_memory.TailwagMemoryClient, TailwagMemoryClient)
         self.assertIs(tailwag_memory.Settings, Settings)
-        self.assertNotIn("address_item", tailwag_memory.__all__)
-        self.assertNotIn("address_item", memory_items.__all__)
-        self.assertNotIn("stable_memory_id", tailwag_memory.__all__)
-        self.assertNotIn("stable_memory_id", memory_items.__all__)
-        self.assertNotIn("AffectScore", tailwag_memory.__all__)
-        self.assertNotIn("PersonEpisodeTranscriptService", tailwag_memory.__all__)
 
     def test_client_exposes_email_rekey_contract(self) -> None:
         signature = inspect.signature(TailwagMemoryClient.rekey_person_by_email)

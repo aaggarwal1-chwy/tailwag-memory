@@ -131,7 +131,7 @@ Request:
 }
 ```
 
-Calls `TailwagMemoryClient.person_context(...)`, not `person_context_structured(...)`.
+Calls `TailwagMemoryClient.person_context(...)`.
 
 Returns:
 
@@ -140,28 +140,6 @@ Returns:
   "person_id": "person_jamie",
   "context_markdown": "...",
   "generated_at": "2026-07-10T00:00:00+00:00"
-}
-```
-
-### `POST /argos/providers/memory/resources/memory/request/person_context_structured`
-
-Request:
-
-```json
-{"person_id": "person_jamie", "current_text": "robot demo later today"}
-```
-
-Calls `TailwagMemoryClient.person_context_structured(...)`.
-
-Returns:
-
-```json
-{
-  "person_id": "person_jamie",
-  "directory_profile_lines": [],
-  "memory_profile_lines": [],
-  "potential_followups": [],
-  "preferred_language": "English"
 }
 ```
 
@@ -665,14 +643,6 @@ Recent Episodes:
 - 2026-06-16: Jamie: Luna has a vet visit tomorrow.
 ```
 
-### `person_context_structured(person_id, *, current_text=None)`
-
-Returns a `PersonContextResult` parsed from `person_context(...)` plus directory
-profile lines from `person_profile(...)`.
-
-Fields are `person_id`, `directory_profile_lines`, `memory_profile_lines`,
-`potential_followups`, and `preferred_language`.
-
 ### `search_semantic_memory(*, text, person_id, building_code=None, limit=5, now=None)`
 
 Returns structured semantic search results for one person without requiring callers to instantiate lower-level retrieval services.
@@ -1141,7 +1111,6 @@ Common return types:
 | `VerifiedProfile` | person ID, official name, username, email, title, tenure, manager, directory lines, and metadata. |
 | `PersonProfile` | person ID, display name, email, consent/status, interaction count, last seen, directory lines, and metadata. |
 | `OwnerResolutionResult` | audio speaker ID, scores, margin, speaker visibility, owner ID/source/confidence, and unresolved reason. |
-| `PersonContextResult` | person ID, directory lines, memory lines, potential follow-ups, and preferred language. |
 | `PersonContextSource` | `person_id`, `display_name`, `items`. |
 | `PersonContextItem` | `item_id`, `item_type`, `text`, timestamps, place, role, source, score, transcript lines. |
 | `MemoryItemResult` | `memory_id`, `person_id`, `kind`, `key`, `summary`, `source`, status/timestamps, metadata, optional `score`. |

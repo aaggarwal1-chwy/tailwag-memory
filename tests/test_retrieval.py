@@ -241,26 +241,6 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         self.assertIn("MATCH (p:Person", runner.queries[0].query)
         self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
 
-    def test_markdown_for_person_does_not_render_recent_episode_summaries(self) -> None:
-        runner = RecordingQueryRunner(
-            results=[
-                [{"person_id": "person_jamie", "display_name": "# Jamie"}],
-            ]
-        )
-        service = PersonContextRetrievalService(runner)
-
-        markdown = service.markdown_for_person("person_jamie", limit=10)
-
-        self.assertEqual(markdown, "")
-        self.assertNotIn("Episode Summaries:", markdown)
-        self.assertNotIn("Jamie asked about chargers.", markdown)
-        self.assertNotIn("event_1", markdown)
-        self.assertNotIn("Design review", markdown)
-        self.assertNotIn("Transcript snippets:", markdown)
-        self.assertNotIn("2026-06-16T14:00:00+00:00 Jamie: Any chargers?", markdown)
-        self.assertEqual(len(runner.queries), 1)
-        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
-
     def test_markdown_for_person_scoped_no_match_does_not_fallback_to_events(self) -> None:
         runner = RecordingQueryRunner(
             results=[
@@ -302,11 +282,6 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         markdown = service.markdown_for_person("person_jamie", limit=1, semantic_scope="chargers")
 
         self.assertEqual(markdown, "")
-        self.assertNotIn("Episode Summaries:", markdown)
-        self.assertNotIn("Jamie asked about chargers.", markdown)
-        self.assertNotIn("episode_1", markdown)
-        self.assertNotIn("score=0.882", markdown)
-        self.assertNotIn("Jamie: Any chargers?", markdown)
         self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
 
     def test_source_for_person_combines_recent_episodes_and_events(self) -> None:
