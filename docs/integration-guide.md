@@ -141,4 +141,4 @@ The optional FastAPI adapter mirrors the Argos-facing package operations for ser
 - Use `enroll_face_reference()` / `enroll_voice_reference()` for first durable samples, and `observe_face_embedding()` / `observe_voice_embedding()` for cross-modal-safe adaptive updates. Tailwag owns sample counts, similarity thresholds, and completion.
 - Direct memory item writes are advanced. Prefer episode recording plus extraction for live systems.
 - `fact` memories must remain narrow person-prompt context, not broad ontology facts.
-- `SemanticFact`, confidence fields, `org_id`, external vector stores, and secondary persistence are outside current scope.
+- `SemanticFact`, persistent graph confidence fields, `org_id`, external vector stores, and secondary persistence are outside current scope.

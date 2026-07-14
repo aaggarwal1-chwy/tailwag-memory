@@ -780,11 +780,11 @@ class InspectPlaceholderFilesTest(unittest.TestCase):
             html = (inspect_dir / filename).read_text()
             current = None if filename == "index.html" else filename
             _assert_canonical_nav(self, html, current)
-            self.assertIn('href="../src/tailwag_memory/inspect/assets/tailwag-inspect.css"', html)
+            self.assertIn('href="tailwag-inspect.css"', html)
             for command in command_hints[filename]:
                 self.assertIn(command, html)
             if filename != "index.html":
-                self.assertIn('src="../src/tailwag_memory/inspect/assets/tailwag-inspect.js"', html)
+                self.assertIn('src="tailwag-inspect.js"', html)
                 self.assertIn('id="report-data"', html)
 
 

@@ -85,7 +85,7 @@ class TailwagMemoryClient:
         return PersonIngestionService(self.runner).rekey_by_email(email, new_person_id)
 
     def canonical_person_id_by_email(self, email: str) -> str | None:
-        """Return one canonical Argos person id for an email when unambiguous."""
+        """Return one caller-owned canonical person id for an email when unambiguous."""
         return PersonIngestionService(self.runner).canonical_id_by_email(email)
 
     def sync_directory_people(

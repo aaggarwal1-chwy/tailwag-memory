@@ -17,7 +17,7 @@ The `tailwag inspect` command currently exposes four reports:
 | `tailwag inspect person-timeline` | `inspect/tailwag-person-timeline.html` | Shows a read-only timeline of participation episodes and attended events by person. |
 | `tailwag inspect memory-items` | `inspect/tailwag-memory-items.html` | Shows memory item distributions, evidence links, status, source, and follow-up state. |
 
-The committed `inspect/index.html` and report pages can be opened as static browser entry points. Regenerating a report replaces that page's embedded report data and keeps the shared report navigation.
+The committed `inspect/index.html` and report pages can be opened as static browser entry points. Committed report pages should stay empty placeholders; generated reports may embed live graph data and should not be committed unless intentionally sanitized. Regenerating a report replaces that page's embedded report data and keeps the shared report navigation.
 
 ## Commands
 

@@ -192,8 +192,8 @@ LIMIT 20;
 - The poller creates one episode per Slack root message or thread.
 - Replies update the same stable episode ID instead of creating a new episode.
 - Newly seen standalone root messages stay in the active-thread watchlist for `--active-thread-hours` so a later first reply can refresh the same episode. The default watch window is 24 hours.
-- Deleted, bot, join, and leave system messages are skipped.
-- The state cursor advances after an empty history check, or after discovered threads are ingested successfully.
+- Deleted, bot, join, leave, file-only/empty-text, and messages missing `user` or `ts` are skipped.
+- After a successful history poll, the state cursor advances to the latest returned history timestamp, or to the poll start timestamp when history is empty. This can advance even when all returned messages were skipped.
 
 ## Mention Backfill
 

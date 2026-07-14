@@ -67,7 +67,7 @@ class StrictRequest(BaseModel):
 
 
 def _reject_raw_media_keys(value: Any) -> Any:
-    """Reject raw media fields in biometric request metadata."""
+    """Reject raw-media and out-of-scope fields in API request metadata/evidence."""
     if isinstance(value, dict):
         for key, item in value.items():
             rendered = str(key or "").strip().casefold()
