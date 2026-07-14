@@ -209,7 +209,7 @@ class PersonIngestionService:
         return resolved_id == rendered_person_id
 
     def canonical_id_by_email(self, email: str) -> str | None:
-        """Return one canonical Argos person id for an email when unambiguous."""
+        """Return one caller-owned canonical person id for an email when unambiguous."""
         rendered_email = str(email or "").strip()
         if not rendered_email:
             return None

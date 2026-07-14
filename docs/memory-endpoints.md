@@ -84,7 +84,7 @@ Run the service:
 python -m uvicorn tailwag_memory.api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
-`GET /health` is unauthenticated and does not initialize Neo4j or OpenAI clients. All memory API routes require:
+`GET /health` is unauthenticated and does not initialize Neo4j or OpenAI clients. Provider health and memory API routes require:
 
 ```text
 Authorization: Bearer <TAILWAG_API_BEARER_TOKEN>
@@ -108,6 +108,14 @@ Returns:
 {"status": "ok", "service": "tailwag-memory"}
 ```
 
+### `GET /argos/providers/memory/resources/memory/health`
+
+Requires bearer auth and returns:
+
+```json
+{"ok": true, "service": "tailwag-memory", "provider": "memory", "resource": "memory"}
+```
+
 ### `POST /argos/providers/memory/resources/memory/request/person_context`
 
 Request:
@@ -123,7 +131,7 @@ Request:
 }
 ```
 
-Calls `TailwagMemoryClient.person_context(...)`, not `person_context_structured(...)`.
+Calls `TailwagMemoryClient.person_context(...)`.
 
 Returns:
 
@@ -132,28 +140,6 @@ Returns:
   "person_id": "person_jamie",
   "context_markdown": "...",
   "generated_at": "2026-07-10T00:00:00+00:00"
-}
-```
-
-### `POST /argos/providers/memory/resources/memory/request/person_context_structured`
-
-Request:
-
-```json
-{"person_id": "person_jamie", "current_text": "robot demo later today"}
-```
-
-Calls `TailwagMemoryClient.person_context_structured(...)`.
-
-Returns:
-
-```json
-{
-  "person_id": "person_jamie",
-  "directory_profile_lines": [],
-  "memory_profile_lines": [],
-  "potential_followups": [],
-  "preferred_language": "English"
 }
 ```
 
@@ -463,7 +449,7 @@ Notes:
 
 ### `canonical_person_id_by_email(email)`
 
-Returns one active caller-owned canonical person ID for an email address when the match is unambiguous.
+Returns one caller-owned canonical `person_*` ID for an email address when the exact email match is unambiguous.
 
 Parameters:
 
@@ -514,7 +500,7 @@ Returns: `DirectorySyncResult`.
 
 Notes:
 
-- The code reads `.snowflake_env`, then `.env`, then process environment for unset Snowflake variables.
+- The code loads the first existing env file from `.snowflake_env`, an explicitly supplied env path, or `.env`; values already set in the process environment win, and multiple env files are not merged.
 - Required connector values are `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, and `SNOWFLAKE_DATABASE`; password/authenticator/role/warehouse/schema are optional inputs to the connector wrapper.
 - The base package currently depends on `snowflake-connector-python`.
 
@@ -657,14 +643,6 @@ Recent Episodes:
 - 2026-06-16: Jamie: Luna has a vet visit tomorrow.
 ```
 
-### `person_context_structured(person_id, *, current_text=None)`
-
-Returns a `PersonContextResult` parsed from `person_context(...)` plus directory
-profile lines from `person_profile(...)`.
-
-Fields are `person_id`, `directory_profile_lines`, `memory_profile_lines`,
-`potential_followups`, and `preferred_language`.
-
 ### `search_semantic_memory(*, text, person_id, building_code=None, limit=5, now=None)`
 
 Returns structured semantic search results for one person without requiring callers to instantiate lower-level retrieval services.
@@ -754,10 +732,8 @@ Caller-supplied person data.
 
 Omitted profile fields preserve existing `Person` values on later writes. When a write supplies an email already owned by another person, Tailwag updates and links that existing person instead of creating a duplicate. Incoming canonical `person_*` IDs rekey matching `slack:*` temporary people when safe.
 
-`EpisodeInput.from_dict(...)` and `EventInput.from_dict(...)` currently map
-`id`, `display_name`, `email`, `consent_status`, `role`, and `source` for nested
-people; callers that need `official_name` should construct `PersonInput`
-instances directly.
+`EpisodeInput.from_dict(...)`, `EventInput.from_dict(...)`, and HTTP episode
+payloads accept `official_name` on nested person shapes.
 
 ### `DirectoryPersonRecord`
 
@@ -1058,7 +1034,7 @@ Fetches Slack history, replies, and user profiles through the Slack Web API.
 
 ### `SlackMemoryPoller(client, episode_recorder, state_path, *, retention_class="standard", active_thread_hours=24.0, person_id_resolver=None)`
 
-Creates a poller that converts Slack threads into Tailwag episodes.
+Creates a poller that converts Slack root messages and threads into Tailwag episodes.
 
 Constructor parameters:
 
@@ -1135,7 +1111,6 @@ Common return types:
 | `VerifiedProfile` | person ID, official name, username, email, title, tenure, manager, directory lines, and metadata. |
 | `PersonProfile` | person ID, display name, email, consent/status, interaction count, last seen, directory lines, and metadata. |
 | `OwnerResolutionResult` | audio speaker ID, scores, margin, speaker visibility, owner ID/source/confidence, and unresolved reason. |
-| `PersonContextResult` | person ID, directory lines, memory lines, potential follow-ups, and preferred language. |
 | `PersonContextSource` | `person_id`, `display_name`, `items`. |
 | `PersonContextItem` | `item_id`, `item_type`, `text`, timestamps, place, role, source, score, transcript lines. |
 | `MemoryItemResult` | `memory_id`, `person_id`, `kind`, `key`, `summary`, `source`, status/timestamps, metadata, optional `score`. |
@@ -1154,4 +1129,4 @@ Common return types:
 - Do not pass raw face images or raw audio into Tailwag. Pass embeddings only.
 - Direct memory item writes are advanced. Prefer episode recording plus extraction for live systems.
 - `fact` memories must remain narrow person-prompt context, not broad ontology facts.
-- `SemanticFact`, confidence fields, `org_id`, external vector stores, and secondary persistence are outside current scope.
+- `SemanticFact`, persistent graph confidence fields, `org_id`, external vector stores, and secondary persistence are outside current scope.

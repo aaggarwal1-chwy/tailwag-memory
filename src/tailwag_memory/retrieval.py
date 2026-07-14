@@ -41,7 +41,7 @@ def format_person_context_evidence_markdown(
     semantic_scope: str | None = None,
     limit: int = 10,
 ) -> str:
-    """Render retrieved person context evidence as deterministic markdown."""
+    """Return sentinel markdown when person context evidence is absent."""
     if source is None:
         return UNKNOWN_PERSON_CONTEXT_MESSAGE
 
@@ -272,7 +272,7 @@ class PersonContextRetrievalService:
         limit: int = 10,
         semantic_scope: str | None = None,
     ) -> str:
-        """Return deterministic markdown evidence for a person."""
+        """Return sentinel markdown for missing or no-match person evidence."""
         bounded_limit = _bounded_limit(limit)
         scope = self._normalize_semantic_scope(semantic_scope)
         if scope is not None:

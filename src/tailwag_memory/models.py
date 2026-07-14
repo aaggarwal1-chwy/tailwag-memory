@@ -359,17 +359,6 @@ class OwnerResolutionResult:
 
 
 @dataclass(frozen=True)
-class PersonContextResult:
-    """Structured prompt context for one person."""
-
-    person_id: str
-    directory_profile_lines: tuple[str, ...] = ()
-    memory_profile_lines: tuple[str, ...] = ()
-    potential_followups: tuple[str, ...] = ()
-    preferred_language: str = "English"
-
-
-@dataclass(frozen=True)
 class PersonContextTranscriptLine:
     """Transcript line included in person context output."""
 

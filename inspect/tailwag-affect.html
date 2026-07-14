@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Affect Scatter</title>
-  <link rel="stylesheet" href="../src/tailwag_memory/inspect/assets/tailwag-inspect.css">
+  <link rel="stylesheet" href="tailwag-inspect.css">
   <style>
-    main {
+main {
       display: grid;
       grid-template-columns: minmax(360px, 1fr) minmax(320px, 430px);
       min-height: calc(100vh - 78px);
@@ -220,7 +220,7 @@
     <div class="meta">Generated No Generated Data Yet - <span id="count">0</span> scored points</div>
   </header>
   <main>
-    <section class="plot-wrap">
+<section class="plot-wrap">
       <div class="toolbar">
         <span>Valence and arousal are displayed from -1 to 1, centered from the model's native 0 to 1 scores.</span>
         <span class="toolbar-actions">
@@ -244,18 +244,18 @@
     <aside>
       <div id="warnings"></div>
       <section class="panel command-panel" id="emptyCommand">
-        <h2>Generate This Report</h2>
-        <p><code>tailwag inspect affect</code></p>
-      </section>
+      <h2>Generate This Report</h2>
+      <p><code>tailwag inspect affect</code></p>
+    </section>
       <h2 id="detailTitle">Select a point</h2>
       <div id="detail" class="empty">Click a point to inspect the evaluated text and metadata.</div>
     </aside>
   </main>
   <script id="report-data" type="application/json">{"filters": {}, "generated_at": "No Generated Data Yet", "metadata": {}, "records": [], "title": "Affect Scatter", "warnings": ["No Generated Data Yet"]}</script>
-  <script src="../src/tailwag_memory/inspect/assets/tailwag-inspect.js"></script>
+  <script src="tailwag-inspect.js"></script>
   <script>
-    const report = JSON.parse(document.getElementById('report-data').textContent);
-    const records = report.records || [];
+const report = inspectReportData();
+    const records = inspectReportRecords(report);
     const pointColor = '#0b4db3';
     const memoryPointColor = '#f4a51c';
     const plot = document.getElementById('plot');
@@ -268,16 +268,10 @@
     const fullDomain = { xMin: -1, xMax: 1, yMin: -1, yMax: 1 };
     let domain = { ...fullDomain };
     let dragStart = null;
-    document.getElementById('count').textContent = records.length;
-    document.getElementById('emptyCommand').hidden = records.length > 0;
-    document.getElementById('filterSummary').textContent = Object.entries(report.filters || {})
-      .filter(([, value]) => value !== null && value !== undefined && value !== '')
-      .map(([key, value]) => `${key}=${value}`)
-      .join(' - ');
-    const warnings = report.warnings || [];
-    if (warnings.length) {
-      document.getElementById('warnings').innerHTML = `<div class="warnings">${warnings.map(escapeHtml).join('<br>')}</div>`;
-    }
+    inspectSetCount('count', records.length);
+    inspectToggleEmptyCommand(records);
+    document.getElementById('filterSummary').textContent = inspectFilterText(report.filters);
+    inspectRenderWarnings(report);
     if (!records.length) {
       const empty = document.createElement('div');
       empty.className = 'empty';

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Current Argos integration lives in `argos_src/memory_provider/`, especially:
+In the external Argos repository, the current integration is expected to live in `argos_src/memory_provider/`, especially:
 
 - `argos_src/memory_provider/tailwag.py`
 - `argos_src/memory_provider/slack.py`
@@ -82,7 +82,7 @@ same graph node.
 
 `TailwagMemoryClient.canonical_person_id_by_email(email)` is package-level
 resolver support for Slack polling and other adapters that need to map a
-normalized email to one active caller-owned canonical person. Argos does not
+normalized email to one caller-owned canonical `person_*` ID. Argos does not
 call this method directly in the live runtime; package-level `SlackMemoryPoller`
 uses it automatically only when its `episode_recorder` exposes the method and no
 explicit resolver is supplied.

@@ -31,7 +31,6 @@ from .models import (
     IdentityResolutionResult,
     MemoryConsolidationResult,
     OwnerResolutionResult,
-    PersonContextResult,
     PersonInput,
     PersonProfile,
     SearchQuery,
@@ -85,7 +84,7 @@ class TailwagMemoryClient:
         return PersonIngestionService(self.runner).rekey_by_email(email, new_person_id)
 
     def canonical_person_id_by_email(self, email: str) -> str | None:
-        """Return one canonical Argos person id for an email when unambiguous."""
+        """Return one caller-owned canonical person id for an email when unambiguous."""
         return PersonIngestionService(self.runner).canonical_id_by_email(email)
 
     def sync_directory_people(
@@ -294,24 +293,6 @@ class TailwagMemoryClient:
         )
         return "\n\n".join(part for part in [memory_context, retrieved_context] if part)
 
-    def person_context_structured(
-        self,
-        person_id: str,
-        *,
-        current_text: str | None = None,
-    ) -> PersonContextResult:
-        """Return structured prompt context for a person."""
-        profile = self.person_profile(person_id)
-        rendered = self.person_context(person_id, current_text=current_text)
-        memory_lines, followup_lines, preferred_language = _parse_context(rendered)
-        return PersonContextResult(
-            person_id=str(person_id or "").strip(),
-            directory_profile_lines=profile.directory_profile_lines if profile else (),
-            memory_profile_lines=memory_lines,
-            potential_followups=followup_lines,
-            preferred_language=preferred_language,
-        )
-
     def search_semantic_memory(
         self,
         *,
@@ -456,45 +437,3 @@ class TailwagMemoryClient:
             face_embedding_model=self.settings.face_embedding_model,
             voice_embedding_model=self.settings.voice_embedding_model,
         )
-
-
-def _parse_context(value: object) -> tuple[tuple[str, ...], tuple[str, ...], str]:
-    profile: list[str] = []
-    followups: list[str] = []
-    preferred_language = "English"
-    section = ""
-    for raw_line in str(value or "").splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            continue
-        if line.endswith(":") and not line.startswith("-"):
-            section = line[:-1].strip().casefold()
-            continue
-        text = line[1:].strip() if line.startswith("-") else line
-        text = " ".join(text.split()).lstrip("#-*[]>` ").strip()
-        if not text:
-            continue
-        lowered = text.casefold()
-        if lowered.startswith("preferred language"):
-            _, _, language = text.partition(":")
-            if language.strip():
-                preferred_language = language.strip(" .")
-        if section in {"potential follow-ups", "potential followups", "followups"}:
-            followups.append(text)
-        else:
-            profile.append(text)
-    return tuple(_dedupe(profile)), tuple(_dedupe(followups)), preferred_language
-
-
-def _dedupe(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        key = value.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(value)
-    return result

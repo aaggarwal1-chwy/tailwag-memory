@@ -196,7 +196,7 @@ class SlackPollState:
 
 
 class SlackMemoryPoller:
-    """Poll Slack threads and record them as Tailwag episodes."""
+    """Poll Slack root messages and threads and record them as Tailwag episodes."""
 
     def __init__(
         self,
@@ -331,10 +331,10 @@ def build_episode_from_slack_thread(
     retention_class: str = "standard",
     person_id_resolver: PersonIdResolver | None = None,
 ) -> EpisodeInput:
-    """Convert a Slack thread into an episode input."""
+    """Convert Slack root-message or thread messages into an episode input."""
     ordered = sorted([message for message in messages if _is_memory_message(message)], key=lambda item: float(item["ts"]))
     if not ordered:
-        raise ValueError("Cannot build an episode from an empty Slack thread.")
+        raise ValueError("Cannot build an episode from empty Slack messages.")
 
     thread_ts = _thread_ts(ordered[0])
     user_profiles: dict[str, SlackUserProfile] = {}
@@ -434,7 +434,7 @@ def _resolve_slack_person_id(
     email: str | None,
     person_id_resolver: PersonIdResolver | None,
 ) -> tuple[str, bool]:
-    """Resolve a Slack participant to an existing Argos person id when possible."""
+    """Resolve a Slack participant to a caller-owned canonical person id when possible."""
     fallback_person_id = f"slack:{slack_user_id}"
     if email and person_id_resolver is not None:
         resolved = str(person_id_resolver(email) or "").strip()

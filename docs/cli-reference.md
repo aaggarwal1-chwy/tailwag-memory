@@ -20,6 +20,29 @@ Wipe all Neo4j data before re-running local examples:
 tailwag db wipe --yes
 ```
 
+Permanently delete one supported node with type-specific cleanup:
+
+```bash
+tailwag db delete-node --label Person --id person_jamie --yes
+tailwag db delete-node --label Episode --id episode_example_001 --yes
+tailwag db delete-node --label MemoryItem --id mem_example_001 --yes
+```
+
+`db delete-node` is CLI-only maintenance behavior. It supports only `Person`,
+`Episode`, and `MemoryItem` labels and returns JSON with the target label, id,
+status, and deleted counts. A missing node returns `status="not_found"` without
+failing the command. Direct deletes for `Event`, `Place`,
+`EmployeeDirectoryRecord`, `FaceReference`, and `VoiceReference` are out of
+scope.
+
+Targeted deletes are permanent. Deleting a person removes their owned memory
+items, owned biometric references, attendance/directory relationships, and
+single-participant episodes while preserving shared episodes, events, and
+directory records. Deleting an episode preserves linked people, removes or
+updates memory evidence links, and removes its place only when unreferenced.
+Deleting a memory item also deletes memories reachable through outgoing
+`SUPERSEDED_BY` links.
+
 ## Episode And Event Ingestion
 
 Create an episode from JSON without transcript memory extraction:

@@ -17,7 +17,6 @@ from tailwag_memory.models import (
     EpisodeRecordResult,
     IdentityResolutionResult,
     OwnerResolutionResult,
-    PersonContextResult,
     PersonInput,
     PersonMemoryExtractionResult,
     PersonProfile,
@@ -312,7 +311,7 @@ class TailwagApiAppTest(unittest.TestCase):
             ],
         )
 
-    def test_structured_context_and_identity_routes_call_matching_client_methods(self) -> None:
+    def test_identity_routes_call_matching_client_methods(self) -> None:
         from tailwag_memory.api.app import create_app
         from tailwag_memory.api.dependencies import get_client
 
@@ -321,11 +320,6 @@ class TailwagApiAppTest(unittest.TestCase):
         app.dependency_overrides[get_client] = lambda: fake
         client = TestClient(app)
 
-        structured = client.post(
-            f"{API_BASE}/person_context_structured",
-            headers=_auth_header(),
-            json={"person_id": "person_jamie", "current_text": "robot demo"},
-        )
         profile = client.post(
             f"{API_BASE}/people_profile",
             headers=_auth_header(),
@@ -347,28 +341,12 @@ class TailwagApiAppTest(unittest.TestCase):
             json={"username": "jexample", "official_name": "Jamie Example", "site_code": "BOS3"},
         )
 
-        self.assertEqual(structured.status_code, 200)
-        self.assertEqual(
-            structured.json(),
-            {
-                "person_id": "person_jamie",
-                "directory_profile_lines": ["Jamie Example"],
-                "memory_profile_lines": ["likes robot demos"],
-                "potential_followups": ["ask about robotics"],
-                "preferred_language": "English",
-            },
-        )
         self.assertEqual(profile.json()["person_id"], "person_jamie")
         self.assertTrue(resolved.json()["success"])
         self.assertEqual(verified.json()["username"], "jexample")
         self.assertEqual(
             fake.calls,
             [
-                (
-                    "person_context_structured",
-                    "person_jamie",
-                    {"current_text": "robot demo"},
-                ),
                 ("person_profile", "person_jamie"),
                 (
                     "resolve_identity",
@@ -612,7 +590,7 @@ class TailwagApiAppTest(unittest.TestCase):
         document = response.json()
         paths = set(document["paths"])
         self.assertIn(f"{API_BASE}/biometrics_face_search", paths)
-        self.assertIn(f"{API_BASE}/person_context_structured", paths)
+        self.assertIn(f"{API_BASE}/person_context", paths)
         self.assertIn(f"{API_BASE}/turn_owner_resolve", paths)
         rendered = str(document)
         self.assertIn("embedding", rendered)
@@ -636,16 +614,6 @@ class _FakeClient:
     def person_context(self, person_id: str, **kwargs) -> str:
         self.calls.append(("person_context", person_id, kwargs))
         return "[PERSON MEMORY]\n- likes robot demos"
-
-    def person_context_structured(self, person_id: str, **kwargs) -> PersonContextResult:
-        self.calls.append(("person_context_structured", person_id, kwargs))
-        return PersonContextResult(
-            person_id=person_id,
-            directory_profile_lines=("Jamie Example",),
-            memory_profile_lines=("likes robot demos",),
-            potential_followups=("ask about robotics",),
-            preferred_language="English",
-        )
 
     def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
         self.calls.append(("record_episode", episode, {"extract_memory": extract_memory}))
