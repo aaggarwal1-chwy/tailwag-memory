@@ -35,12 +35,14 @@ Deploy it with:
 
 ```bash
 aws cloudformation deploy \
-  --stack-name tailwag-memory-core-dev \
+  --region us-east-2 \
+  --stack-name aaggarwal1-tailwag-core-dev \
   --template-file deploy/aws/cloudformation/tailwag-memory-core.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
-    ProjectName=tailwag-memory \
-    EnvironmentName=dev
+    ProjectName=aaggarwal1-tailwag \
+    EnvironmentName=dev \
+    ReportsBucketName=aaggarwal1-tailwag-reports-<account-id>-us-east-2
 ```
 
 Use `ReportsBucketName=<globally-unique-bucket-name>` when the bucket name must
@@ -58,24 +60,28 @@ handler names and runtime secret references:
 
 ```bash
 aws cloudformation deploy \
-  --stack-name tailwag-memory-core-dev \
+  --region us-east-2 \
+  --stack-name aaggarwal1-tailwag-core-dev \
   --template-file deploy/aws/cloudformation/tailwag-memory-core.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
-    ProjectName=tailwag-memory \
+    ProjectName=aaggarwal1-tailwag \
     EnvironmentName=dev \
+    ReportsBucketName=aaggarwal1-tailwag-reports-<account-id>-us-east-2 \
     CreateWorkerLambdas=true \
     WorkerCodeS3Bucket=<worker-code-bucket> \
     WorkerCodeS3Key=<worker-code-key> \
+    WorkerSubnetIds=<private-subnet-id-1>,<private-subnet-id-2> \
+    WorkerSecurityGroupIds=<worker-security-group-id> \
     PollWorkerHandler=tailwag_memory.aws.handlers.slack_poll_handler \
     MemoryWorkerHandler=tailwag_memory.aws.handlers.memory_worker_handler \
     ReportWorkerHandler=tailwag_memory.aws.handlers.report_worker_handler \
-    Neo4jUriSecretId=tailwag/neo4j-uri \
-    Neo4jUserSecretId=tailwag/neo4j-user \
-    Neo4jPasswordSecretId=tailwag/neo4j-password \
-    OpenAIApiKeySecretId=tailwag/openai-api-key \
-    SlackBotTokenSecretId=tailwag/slack-bot-token \
-    TailwagApiBearerTokenSecretId=tailwag/api-bearer-token
+    Neo4jUriSecretId=aaggarwal1-tailwag/neo4j-uri \
+    Neo4jUserSecretId=aaggarwal1-tailwag/neo4j-user \
+    Neo4jPasswordSecretId=aaggarwal1-tailwag/neo4j-password \
+    OpenAIApiKeySecretId=aaggarwal1-tailwag/openai-api-key \
+    SlackBotTokenSecretId=aaggarwal1-tailwag/slack-bot-token \
+    TailwagApiBearerTokenSecretId=aaggarwal1-tailwag/api-bearer-token
 ```
 
 The worker Lambda environment includes queue URLs, DynamoDB table names, the
@@ -85,14 +91,19 @@ by Tailwag settings: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`,
 CloudFormation populates those runtime variables through Secrets Manager dynamic
 references.
 
+When Neo4j runs on a private EC2 address, pass `WorkerSubnetIds` and
+`WorkerSecurityGroupIds` so worker Lambdas can reach Bolt. The selected worker
+subnets need outbound access to AWS APIs, Slack, and OpenAI, typically through a
+NAT gateway for the first deployment.
+
 The examples use one Secrets Manager namespace for all Tailwag runtime secrets:
 
-- `tailwag/neo4j-uri`
-- `tailwag/neo4j-user`
-- `tailwag/neo4j-password`
-- `tailwag/openai-api-key`
-- `tailwag/slack-bot-token`
-- `tailwag/api-bearer-token`
+- `aaggarwal1-tailwag/neo4j-uri`
+- `aaggarwal1-tailwag/neo4j-user`
+- `aaggarwal1-tailwag/neo4j-password`
+- `aaggarwal1-tailwag/openai-api-key`
+- `aaggarwal1-tailwag/slack-bot-token`
+- `aaggarwal1-tailwag/api-bearer-token`
 
 ## Build And Push The API Image
 

@@ -85,6 +85,14 @@ Parameters:
     MinValue: 1
     MaxValue: 10
     Description: SQS messages delivered per Lambda invocation.
+  WorkerSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional private subnet ids for worker Lambda VPC access to private Neo4j. Leave empty to create workers without VPC config.
+  WorkerSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional security group ids for worker Lambda VPC access to private Neo4j. Leave empty to create workers without VPC config.
   PollWorkerHandler:
     Type: String
     Default: tailwag_memory.aws.handlers.slack_poll_handler
@@ -103,32 +111,35 @@ Parameters:
     Description: Worker log level.
   Neo4jUriSecretId:
     Type: String
-    Default: tailwag/neo4j-uri
+    Default: aaggarwal1-tailwag/neo4j-uri
     Description: Secrets Manager secret id or ARN whose SecretString is NEO4J_URI.
   Neo4jUserSecretId:
     Type: String
-    Default: tailwag/neo4j-user
+    Default: aaggarwal1-tailwag/neo4j-user
     Description: Secrets Manager secret id or ARN whose SecretString is NEO4J_USER.
   Neo4jPasswordSecretId:
     Type: String
-    Default: tailwag/neo4j-password
+    Default: aaggarwal1-tailwag/neo4j-password
     Description: Secrets Manager secret id or ARN whose SecretString is NEO4J_PASSWORD.
   OpenAIApiKeySecretId:
     Type: String
-    Default: tailwag/openai-api-key
+    Default: aaggarwal1-tailwag/openai-api-key
     Description: Secrets Manager secret id or ARN whose SecretString is OPENAI_API_KEY.
   SlackBotTokenSecretId:
     Type: String
-    Default: tailwag/slack-bot-token
+    Default: aaggarwal1-tailwag/slack-bot-token
     Description: Secrets Manager secret id or ARN whose SecretString is SLACK_BOT_TOKEN.
   TailwagApiBearerTokenSecretId:
     Type: String
-    Default: tailwag/api-bearer-token
+    Default: aaggarwal1-tailwag/api-bearer-token
     Description: Secrets Manager secret id or ARN whose SecretString is TAILWAG_API_BEARER_TOKEN.
 
 Conditions:
   HasReportsBucketName: !Not [!Equals [!Ref ReportsBucketName, ""]]
   ShouldCreateWorkerLambdas: !Equals [!Ref CreateWorkerLambdas, "true"]
+  HasWorkerSubnetIds: !Not [!Equals [!Join ["", !Ref WorkerSubnetIds], ""]]
+  HasWorkerSecurityGroupIds: !Not [!Equals [!Join ["", !Ref WorkerSecurityGroupIds], ""]]
+  HasWorkerVpcConfig: !And [!Condition HasWorkerSubnetIds, !Condition HasWorkerSecurityGroupIds]
 
 Resources:
   ApiRepository:
@@ -277,6 +288,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If
+          - HasWorkerVpcConfig
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - !Ref "AWS::NoValue"
       Policies:
         - PolicyName: !Sub "${ProjectName}-${EnvironmentName}-worker-runtime"
           PolicyDocument:
@@ -333,6 +348,11 @@ Resources:
         S3Key: !Ref WorkerCodeS3Key
       Timeout: !Ref WorkerTimeout
       MemorySize: !Ref WorkerMemorySize
+      VpcConfig: !If
+        - HasWorkerVpcConfig
+        - SubnetIds: !Ref WorkerSubnetIds
+          SecurityGroupIds: !Ref WorkerSecurityGroupIds
+        - !Ref "AWS::NoValue"
       Environment:
         Variables:
           PROJECT_NAME: !Ref ProjectName
@@ -369,6 +389,11 @@ Resources:
         S3Key: !Ref WorkerCodeS3Key
       Timeout: !Ref WorkerTimeout
       MemorySize: !Ref WorkerMemorySize
+      VpcConfig: !If
+        - HasWorkerVpcConfig
+        - SubnetIds: !Ref WorkerSubnetIds
+          SecurityGroupIds: !Ref WorkerSecurityGroupIds
+        - !Ref "AWS::NoValue"
       Environment:
         Variables:
           PROJECT_NAME: !Ref ProjectName
@@ -405,6 +430,11 @@ Resources:
         S3Key: !Ref WorkerCodeS3Key
       Timeout: !Ref WorkerTimeout
       MemorySize: !Ref WorkerMemorySize
+      VpcConfig: !If
+        - HasWorkerVpcConfig
+        - SubnetIds: !Ref WorkerSubnetIds
+          SecurityGroupIds: !Ref WorkerSecurityGroupIds
+        - !Ref "AWS::NoValue"
       Environment:
         Variables:
           PROJECT_NAME: !Ref ProjectName

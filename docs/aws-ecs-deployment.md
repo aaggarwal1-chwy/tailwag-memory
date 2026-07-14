@@ -43,7 +43,8 @@ All Argos memory provider routes require `Authorization: Bearer
 Use the image with:
 
 - ECS Fargate service in private subnets
-- internal Application Load Balancer
+- Application Load Balancer, either public HTTPS with access controls or private
+  through VPN/tunnel
 - container port `8000`
 - ALB health check path `/health`
 - task execution role for ECR, Secrets Manager, and
@@ -73,12 +74,12 @@ Store sensitive values in Secrets Manager:
 
 The deployment examples use these Secrets Manager secret IDs:
 
-- `tailwag/neo4j-uri`
-- `tailwag/neo4j-user`
-- `tailwag/neo4j-password`
-- `tailwag/openai-api-key`
-- `tailwag/slack-bot-token`
-- `tailwag/api-bearer-token`
+- `aaggarwal1-tailwag/neo4j-uri`
+- `aaggarwal1-tailwag/neo4j-user`
+- `aaggarwal1-tailwag/neo4j-password`
+- `aaggarwal1-tailwag/openai-api-key`
+- `aaggarwal1-tailwag/slack-bot-token`
+- `aaggarwal1-tailwag/api-bearer-token`
 
 Set non-sensitive values directly as ECS task environment variables:
 

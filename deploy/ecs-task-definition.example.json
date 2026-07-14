@@ -1,15 +1,15 @@
 {
-  "family": "tailwag-memory-api",
+  "family": "aaggarwal1-tailwag-api-task",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::<account-id>:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::<account-id>:role/tailwag-memory-api-task-role",
+  "executionRoleArn": "arn:aws:iam::<account-id>:role/aaggarwal1-tailwag-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::<account-id>:role/aaggarwal1-tailwag-api-task-role",
   "containerDefinitions": [
     {
       "name": "tailwag-memory-api",
-      "image": "<account-id>.dkr.ecr.<region>.amazonaws.com/tailwag-memory-api:<tag>",
+      "image": "<account-id>.dkr.ecr.us-east-2.amazonaws.com/aaggarwal1-tailwag-dev-api:<tag>",
       "essential": true,
       "portMappings": [
         {
@@ -30,11 +30,11 @@
         {"name": "TAILWAG_SYNTHESIS_MODEL", "value": "gpt-5.5"}
       ],
       "secrets": [
-        {"name": "NEO4J_URI", "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:tailwag/neo4j-uri"},
-        {"name": "NEO4J_USER", "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:tailwag/neo4j-user"},
-        {"name": "NEO4J_PASSWORD", "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:tailwag/neo4j-password"},
-        {"name": "OPENAI_API_KEY", "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:tailwag/openai-api-key"},
-        {"name": "TAILWAG_API_BEARER_TOKEN", "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:tailwag/api-bearer-token"}
+        {"name": "NEO4J_URI", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/neo4j-uri"},
+        {"name": "NEO4J_USER", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/neo4j-user"},
+        {"name": "NEO4J_PASSWORD", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/neo4j-password"},
+        {"name": "OPENAI_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/openai-api-key"},
+        {"name": "TAILWAG_API_BEARER_TOKEN", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/api-bearer-token"}
       ],
       "healthCheck": {
         "command": [
@@ -49,8 +49,8 @@
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/tailwag-memory-api",
-          "awslogs-region": "<region>",
+          "awslogs-group": "/ecs/aaggarwal1-tailwag-api",
+          "awslogs-region": "us-east-2",
           "awslogs-stream-prefix": "ecs"
         }
       }

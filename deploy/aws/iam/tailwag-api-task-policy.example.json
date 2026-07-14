@@ -8,7 +8,7 @@
         "secretsmanager:GetSecretValue"
       ],
       "Resource": [
-        "arn:aws:secretsmanager:<region>:<account-id>:secret:tailwag/*"
+        "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/*"
       ]
     }
   ]

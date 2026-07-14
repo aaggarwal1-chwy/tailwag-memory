@@ -6,8 +6,8 @@
       "Effect": "Allow",
       "Action": "sqs:SendMessage",
       "Resource": [
-        "arn:aws:sqs:<region>:<account-id>:tailwag-memory-<environment>-poll-jobs",
-        "arn:aws:sqs:<region>:<account-id>:tailwag-memory-<environment>-report-jobs"
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-poll-jobs",
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-report-jobs"
       ]
     }
   ]

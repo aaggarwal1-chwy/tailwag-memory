@@ -13,9 +13,9 @@
         "sqs:SendMessage"
       ],
       "Resource": [
-        "arn:aws:sqs:<region>:<account-id>:tailwag-memory-<environment>-poll-jobs",
-        "arn:aws:sqs:<region>:<account-id>:tailwag-memory-<environment>-memory-jobs",
-        "arn:aws:sqs:<region>:<account-id>:tailwag-memory-<environment>-report-jobs"
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-poll-jobs",
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-memory-jobs",
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-report-jobs"
       ]
     },
     {
@@ -29,8 +29,8 @@
         "dynamodb:DeleteItem"
       ],
       "Resource": [
-        "arn:aws:dynamodb:<region>:<account-id>:table/tailwag-memory-<environment>-slack-poll-state",
-        "arn:aws:dynamodb:<region>:<account-id>:table/tailwag-memory-<environment>-job-idempotency"
+        "arn:aws:dynamodb:us-east-2:<account-id>:table/aaggarwal1-tailwag-dev-slack-poll-state",
+        "arn:aws:dynamodb:us-east-2:<account-id>:table/aaggarwal1-tailwag-dev-job-idempotency"
       ]
     },
     {
@@ -43,8 +43,8 @@
         "s3:ListBucket"
       ],
       "Resource": [
-        "arn:aws:s3:::<tailwag-reports-bucket>",
-        "arn:aws:s3:::<tailwag-reports-bucket>/*"
+        "arn:aws:s3:::aaggarwal1-tailwag-reports-<account-id>-us-east-2",
+        "arn:aws:s3:::aaggarwal1-tailwag-reports-<account-id>-us-east-2/*"
       ]
     }
   ]

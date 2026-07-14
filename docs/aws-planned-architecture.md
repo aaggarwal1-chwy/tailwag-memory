@@ -114,6 +114,11 @@ jobs and use Tailwag package services:
 SQS DLQs retain failed jobs after retry exhaustion. DynamoDB stores Slack channel
 poll cursors and job idempotency state.
 
+When Neo4j runs on a private EC2 address, worker Lambdas run with VPC subnet and
+security group settings so they can reach Bolt. Those subnets need outbound
+access to AWS APIs, Slack, and OpenAI, typically through a NAT gateway for the
+first deployment.
+
 ## AWS Resources
 
 The planned deployment uses:
@@ -134,12 +139,12 @@ The planned deployment uses:
 The deployment examples use one Secrets Manager namespace for Tailwag runtime
 secrets:
 
-- `tailwag/neo4j-uri`
-- `tailwag/neo4j-user`
-- `tailwag/neo4j-password`
-- `tailwag/openai-api-key`
-- `tailwag/slack-bot-token`
-- `tailwag/api-bearer-token`
+- `aaggarwal1-tailwag/neo4j-uri`
+- `aaggarwal1-tailwag/neo4j-user`
+- `aaggarwal1-tailwag/neo4j-password`
+- `aaggarwal1-tailwag/openai-api-key`
+- `aaggarwal1-tailwag/slack-bot-token`
+- `aaggarwal1-tailwag/api-bearer-token`
 
 ## Repo Resources
 

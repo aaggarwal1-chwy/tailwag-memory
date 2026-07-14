@@ -10,6 +10,7 @@ The focused docs are the source of truth:
 - [Python package integration guide](docs/integration-guide.md): installation from another repo, runtime configuration, setup sequence, and integration responsibilities.
 - [Memory endpoints reference](docs/memory-endpoints.md): Python APIs, service constructors, input models, return shapes, and optional HTTP routes.
 - [AWS planned architecture](docs/aws-planned-architecture.md): cloud topology, service interactions, background workers, and report publishing.
+- [Beginner AWS deployment runbook](docs/aws-beginner-deployment-runbook.md): console-first Tailwag AWS deployment steps for `us-east-2` using the `aaggarwal1-tailwag` resource prefix.
 - [AWS ECS deployment note](docs/aws-ecs-deployment.md): container image, ECS task shape, runtime config, and health checks for the Tailwag API.
 - [AWS deployment resources](deploy/aws/README.md): local CloudFormation, IAM policy examples, image build/push helper, and worker packaging helper for AWS deployment.
 - [CLI reference](docs/cli-reference.md): local schema setup, ingestion, retrieval, memory maintenance, inspect, and Slack command examples.
