@@ -106,7 +106,12 @@ def _person_upsert_cypher(
     return (
         f"""
                 MERGE (p:Person {{id: {person_variable}.{id_property}}})
-                SET p.display_name = coalesce({person_variable}.display_name, p.display_name),
+                SET p.display_name = CASE
+                      WHEN {person_variable}.official_name IS NOT NULL THEN {person_variable}.official_name
+                      WHEN {person_variable}.display_name IS NOT NULL
+                        AND {person_variable}.display_name <> {person_variable}.{id_property} THEN {person_variable}.display_name
+                      ELSE p.display_name
+                    END,
                     p.official_name = coalesce({person_variable}.official_name, p.official_name),
                     p.name = coalesce(p.name, {person_variable}.id),
                     p.email = coalesce({person_variable}.email, p.email),
@@ -244,6 +249,7 @@ class EpisodeIngestionService:
                 {
                     "id": person.id,
                     "display_name": person.display_name,
+                    "official_name": person.official_name,
                     "email": _normalize_email(person.email),
                     "consent_status": person.consent_status,
                     "role": person.role,
@@ -260,6 +266,7 @@ class EpisodeIngestionService:
                     "person_id": mention.person.id,
                     "id": mention.person.id,
                     "display_name": mention.person.display_name,
+                    "official_name": mention.person.official_name,
                     "email": _normalize_email(mention.person.email),
                     "consent_status": mention.person.consent_status,
                     "source": mention.source,
@@ -302,8 +309,7 @@ class EpisodeIngestionService:
             WITH e, old_mentioned, old_mention
             FOREACH (_ IN CASE WHEN old_mentioned IS NOT NULL AND NOT old_mentioned.id IN $mentioned_person_ids THEN [1] ELSE [] END | DELETE old_mention)
             WITH DISTINCT e
-            CALL {
-              WITH e
+            CALL (e) {
               UNWIND $participants AS person
             """
             + _person_upsert_cypher("person", "id")
@@ -313,8 +319,7 @@ class EpisodeIngestionService:
                     r.source = person.source
               RETURN count(*) AS participant_write_count
             }
-            CALL {
-              WITH e
+            CALL (e) {
               UNWIND $mentioned_people AS mentioned
             """
             + _person_upsert_cypher("mentioned", "person_id", update_last_seen=False)
@@ -365,6 +370,7 @@ class EventIngestionService:
                     "person_id": attendee.person.id,
                     "id": attendee.person.id,
                     "display_name": attendee.person.display_name,
+                    "official_name": attendee.person.official_name,
                     "email": _normalize_email(attendee.person.email),
                     "consent_status": attendee.person.consent_status,
                     "source": attendee.source,

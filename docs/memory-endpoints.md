@@ -6,14 +6,16 @@ This document is the caller-facing reference for the Tailwag memory system. It d
 
 These are synchronous Python APIs, not HTTP endpoints. Normal callers should use `TailwagMemoryClient`; lower-level services are available when a caller needs dependency injection, custom providers, or tests without live OpenAI/Neo4j calls.
 
+An optional FastAPI adapter is available for service deployments. It mirrors selected `TailwagMemoryClient` calls over HTTP, but the Python client remains the canonical package API.
+
 Inspection utilities are imported from `tailwag_memory.inspect`, not from the top-level `tailwag_memory` package. They are optional local analysis/reporting helpers and are separate from the normal memory service API surface below. See [Inspect Reference](inspect-reference.md) for report commands, generated assets, and read-only boundaries.
 
 ## Runtime Setup
 
-Install the package from the consuming repo:
+Install the package from the consuming repo, replacing `/path/to/tailwag-memory` with the local checkout path:
 
 ```bash
-python -m pip install -e /Users/aaggarwal1/Desktop/code/tailwag-memory
+python -m pip install -e /path/to/tailwag-memory
 ```
 
 Set runtime configuration:
@@ -30,6 +32,8 @@ export TAILWAG_VOICE_EMBEDDING_DIMENSION=192
 export TAILWAG_FACE_EMBEDDING_MODEL=facenet
 export TAILWAG_VOICE_EMBEDDING_MODEL=speechbrain_ecapa
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
+export TAILWAG_API_BEARER_TOKEN=replace-with-a-private-token
+export TAILWAG_API_DOCS_ENABLED=false
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 export SNOWFLAKE_ACCOUNT=CHEWY-CHEWY
 export SNOWFLAKE_USER=<username>@CHEWY.COM
@@ -63,6 +67,282 @@ finally:
 ```
 
 `OPENAI_API_KEY` is required when production code uses the OpenAI provider for embeddings, memory extraction, consolidation, or vector search. `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by extraction and consolidation providers. `SNOWFLAKE_*` variables are required only for Snowflake-backed directory sync; local JSON directory imports do not need them. `TAILWAG_AFFECT_FOLD1_MODEL` and `TAILWAG_AFFECT_FOLD2_MODEL` are only needed for optional affect inspection with `tailwag-memory[affect]`. Offline tests can inject `MockOpenAIEmbeddingProvider` or fake provider objects into lower-level services.
+
+`TAILWAG_API_BEARER_TOKEN` is required only for the optional FastAPI memory routes. `TAILWAG_API_DOCS_ENABLED=true` exposes interactive docs; leave it false or unset in production unless docs are intentionally exposed behind a trusted boundary.
+
+## Optional HTTP Endpoints
+
+Install the API extra:
+
+```bash
+python -m pip install -e "/path/to/tailwag-memory[api]"
+```
+
+Run the service:
+
+```bash
+python -m uvicorn tailwag_memory.api.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+`GET /health` is unauthenticated and does not initialize Neo4j or OpenAI clients. All memory API routes require:
+
+```text
+Authorization: Bearer <TAILWAG_API_BEARER_TOKEN>
+```
+
+Interactive docs at `/docs`, `/redoc`, and `/openapi.json` are disabled unless `TAILWAG_API_DOCS_ENABLED=true`.
+
+Memory API URLs follow the Argos provider/resource/request convention:
+
+```text
+/argos/providers/{provider_id}/resources/{resource_id}/request/{request_id}
+```
+
+For these Tailwag routes, `provider_id` and `resource_id` must both be `memory`. The `request_id` is the operation name, such as `person_context` or `episodes_record`.
+
+### `GET /health`
+
+Returns:
+
+```json
+{"status": "ok", "service": "tailwag-memory"}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/person_context`
+
+Request:
+
+```json
+{
+  "person_id": "person_jamie",
+  "limit": 10,
+  "semantic_scope": "workplace help",
+  "current_text": "robot demo later today",
+  "memory_limit": 12,
+  "recent_episode_limit": 5
+}
+```
+
+Calls `TailwagMemoryClient.person_context(...)`, not `person_context_structured(...)`.
+
+Returns:
+
+```json
+{
+  "person_id": "person_jamie",
+  "context_markdown": "...",
+  "generated_at": "2026-07-10T00:00:00+00:00"
+}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/person_context_structured`
+
+Request:
+
+```json
+{"person_id": "person_jamie", "current_text": "robot demo later today"}
+```
+
+Calls `TailwagMemoryClient.person_context_structured(...)`.
+
+Returns:
+
+```json
+{
+  "person_id": "person_jamie",
+  "directory_profile_lines": [],
+  "memory_profile_lines": [],
+  "potential_followups": [],
+  "preferred_language": "English"
+}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/episodes_record`
+
+Request:
+
+```json
+{
+  "episode": {
+    "id": "episode_example_001",
+    "episode_type": "conversation",
+    "start_time": "2026-06-15T15:00:00+00:00",
+    "end_time": "2026-06-15T15:02:00+00:00",
+    "transcript": "Jamie: Are there spare laptop chargers in room 101?",
+    "retention_class": "standard",
+    "place": {"building_code": "MAIN", "room_id": "101"},
+    "participants": [{"id": "person_jamie", "role": "speaker"}]
+  },
+  "extract_memory": true
+}
+```
+
+Returns the `EpisodeRecordResult` dictionary shape.
+
+### `POST /argos/providers/memory/resources/memory/request/semantic_search`
+
+Request:
+
+```json
+{"text": "robot demos", "person_id": "person_jamie", "building_code": "MAIN", "limit": 5}
+```
+
+Returns the existing semantic search shape:
+
+```json
+{"episodes": [], "memory_items": []}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/people_upsert`
+
+Request:
+
+```json
+{"person": {"id": "person_jamie", "display_name": "Jamie", "consent_status": "consented"}}
+```
+
+Returns:
+
+```json
+{"person_id": "person_jamie"}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/people_archive`
+
+Request:
+
+```json
+{"person_id": "person_jamie"}
+```
+
+Returns:
+
+```json
+{"archived": true}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/people_rekey_by_email`
+
+Request:
+
+```json
+{"email": "jamie@example.com", "new_person_id": "person_jamie"}
+```
+
+Returns:
+
+```json
+{"rekeyed": true}
+```
+
+### `POST /argos/providers/memory/resources/memory/request/people_profile`
+
+Request:
+
+```json
+{"person_id": "person_jamie"}
+```
+
+Returns a `PersonProfile` dictionary or `null`.
+
+### `POST /argos/providers/memory/resources/memory/request/identity_resolve`
+
+Request:
+
+```json
+{
+  "shared_first_name": "Jamie",
+  "shared_last_name": "Example",
+  "shared_name": "Jamie Example",
+  "site_code": "BOS3"
+}
+```
+
+Returns the `IdentityResolutionResult` dictionary shape.
+
+### `POST /argos/providers/memory/resources/memory/request/identity_verified_profile`
+
+Request:
+
+```json
+{"username": "jexample", "official_name": "Jamie Example", "site_code": "BOS3"}
+```
+
+Returns a `VerifiedProfile` dictionary or `null`.
+
+### Biometric HTTP routes
+
+Biometric HTTP routes accept embeddings only. They do not accept raw face images,
+face crops, raw audio, waveforms, media URLs, or base64 media fields. Request
+bodies with raw-media-like fields are rejected.
+
+The vector examples below are truncated for readability. Real requests must
+send embeddings with the configured modality dimension, such as
+`TAILWAG_FACE_EMBEDDING_DIMENSION` for face routes and
+`TAILWAG_VOICE_EMBEDDING_DIMENSION` for voice routes.
+
+| Route | Client call |
+| --- | --- |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_face_search` | `search_face(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_voice_search` | `search_voice(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_face_references` | `enroll_face_reference(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_voice_references` | `enroll_voice_reference(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_face_observations` | `observe_face_embedding(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_voice_observations` | `observe_voice_embedding(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_voice_references_exists` | `has_voice_reference(...)` |
+
+Search request:
+
+```json
+{"embedding": [0.1, 0.2], "limit": 2, "site_code": "BOS3"}
+```
+
+Enrollment request:
+
+```json
+{
+  "person_id": "person_jamie",
+  "embedding": [0.1, 0.2],
+  "metadata": {"source": "argos"},
+  "consent_status": "consented"
+}
+```
+
+Observation request:
+
+```json
+{
+  "person_id": "person_jamie",
+  "embedding": [0.1, 0.2],
+  "evidence": {"owner_source": "audio_face_agree"},
+  "metadata": {"source": "argos"}
+}
+```
+
+Voice reference existence request:
+
+```json
+{"person_id": "person_jamie"}
+```
+
+Search responses return the `BiometricSearchResult` shape with narrowed
+candidate dictionaries containing `person_id`, `display_name`, `score`, and
+`metadata`; embeddings are not echoed.
+
+### `POST /argos/providers/memory/resources/memory/request/turn_owner_resolve`
+
+Request:
+
+```json
+{
+  "primary_face_candidate": {"person_id": "person_jamie", "display_name": "Jamie", "score": 0.91},
+  "visible_face_candidates": [],
+  "voice_candidate": {"person_id": "person_jamie", "display_name": "Jamie", "score": 0.87},
+  "policy_context": {}
+}
+```
+
+Returns the `OwnerResolutionResult` dictionary shape.
 
 ## Quick Start
 
