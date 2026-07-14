@@ -60,6 +60,31 @@ class SlackPollResult:
     episode_records: list[EpisodeRecordResult] = field(default_factory=list)
 
 
+@dataclass
+class SlackChannelState:
+    """Hold one Slack channel's polling checkpoint."""
+
+    latest_history_ts: str | None = None
+    active_threads: dict[str, dict[str, str]] = field(default_factory=dict)
+    version: object | None = None
+
+
+class SlackPollStateConflict(RuntimeError):
+    """Raised when a state save observes a stale channel version."""
+
+
+class SlackPollStateStore(Protocol):
+    """Describe storage for per-channel Slack polling state."""
+
+    def load_channel(self, channel: str) -> SlackChannelState:
+        """Return one channel's polling state and opaque store version."""
+        ...
+
+    def save_channel(self, channel: str, state: SlackChannelState, expected_version: object | None) -> None:
+        """Save one channel if its current version still matches expected_version."""
+        ...
+
+
 class SlackWebApiClient:
     """Fetch Slack conversations through the Slack Web API."""
 
@@ -125,45 +150,36 @@ class SlackWebApiClient:
         return self._user_cache[user_id]
 
 
-class SlackPollState:
-    """Persist per-channel Slack polling cursors."""
+class SlackFilePollStateStore:
+    """Persist per-channel Slack polling cursors in a local JSON file."""
 
     def __init__(self, path: Path) -> None:
-        """Load poll state from a JSON file path."""
+        """Create a file-backed Slack poll state store."""
         self.path = path
-        self.data = self._load()
-        self._dirty_channels: set[str] = set()
 
-    def latest_history_ts(self, channel: str) -> str | None:
-        """Return the latest saved channel history timestamp."""
-        return self._channel(channel).get("latest_history_ts")
+    def load_channel(self, channel: str) -> SlackChannelState:
+        """Load one channel's polling state from disk."""
+        data = self._load()
+        channels = data.get("channels", {})
+        raw_channel = channels.get(channel)
+        return self._channel_state(raw_channel, channel=channel)
 
-    def set_latest_history_ts(self, channel: str, ts: str) -> None:
-        """Store the latest channel history timestamp."""
-        self._channel(channel)["latest_history_ts"] = ts
-        self._dirty_channels.add(channel)
-
-    def active_threads(self, channel: str) -> dict[str, dict[str, str]]:
-        """Return mutable active-thread state for a channel."""
-        self._dirty_channels.add(channel)
-        return self._channel(channel).setdefault("active_threads", {})
-
-    def save(self) -> None:
-        """Atomically save poll state to disk."""
+    def save_channel(self, channel: str, state: SlackChannelState, expected_version: object | None) -> None:
+        """Atomically save one channel's polling state to disk."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = self._merged_with_disk_state()
+        data = self._load()
+        channels = data.setdefault("channels", {})
+        current_channel = channels.get(channel)
+        current_version = self._channel_version(current_channel, channel=channel)
+        if current_version != expected_version:
+            raise SlackPollStateConflict(f"Slack poll state changed for channel {channel}.")
+
+        channels[channel] = self._serialize_channel_state(state)
         serialized = json.dumps(data, indent=2, sort_keys=True) + "\n"
         with NamedTemporaryFile("w", dir=self.path.parent, delete=False) as temp_file:
             temp_file.write(serialized)
             temp_path = Path(temp_file.name)
         temp_path.replace(self.path)
-        self.data = data
-        self._dirty_channels.clear()
-
-    def _channel(self, channel: str) -> dict[str, Any]:
-        """Return mutable state for one channel."""
-        channels = self.data.setdefault("channels", {})
-        return channels.setdefault(channel, {})
 
     def _load(self) -> dict[str, Any]:
         """Load and validate poll state JSON."""
@@ -180,19 +196,75 @@ class SlackPollState:
             raise ValueError(f"Slack poll state file channels must be a JSON object: {self.path}")
         return data
 
-    def _merged_with_disk_state(self) -> dict[str, Any]:
-        """Merge dirty in-memory channel state with current disk state."""
-        if not self.path.exists():
-            return self.data
-        disk_data = SlackPollState(self.path).data
-        merged = dict(disk_data)
-        merged_channels = dict(disk_data.get("channels", {}))
-        current_channels = self.data.get("channels", {})
-        for channel in self._dirty_channels:
-            if channel in current_channels:
-                merged_channels[channel] = current_channels[channel]
-        merged["channels"] = merged_channels
-        return merged
+    def _channel_state(self, raw_channel: object, *, channel: str) -> SlackChannelState:
+        """Return a validated SlackChannelState for a raw channel object."""
+        if raw_channel is None:
+            return SlackChannelState(version=None)
+        if not isinstance(raw_channel, dict):
+            raise ValueError(f"Slack poll state channel {channel} must be a JSON object: {self.path}")
+
+        latest_history_ts = raw_channel.get("latest_history_ts")
+        if latest_history_ts is not None and not isinstance(latest_history_ts, str):
+            raise ValueError(f"Slack poll state latest_history_ts for {channel} must be a string: {self.path}")
+
+        active_threads = raw_channel.get("active_threads", {})
+        if not isinstance(active_threads, dict):
+            raise ValueError(f"Slack poll state active_threads for {channel} must be a JSON object: {self.path}")
+
+        normalized_threads: dict[str, dict[str, str]] = {}
+        for thread_ts, thread_state in active_threads.items():
+            if not isinstance(thread_ts, str) or not isinstance(thread_state, dict):
+                raise ValueError(f"Slack poll state active_threads for {channel} must map strings to objects: {self.path}")
+            latest_ts = thread_state.get("latest_ts")
+            if latest_ts is not None and not isinstance(latest_ts, str):
+                raise ValueError(f"Slack poll state active thread latest_ts for {channel} must be a string: {self.path}")
+            normalized_threads[thread_ts] = dict(thread_state)
+
+        return SlackChannelState(
+            latest_history_ts=latest_history_ts,
+            active_threads=normalized_threads,
+            version=self._channel_version(raw_channel, channel=channel),
+        )
+
+    def _channel_version(self, raw_channel: object, *, channel: str) -> str | None:
+        """Return an opaque version derived from the stored channel JSON."""
+        if raw_channel is None:
+            return None
+        channel_state = self._serialize_channel_state(self._channel_state_without_version(raw_channel, channel=channel))
+        return json.dumps(channel_state, sort_keys=True, separators=(",", ":"))
+
+    def _channel_state_without_version(self, raw_channel: object, *, channel: str) -> SlackChannelState:
+        """Validate raw channel state without recursively deriving a version."""
+        if raw_channel is None:
+            return SlackChannelState()
+        if not isinstance(raw_channel, dict):
+            raise ValueError(f"Slack poll state channel {channel} must be a JSON object: {self.path}")
+        latest_history_ts = raw_channel.get("latest_history_ts")
+        if latest_history_ts is not None and not isinstance(latest_history_ts, str):
+            raise ValueError(f"Slack poll state latest_history_ts for {channel} must be a string: {self.path}")
+        active_threads = raw_channel.get("active_threads", {})
+        if not isinstance(active_threads, dict):
+            raise ValueError(f"Slack poll state active_threads for {channel} must be a JSON object: {self.path}")
+        normalized_threads: dict[str, dict[str, str]] = {}
+        for thread_ts, thread_state in active_threads.items():
+            if not isinstance(thread_ts, str) or not isinstance(thread_state, dict):
+                raise ValueError(f"Slack poll state active_threads for {channel} must map strings to objects: {self.path}")
+            latest_ts = thread_state.get("latest_ts")
+            if latest_ts is not None and not isinstance(latest_ts, str):
+                raise ValueError(f"Slack poll state active thread latest_ts for {channel} must be a string: {self.path}")
+            normalized_threads[thread_ts] = dict(thread_state)
+        return SlackChannelState(latest_history_ts=latest_history_ts, active_threads=normalized_threads)
+
+    def _serialize_channel_state(self, state: SlackChannelState) -> dict[str, Any]:
+        """Return the JSON-compatible channel state without the opaque version."""
+        serialized: dict[str, Any] = {}
+        if state.latest_history_ts is not None:
+            serialized["latest_history_ts"] = state.latest_history_ts
+        if state.active_threads:
+            serialized["active_threads"] = state.active_threads
+        else:
+            serialized["active_threads"] = {}
+        return serialized
 
 
 class SlackMemoryPoller:
@@ -202,7 +274,7 @@ class SlackMemoryPoller:
         self,
         client: SlackConversationClient,
         episode_recorder: EpisodeRecorder,
-        state_path: Path,
+        state_store: SlackPollStateStore,
         *,
         retention_class: str = "standard",
         active_thread_hours: float = 24.0,
@@ -211,7 +283,7 @@ class SlackMemoryPoller:
         """Create a poller for a Slack client and episode recorder."""
         self.client = client
         self.episode_recorder = episode_recorder
-        self.state_path = state_path
+        self.state_store = state_store
         self.retention_class = retention_class
         self.active_thread_hours = active_thread_hours
         self.person_id_resolver = person_id_resolver or _recorder_person_id_resolver(episode_recorder)
@@ -231,15 +303,16 @@ class SlackMemoryPoller:
             raise ValueError("force_backfill requires backfill_hours.")
 
         poll_started_ts = _now_slack_ts()
-        state = SlackPollState(self.state_path)
-        oldest = state.latest_history_ts(channel)
+        state = self.state_store.load_channel(channel)
+        expected_version = state.version
+        oldest = state.latest_history_ts
 
         if force_backfill:
             oldest = _datetime_to_slack_ts(datetime.now(timezone.utc) - timedelta(hours=backfill_hours or 0))
         elif oldest is None and backfill_hours is None:
             now_ts = _now_slack_ts()
-            state.set_latest_history_ts(channel, now_ts)
-            state.save()
+            state.latest_history_ts = now_ts
+            self.state_store.save_channel(channel, state, expected_version)
             return SlackPollResult(
                 channel=channel,
                 checked_threads=0,
@@ -267,7 +340,7 @@ class SlackMemoryPoller:
             if _has_thread_replies(message):
                 threaded_history.add(thread_ts)
 
-        active_threads = state.active_threads(channel)
+        active_threads = state.active_threads
         threads_to_check = set(active_threads) | set(history_messages)
         episode_records: list[EpisodeRecordResult] = []
         thread_cutoff = datetime.now(timezone.utc) - timedelta(hours=self.active_thread_hours)
@@ -309,8 +382,8 @@ class SlackMemoryPoller:
 
         latest_history_ts = _max_ts(history) if history else poll_started_ts
         if latest_history_ts is not None:
-            state.set_latest_history_ts(channel, latest_history_ts)
-        state.save()
+            state.latest_history_ts = latest_history_ts
+        self.state_store.save_channel(channel, state, expected_version)
 
         return SlackPollResult(
             channel=channel,

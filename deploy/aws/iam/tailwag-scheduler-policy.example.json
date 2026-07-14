@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SendTailwagScheduledJobs",
+      "Effect": "Allow",
+      "Action": "sqs:SendMessage",
+      "Resource": [
+        "arn:aws:sqs:<region>:<account-id>:tailwag-memory-<environment>-poll-jobs",
+        "arn:aws:sqs:<region>:<account-id>:tailwag-memory-<environment>-report-jobs"
+      ]
+    }
+  ]
+}

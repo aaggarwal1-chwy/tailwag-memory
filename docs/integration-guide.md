@@ -10,6 +10,8 @@ This guide stays at the package setup and integration-boundary level. For detail
 
 - Current graph model, scope, and deferred concepts: [Architecture](architecture.md)
 - Python endpoints, parameters, input models, return shapes, and service constructors: [Memory Endpoints Reference](memory-endpoints.md)
+- AWS service topology, background workers, and report publishing: [AWS Planned Architecture](aws-planned-architecture.md)
+- ECS/Fargate container packaging and deployment shape: [AWS ECS Deployment](aws-ecs-deployment.md)
 - Local command examples and CLI workflow: [CLI Reference](cli-reference.md)
 - Read-only local inspection reports and generated report assets: [Inspect Reference](inspect-reference.md)
 - Slack app setup, CLI polling, package-level polling, and Slack state behavior: [Slack Ingestion Guide](slack-ingestion.md)
@@ -36,6 +38,12 @@ For HTTP serving with FastAPI:
 ```bash
 python -m pip install -e "/path/to/tailwag-memory[api]"
 ```
+
+The repository includes a production-oriented Docker image for the FastAPI
+adapter and AWS worker helpers for polling, memory jobs, and report publishing.
+See [AWS Planned Architecture](aws-planned-architecture.md) for the full cloud
+shape and [AWS ECS Deployment](aws-ecs-deployment.md) for the API image command,
+ECS task definition example, health checks, and Secrets Manager mapping.
 
 ## Runtime Configuration
 
@@ -126,7 +134,7 @@ from tailwag_memory import TailwagMemoryClient
 
 Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, or direct memory item operations. Their constructor and method details also live in the endpoint reference.
 
-Slack adapter classes are imported from `tailwag_memory.slack_ingestion`, not from the top-level package. See [Slack Ingestion Guide](slack-ingestion.md#package-api).
+Slack adapter classes are imported from `tailwag_memory.slack_ingestion`, not from the top-level package. Package callers construct a `SlackPollStateStore` explicitly; use `SlackFilePollStateStore(Path(...))` for local JSON cursor state and `tailwag_memory.aws.SlackDynamoDBPollStateStore` for AWS DynamoDB-backed cursor state. See [Slack Ingestion Guide](slack-ingestion.md#package-api).
 
 Inspection helpers are imported from `tailwag_memory.inspect`, not from the top-level package. They are intended for local investigation and reporting, not for normal memory-service integration.
 

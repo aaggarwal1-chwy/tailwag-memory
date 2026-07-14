@@ -51,8 +51,6 @@ Argos relies on these Tailwag package surfaces:
 - `TailwagMemoryClient.upsert_person(PersonInput(...))`
 - `TailwagMemoryClient.archive_person(person_id)`
 - `TailwagMemoryClient.rekey_person_by_email(email, new_person_id)`
-- `tailwag_memory.slack_ingestion.SlackWebApiClient`
-- `tailwag_memory.slack_ingestion.SlackMemoryPoller`
 
 Argos treats `person_context()` as prompt-ready text and maps it into existing
 prompt fields such as `About`, `Potential Followups`, and preferred language.
@@ -69,8 +67,11 @@ separate `episodes` and `memory_items` lists.
 
 ## Slack And Identity
 
-Slack ingestion is Tailwag-backed. Argos can schedule polling, but Tailwag owns
-Slack episode construction, transcript formatting, memory extraction, and
+Slack ingestion is Tailwag-backed and Tailwag-owned. The current `argos-agent`
+integration reaches Tailwag through the HTTP identity-memory provider and does
+not construct `SlackWebApiClient`, `SlackMemoryPoller`, or a Slack poll state
+store directly. If Argos later schedules Slack polling directly, Tailwag still
+owns Slack episode construction, transcript formatting, memory extraction, and
 persistence.
 
 Slack users may start as temporary `Person.id="slack:<user_id>"` records. When a
@@ -83,9 +84,9 @@ same graph node.
 `TailwagMemoryClient.canonical_person_id_by_email(email)` is package-level
 resolver support for Slack polling and other adapters that need to map a
 normalized email to one caller-owned canonical `person_*` ID. Argos does not
-call this method directly in the live runtime; package-level `SlackMemoryPoller`
-uses it automatically only when its `episode_recorder` exposes the method and no
-explicit resolver is supplied.
+call this method directly in the live runtime. Tailwag's package-level
+`SlackMemoryPoller` uses it automatically only when its `episode_recorder`
+exposes the method and no explicit resolver is supplied.
 
 `MemoryItem.id` values are opaque and are not renamed during person rekeying.
 Consumers should use person-scoped APIs and graph relationships after rekey

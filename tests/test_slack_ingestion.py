@@ -7,8 +7,10 @@ import tempfile
 import unittest
 
 from tailwag_memory.slack_ingestion import (
+    SlackChannelState,
+    SlackFilePollStateStore,
     SlackMemoryPoller,
-    SlackPollState,
+    SlackPollStateConflict,
     SlackWebApiClient,
     SlackUserProfile,
     build_episode_from_slack_thread,
@@ -92,6 +94,40 @@ class FakeEpisodeRecorder:
     def canonical_person_id_by_email(self, email: str) -> str | None:
         self.canonical_lookup_calls.append(email)
         return self.canonical_ids_by_email.get(email)
+
+
+class FakeStateStore:
+    def __init__(self, states: dict[str, SlackChannelState] | None = None, *, fail_on_save: bool = False) -> None:
+        self.states = states or {}
+        self.fail_on_save = fail_on_save
+        self.load_calls: list[str] = []
+        self.save_calls: list[dict] = []
+
+    def load_channel(self, channel: str) -> SlackChannelState:
+        self.load_calls.append(channel)
+        state = self.states.get(channel, SlackChannelState())
+        return SlackChannelState(
+            latest_history_ts=state.latest_history_ts,
+            active_threads={thread_ts: dict(thread_state) for thread_ts, thread_state in state.active_threads.items()},
+            version=state.version,
+        )
+
+    def save_channel(self, channel: str, state: SlackChannelState, expected_version: object | None) -> None:
+        self.save_calls.append(
+            {
+                "channel": channel,
+                "latest_history_ts": state.latest_history_ts,
+                "active_threads": {thread_ts: dict(thread_state) for thread_ts, thread_state in state.active_threads.items()},
+                "expected_version": expected_version,
+            }
+        )
+        if self.fail_on_save:
+            raise SlackPollStateConflict(f"Slack poll state changed for channel {channel}.")
+        self.states[channel] = SlackChannelState(
+            latest_history_ts=state.latest_history_ts,
+            active_threads={thread_ts: dict(thread_state) for thread_ts, thread_state in state.active_threads.items()},
+            version="saved",
+        )
 
 
 class SlackThreadConversionTest(unittest.TestCase):
@@ -354,7 +390,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             state_path.write_text("{not json")
             service = FakeEpisodeRecorder()
             client = FakeSlackClient()
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             with self.assertRaisesRegex(ValueError, "not valid JSON"):
                 poller.poll_once("C123", backfill_hours=1)
@@ -367,7 +403,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             state_path = Path(tmp) / "slack-state.json"
             service = FakeEpisodeRecorder()
             client = FakeSlackClient()
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             result = poller.poll_once("C123")
 
@@ -393,7 +429,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 },
                 user_names={"U1": "Asha", "U2": "Ben"},
             )
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             result = poller.poll_once("C123", backfill_hours=1)
 
@@ -407,6 +443,42 @@ class SlackMemoryPollerTest(unittest.TestCase):
             state = json.loads(state_path.read_text())
             self.assertEqual(state["channels"]["C123"]["latest_history_ts"], root_ts)
 
+    def test_poll_once_uses_injected_state_store_without_filesystem_state(self) -> None:
+        root_ts = _ts()
+        store = FakeStateStore()
+        service = FakeEpisodeRecorder()
+        client = FakeSlackClient(
+            history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
+            user_names={"U1": "Asha"},
+        )
+        poller = SlackMemoryPoller(client, service, store)
+
+        result = poller.poll_once("C123", backfill_hours=1)
+
+        self.assertEqual(result.ingested_episode_ids, [f"slack:C123:{root_ts}"])
+        self.assertEqual(store.load_calls, ["C123"])
+        self.assertEqual(len(store.save_calls), 1)
+        self.assertEqual(store.save_calls[0]["channel"], "C123")
+        self.assertEqual(store.save_calls[0]["latest_history_ts"], root_ts)
+        self.assertEqual(store.save_calls[0]["active_threads"], {root_ts: {"latest_ts": root_ts}})
+        self.assertIsNone(store.save_calls[0]["expected_version"])
+
+    def test_state_store_conflict_is_reported_on_save(self) -> None:
+        root_ts = _ts()
+        store = FakeStateStore(fail_on_save=True)
+        service = FakeEpisodeRecorder()
+        client = FakeSlackClient(
+            history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
+            user_names={"U1": "Asha"},
+        )
+        poller = SlackMemoryPoller(client, service, store)
+
+        with self.assertRaisesRegex(SlackPollStateConflict, "C123"):
+            poller.poll_once("C123", backfill_hours=1)
+
+        self.assertEqual(len(store.save_calls), 1)
+        self.assertEqual(service.episodes[0].id, f"slack:C123:{root_ts}")
+
     def test_backfill_can_skip_memory_extraction(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
@@ -416,7 +488,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
                 user_names={"U1": "Asha"},
             )
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             result = poller.poll_once("C123", backfill_hours=1, extract_memory=False)
 
@@ -436,7 +508,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
                 user_names={"U1": "Asha"},
             )
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             result = poller.poll_once("C123", backfill_hours=1)
 
@@ -466,7 +538,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 replies_by_thread={root_ts: [{"ts": root_ts, "user": "U1", "text": "Start thread"}]},
                 user_names={"U1": "Asha"},
             )
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             result = poller.poll_once("C123", backfill_hours=1, force_backfill=True)
 
@@ -492,7 +564,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 },
                 user_names={"U1": "Asha", "U2": "Ben"},
             )
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
             poller.poll_once("C123", backfill_hours=1)
 
             client.history_messages = []
@@ -518,7 +590,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 replies_by_thread={root_ts: [{"ts": root_ts, "user": "U1", "text": "Start thread"}]},
                 user_names={"U1": "Asha"},
             )
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             with self.assertRaises(RuntimeError):
                 poller.poll_once("C123", backfill_hours=1)
@@ -542,7 +614,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             )
             service = FakeEpisodeRecorder()
             client = FakeSlackClient(history_messages=[])
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             result = poller.poll_once("C123")
 
@@ -563,7 +635,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Standalone update"}],
                 user_names={"U1": "Asha"},
             )
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             result = poller.poll_once("C123", backfill_hours=1)
 
@@ -584,7 +656,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 history_messages=[{"ts": root_ts, "user": "U1", "text": "Can someone review this?"}],
                 user_names={"U1": "Asha", "U2": "Ben"},
             )
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
             poller.poll_once("C123", backfill_hours=2)
 
             client.history_messages = []
@@ -624,7 +696,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 replies_by_thread={root_ts: [{"ts": root_ts, "user": "U1", "text": "Old standalone"}]},
                 user_names={"U1": "Asha"},
             )
-            poller = SlackMemoryPoller(client, service, state_path, active_thread_hours=1)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path), active_thread_hours=1)
 
             result = poller.poll_once("C123")
 
@@ -638,7 +710,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             state_path = Path(tmp) / "slack-state.json"
             service = FakeEpisodeRecorder()
             client = FakeSlackClient(history_error=RuntimeError("slack api unavailable"))
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             with self.assertRaisesRegex(RuntimeError, "slack api unavailable"):
                 poller.poll_once("C123", backfill_hours=1)
@@ -664,7 +736,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             state_path.write_text(json.dumps(original_state))
             service = FakeEpisodeRecorder()
             client = FakeSlackClient(replies_error=RateLimitedSlackError("rate_limited"))
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             with self.assertRaisesRegex(RateLimitedSlackError, "rate_limited"):
                 poller.poll_once("C123")
@@ -687,7 +759,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
                 ],
                 user_names={"U1": "Asha", "U2": "Ben", "Ubot": "Build Bot"},
             )
-            poller = SlackMemoryPoller(client, service, state_path)
+            poller = SlackMemoryPoller(client, service, SlackFilePollStateStore(state_path))
 
             result = poller.poll_once("C123", backfill_hours=1)
 
@@ -701,17 +773,35 @@ class SlackMemoryPollerTest(unittest.TestCase):
     def test_stale_state_handles_preserve_other_channel_cursor_updates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
-            first = SlackPollState(state_path)
-            second = SlackPollState(state_path)
+            store = SlackFilePollStateStore(state_path)
+            first = store.load_channel("C123")
+            second = store.load_channel("C999")
 
-            first.set_latest_history_ts("C123", "100.000000")
-            first.save()
-            second.set_latest_history_ts("C999", "200.000000")
-            second.save()
+            first.latest_history_ts = "100.000000"
+            store.save_channel("C123", first, first.version)
+            second.latest_history_ts = "200.000000"
+            store.save_channel("C999", second, second.version)
 
             state = json.loads(state_path.read_text())
             self.assertEqual(state["channels"]["C123"]["latest_history_ts"], "100.000000")
             self.assertEqual(state["channels"]["C999"]["latest_history_ts"], "200.000000")
+
+    def test_stale_same_channel_file_state_raises_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "slack-state.json"
+            store = SlackFilePollStateStore(state_path)
+            first = store.load_channel("C123")
+            second = store.load_channel("C123")
+
+            first.latest_history_ts = "100.000000"
+            store.save_channel("C123", first, first.version)
+            second.latest_history_ts = "200.000000"
+
+            with self.assertRaisesRegex(SlackPollStateConflict, "C123"):
+                store.save_channel("C123", second, second.version)
+
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["channels"]["C123"]["latest_history_ts"], "100.000000")
 
 
 if __name__ == "__main__":

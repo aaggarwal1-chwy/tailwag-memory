@@ -84,6 +84,12 @@ Run the service:
 python -m uvicorn tailwag_memory.api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
+For containerized serving, build the repository `Dockerfile`; it installs the
+API extra, runs Uvicorn on `TAILWAG_API_PORT` defaulting to `8000`, and exposes
+`GET /health` for container and load-balancer checks. See
+[AWS Planned Architecture](aws-planned-architecture.md) for the AWS topology and
+[AWS ECS Deployment](aws-ecs-deployment.md) for the ECS/Fargate API shape.
+
 `GET /health` is unauthenticated and does not initialize Neo4j or OpenAI clients. Provider health and memory API routes require:
 
 ```text
@@ -1012,7 +1018,7 @@ Import Slack APIs from the module, not the top-level package:
 from pathlib import Path
 
 from tailwag_memory import TailwagMemoryClient, load_settings
-from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+from tailwag_memory.slack_ingestion import SlackFilePollStateStore, SlackMemoryPoller, SlackWebApiClient
 
 settings = load_settings()
 
@@ -1021,7 +1027,7 @@ with TailwagMemoryClient.from_env() as memory:
     poller = SlackMemoryPoller(
         client=slack,
         episode_recorder=memory,
-        state_path=Path(".tailwag/slack-state.json"),
+        state_store=SlackFilePollStateStore(Path(".tailwag/slack-state.json")),
     )
     result = poller.poll_once("C0123456789", backfill_hours=2)
 
@@ -1032,7 +1038,19 @@ print(result.ingested_episode_ids)
 
 Fetches Slack history, replies, and user profiles through the Slack Web API.
 
-### `SlackMemoryPoller(client, episode_recorder, state_path, *, retention_class="standard", active_thread_hours=24.0, person_id_resolver=None)`
+### `SlackFilePollStateStore(path)`
+
+Persists Slack polling cursors in the JSON file shape used by the CLI.
+
+### `tailwag_memory.aws.SlackDynamoDBPollStateStore(table, *, channel_key="channel_id", version_attribute="version", lease_owner=None, lease_expires_at=None)`
+
+Persists Slack polling cursors in a DynamoDB-style table for AWS workers. The
+store implements the same `SlackPollStateStore` protocol as
+`SlackFilePollStateStore` and uses conditional writes to raise
+`SlackPollStateConflict` when a stale worker tries to save an older cursor
+version.
+
+### `SlackMemoryPoller(client, episode_recorder, state_store, *, retention_class="standard", active_thread_hours=24.0, person_id_resolver=None)`
 
 Creates a poller that converts Slack root messages and threads into Tailwag episodes.
 
@@ -1042,7 +1060,7 @@ Constructor parameters:
 | --- | --- | --- |
 | `client` | `SlackConversationClient` | Slack API client or test fake. |
 | `episode_recorder` | `EpisodeRecorder` | Object with `record_episode(episode, extract_memory=True)`. `TailwagMemoryClient` satisfies this and also exposes canonical email resolution. |
-| `state_path` | `Path` | JSON cursor state file. |
+| `state_store` | `SlackPollStateStore` | Poll cursor store. Use `SlackFilePollStateStore(Path(...))` for local JSON state or `SlackDynamoDBPollStateStore` for AWS DynamoDB-backed state. |
 | `retention_class` | `str` | Retention class assigned to Slack episodes. |
 | `active_thread_hours` | `float` | How long standalone roots stay active for later replies. |
 | `person_id_resolver` | `Callable[[str], str \| None] \| None` | Optional normalized-email resolver. When omitted, the poller uses `episode_recorder.canonical_person_id_by_email` when available. |

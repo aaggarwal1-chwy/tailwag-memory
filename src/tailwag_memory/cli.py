@@ -27,7 +27,7 @@ from .retrieval import (
     EventRetrievalService,
 )
 from .schema import initialize_schema
-from .slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+from .slack_ingestion import SlackFilePollStateStore, SlackMemoryPoller, SlackWebApiClient
 
 
 def _embedding_provider(settings: Settings) -> OpenAIEmbeddingProvider:
@@ -388,10 +388,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "slack":
             memory_client = TailwagMemoryClient(runner, settings)
             client = SlackWebApiClient(settings.slack_bot_token, include_email=args.include_email)
+            state_store = SlackFilePollStateStore(Path(args.state_file))
             poller = SlackMemoryPoller(
                 client,
                 memory_client,
-                Path(args.state_file),
+                state_store,
                 active_thread_hours=args.active_thread_hours,
             )
 

@@ -112,7 +112,7 @@ Slack ingestion is also available from Python. Import Slack adapter classes from
 from pathlib import Path
 
 from tailwag_memory import TailwagMemoryClient, load_settings
-from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+from tailwag_memory.slack_ingestion import SlackFilePollStateStore, SlackMemoryPoller, SlackWebApiClient
 
 settings = load_settings()
 
@@ -121,7 +121,7 @@ with TailwagMemoryClient.from_env() as memory:
     poller = SlackMemoryPoller(
         client=slack,
         episode_recorder=memory,
-        state_path=Path(".tailwag/slack-state.json"),
+        state_store=SlackFilePollStateStore(Path(".tailwag/slack-state.json")),
     )
     result = poller.poll_once(
         "C0123456789",
@@ -139,7 +139,7 @@ import time
 from pathlib import Path
 
 from tailwag_memory import TailwagMemoryClient, load_settings
-from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+from tailwag_memory.slack_ingestion import SlackFilePollStateStore, SlackMemoryPoller, SlackWebApiClient
 
 settings = load_settings()
 
@@ -148,7 +148,7 @@ with TailwagMemoryClient.from_env() as memory:
     poller = SlackMemoryPoller(
         client=slack,
         episode_recorder=memory,
-        state_path=Path(".tailwag/slack-state.json"),
+        state_store=SlackFilePollStateStore(Path(".tailwag/slack-state.json")),
         active_thread_hours=24.0,
     )
 
@@ -167,7 +167,7 @@ with TailwagMemoryClient.from_env() as memory:
 
 The same runtime requirements still apply: the Slack token must have the needed scopes, episode recording needs Neo4j configuration, and production episode embeddings need OpenAI configuration. A first package poll without `backfill_hours` only arms the cursor, just like the CLI. Use `force_backfill=True` only for one-shot package backfills; continuous loops should rely on the saved state cursor so they do not replay the same backfill window.
 
-Advanced callers can pass a fake Slack client that implements `history(channel, oldest, limit)`, `replies(channel, thread_ts, limit)`, and `user_profile(user_id)` for tests, or a custom `person_id_resolver` to map normalized Slack email addresses to caller-owned person IDs. `build_episode_from_slack_thread(channel=..., messages=..., client=...)` is available when a caller wants to convert Slack messages into an `EpisodeInput` without writing it. See [Memory Endpoints Reference](memory-endpoints.md#slack-endpoints) for constructor parameters and return fields.
+Advanced callers can pass a fake Slack client that implements `history(channel, oldest, limit)`, `replies(channel, thread_ts, limit)`, and `user_profile(user_id)` for tests, or a custom `SlackPollStateStore` implementation when polling state should live outside the local JSON file. `SlackFilePollStateStore(Path(...))` preserves the CLI's file-backed behavior. `tailwag_memory.aws.SlackDynamoDBPollStateStore` provides DynamoDB-backed cursor state for AWS workers. Callers can also pass a custom `person_id_resolver` to map normalized Slack email addresses to caller-owned person IDs. `build_episode_from_slack_thread(channel=..., messages=..., client=...)` is available when a caller wants to convert Slack messages into an `EpisodeInput` without writing it. See [Memory Endpoints Reference](memory-endpoints.md#slack-endpoints) for constructor parameters and return fields.
 
 ## Inspect Generated Memories
 

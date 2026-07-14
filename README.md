@@ -9,6 +9,9 @@ The focused docs are the source of truth:
 - [Architecture](docs/architecture.md): current scope, graph model, design boundaries, privacy/biometric boundaries, and deferred concepts.
 - [Python package integration guide](docs/integration-guide.md): installation from another repo, runtime configuration, setup sequence, and integration responsibilities.
 - [Memory endpoints reference](docs/memory-endpoints.md): Python APIs, service constructors, input models, return shapes, and optional HTTP routes.
+- [AWS planned architecture](docs/aws-planned-architecture.md): cloud topology, service interactions, background workers, and report publishing.
+- [AWS ECS deployment note](docs/aws-ecs-deployment.md): container image, ECS task shape, runtime config, and health checks for the Tailwag API.
+- [AWS deployment resources](deploy/aws/README.md): local CloudFormation, IAM policy examples, image build/push helper, and worker packaging helper for AWS deployment.
 - [CLI reference](docs/cli-reference.md): local schema setup, ingestion, retrieval, memory maintenance, inspect, and Slack command examples.
 - [Inspect reference](docs/inspect-reference.md): read-only report behavior, generated assets, filters, and affect report requirements.
 - [Slack ingestion guide](docs/slack-ingestion.md): Slack app setup, polling, state handling, and inspection queries.
