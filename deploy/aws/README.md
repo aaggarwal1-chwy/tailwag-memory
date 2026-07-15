@@ -9,6 +9,8 @@ The planned service topology is described in
 - `cloudformation/tailwag-memory-core.yaml`: shared AWS resources for the Tailwag API image and background worker flow.
 - `deployment.env.example`: shell environment values used by the helper script and AWS CLI examples.
 - `iam/tailwag-api-task-policy.example.json`: ECS task policy example for the Tailwag API container.
+- `iam/tailwag-github-actions-deploy-policy.example.json`: GitHub Actions dev deploy role permissions example.
+- `iam/tailwag-github-actions-deploy-trust.example.json`: GitHub Actions OIDC trust policy example.
 - `iam/tailwag-scheduler-policy.example.json`: EventBridge Scheduler role policy example for sending jobs to SQS.
 - `iam/tailwag-worker-policy.example.json`: Lambda worker policy example for queue, state, and report access.
 - `scheduler/slack-poll-schedule.example.json`: EventBridge Scheduler payload for recurring Slack poll jobs.
@@ -141,3 +143,11 @@ workers. Worker entrypoints should use:
 EventBridge Scheduler can use the JSON examples in `scheduler/` to enqueue
 recurring Slack poll jobs and daily report jobs. Replace channel IDs, ARNs,
 schedule expressions, and job payload fields before creating schedules.
+
+## GitHub Actions CI/CD
+
+The v1 CI/CD workflow is documented in
+[`docs/aws-cicd.md`](../../docs/aws-cicd.md). It assumes the runbook-created dev
+ECS service, ALB, VPC, and Neo4j resources already exist, then automates repeat
+deployments from `main` by pushing the API image to ECR, uploading an immutable
+worker zip to S3, updating this core stack, and rolling the ECS service.

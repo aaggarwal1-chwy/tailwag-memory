@@ -1,0 +1,333 @@
+name: Deploy AWS Dev
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-aws-dev
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  PROJECT_NAME: ${{ vars.PROJECT_NAME || 'aaggarwal1-tailwag' }}
+  ENVIRONMENT_NAME: ${{ vars.ENVIRONMENT_NAME || 'dev' }}
+  CORE_STACK_NAME: ${{ vars.CORE_STACK_NAME || 'aaggarwal1-tailwag-core-dev' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'aaggarwal1-tailwag-dev-api' }}
+  REPORTS_BUCKET_NAME: ${{ vars.REPORTS_BUCKET_NAME }}
+  WORKER_CODE_S3_BUCKET: ${{ vars.WORKER_CODE_S3_BUCKET }}
+  WORKER_SUBNET_IDS: ${{ vars.WORKER_SUBNET_IDS }}
+  WORKER_SECURITY_GROUP_IDS: ${{ vars.WORKER_SECURITY_GROUP_IDS }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'aaggarwal1-tailwag-cluster' }}
+  ECS_SERVICE: ${{ vars.ECS_SERVICE || 'aaggarwal1-tailwag-api-service' }}
+  ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY || 'aaggarwal1-tailwag-api-task' }}
+  ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME || 'tailwag-memory-api' }}
+  ECS_EXECUTION_ROLE_NAME: ${{ vars.ECS_EXECUTION_ROLE_NAME || 'aaggarwal1-tailwag-ecs-execution-role' }}
+  ECS_TASK_ROLE_NAME: ${{ vars.ECS_TASK_ROLE_NAME || 'aaggarwal1-tailwag-api-task-role' }}
+  ECS_LOG_GROUP: ${{ vars.ECS_LOG_GROUP || '/ecs/aaggarwal1-tailwag-api' }}
+  TAILWAG_ALB_BASE_URL: ${{ vars.TAILWAG_ALB_BASE_URL }}
+  RUN_API_WRITE_SMOKE: ${{ vars.RUN_API_WRITE_SMOKE || 'false' }}
+  RUN_WORKER_SMOKE: ${{ vars.RUN_WORKER_SMOKE || 'false' }}
+  NEO4J_URI_SECRET_ID: ${{ vars.NEO4J_URI_SECRET_ID || 'aaggarwal1-tailwag/neo4j-uri' }}
+  NEO4J_USER_SECRET_ID: ${{ vars.NEO4J_USER_SECRET_ID || 'aaggarwal1-tailwag/neo4j-user' }}
+  NEO4J_PASSWORD_SECRET_ID: ${{ vars.NEO4J_PASSWORD_SECRET_ID || 'aaggarwal1-tailwag/neo4j-password' }}
+  OPENAI_API_KEY_SECRET_ID: ${{ vars.OPENAI_API_KEY_SECRET_ID || 'aaggarwal1-tailwag/openai-api-key' }}
+  SLACK_BOT_TOKEN_SECRET_ID: ${{ vars.SLACK_BOT_TOKEN_SECRET_ID || 'aaggarwal1-tailwag/slack-bot-token' }}
+  TAILWAG_API_BEARER_TOKEN_SECRET_ID: ${{ vars.TAILWAG_API_BEARER_TOKEN_SECRET_ID || 'aaggarwal1-tailwag/api-bearer-token' }}
+
+jobs:
+  deploy:
+    name: Deploy dev
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate required configuration
+        run: |
+          missing=0
+          for name in AWS_ACCOUNT_ID AWS_ROLE_ARN WORKER_CODE_S3_BUCKET REPORTS_BUCKET_NAME; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is required in the GitHub dev environment"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Confirm AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Confirm core stack already exists
+        run: |
+          aws cloudformation describe-stacks \
+            --region "$AWS_REGION" \
+            --stack-name "$CORE_STACK_NAME" >/dev/null
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package for validation
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[api,aws]"
+
+      - name: Run unit tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests
+
+      - name: Validate CloudFormation template with AWS
+        run: |
+          aws cloudformation validate-template \
+            --template-body file://deploy/aws/cloudformation/tailwag-memory-core.yaml \
+            --region "$AWS_REGION"
+
+      - name: Confirm ECR repository is stack-owned
+        run: |
+          aws ecr describe-repositories \
+            --region "$AWS_REGION" \
+            --repository-names "$ECR_REPOSITORY" >/dev/null
+
+      - name: Ensure ECS log group exists
+        run: |
+          existing="$(
+            aws logs describe-log-groups \
+              --region "$AWS_REGION" \
+              --log-group-name-prefix "$ECS_LOG_GROUP" \
+              --query "logGroups[?logGroupName=='${ECS_LOG_GROUP}'].logGroupName" \
+              --output text
+          )"
+          if [ "$existing" != "$ECS_LOG_GROUP" ]; then
+            aws logs create-log-group \
+              --region "$AWS_REGION" \
+              --log-group-name "$ECS_LOG_GROUP"
+          fi
+
+      - name: Build and push API image
+        id: api-image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          image_uri="$(deploy/aws/scripts/build-push-api-image.sh)"
+          echo "image-uri=$image_uri" >> "$GITHUB_OUTPUT"
+
+      - name: Package worker zip
+        id: worker-zip
+        run: |
+          zip_path="$(deploy/aws/scripts/package-worker-zip.sh)"
+          python - "$zip_path" <<'PY'
+          import sys
+          import zipfile
+
+          zip_path = sys.argv[1]
+          with zipfile.ZipFile(zip_path) as archive:
+              names = set(archive.namelist())
+          required = "tailwag_memory/aws/handlers.py"
+          if required not in names:
+              raise SystemExit(f"{zip_path} does not contain {required}")
+          PY
+          worker_key="lambda/${GITHUB_SHA}/tailwag-memory-worker.zip"
+          aws s3 cp "$zip_path" "s3://${WORKER_CODE_S3_BUCKET}/${worker_key}" \
+            --region "$AWS_REGION"
+          echo "worker-key=$worker_key" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy core AWS stack
+        run: |
+          params=(
+            "ProjectName=${PROJECT_NAME}"
+            "EnvironmentName=${ENVIRONMENT_NAME}"
+            "ReportsBucketName=${REPORTS_BUCKET_NAME}"
+            "CreateWorkerLambdas=true"
+            "WorkerCodeS3Bucket=${WORKER_CODE_S3_BUCKET}"
+            "WorkerCodeS3Key=${{ steps.worker-zip.outputs.worker-key }}"
+            "Neo4jUriSecretId=${NEO4J_URI_SECRET_ID}"
+            "Neo4jUserSecretId=${NEO4J_USER_SECRET_ID}"
+            "Neo4jPasswordSecretId=${NEO4J_PASSWORD_SECRET_ID}"
+            "OpenAIApiKeySecretId=${OPENAI_API_KEY_SECRET_ID}"
+            "SlackBotTokenSecretId=${SLACK_BOT_TOKEN_SECRET_ID}"
+            "TailwagApiBearerTokenSecretId=${TAILWAG_API_BEARER_TOKEN_SECRET_ID}"
+          )
+          if [ -n "$WORKER_SUBNET_IDS" ]; then
+            params+=("WorkerSubnetIds=${WORKER_SUBNET_IDS}")
+          fi
+          if [ -n "$WORKER_SECURITY_GROUP_IDS" ]; then
+            params+=("WorkerSecurityGroupIds=${WORKER_SECURITY_GROUP_IDS}")
+          fi
+          aws cloudformation deploy \
+            --region "$AWS_REGION" \
+            --stack-name "$CORE_STACK_NAME" \
+            --template-file deploy/aws/cloudformation/tailwag-memory-core.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "${params[@]}"
+
+      - name: Render ECS task definition
+        id: task-definition
+        env:
+          IMAGE_URI: ${{ steps.api-image.outputs.image-uri }}
+        run: |
+          execution_role_arn="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${ECS_EXECUTION_ROLE_NAME}"
+          task_role_arn="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${ECS_TASK_ROLE_NAME}"
+          jq \
+            --arg family "$ECS_TASK_FAMILY" \
+            --arg container "$ECS_CONTAINER_NAME" \
+            --arg image "$IMAGE_URI" \
+            --arg region "$AWS_REGION" \
+            --arg logGroup "$ECS_LOG_GROUP" \
+            --arg executionRoleArn "$execution_role_arn" \
+            --arg taskRoleArn "$task_role_arn" \
+            --arg neo4jUri "$NEO4J_URI_SECRET_ID" \
+            --arg neo4jUser "$NEO4J_USER_SECRET_ID" \
+            --arg neo4jPassword "$NEO4J_PASSWORD_SECRET_ID" \
+            --arg openaiApiKey "$OPENAI_API_KEY_SECRET_ID" \
+            --arg apiBearerToken "$TAILWAG_API_BEARER_TOKEN_SECRET_ID" \
+            '.family = $family
+              | .executionRoleArn = $executionRoleArn
+              | .taskRoleArn = $taskRoleArn
+              | .containerDefinitions[0].name = $container
+              | .containerDefinitions[0].image = $image
+              | .containerDefinitions[0].logConfiguration.options["awslogs-group"] = $logGroup
+              | .containerDefinitions[0].logConfiguration.options["awslogs-region"] = $region
+              | .containerDefinitions[0].secrets =
+                [
+                  {"name":"NEO4J_URI","valueFrom":$neo4jUri},
+                  {"name":"NEO4J_USER","valueFrom":$neo4jUser},
+                  {"name":"NEO4J_PASSWORD","valueFrom":$neo4jPassword},
+                  {"name":"OPENAI_API_KEY","valueFrom":$openaiApiKey},
+                  {"name":"TAILWAG_API_BEARER_TOKEN","valueFrom":$apiBearerToken}
+                ]' \
+            deploy/ecs-task-definition.example.json > task-definition.json
+          task_definition_arn="$(aws ecs register-task-definition \
+            --region "$AWS_REGION" \
+            --cli-input-json file://task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)"
+          echo "task-definition-arn=$task_definition_arn" >> "$GITHUB_OUTPUT"
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --region "$AWS_REGION" \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "${{ steps.task-definition.outputs.task-definition-arn }}" \
+            --force-new-deployment
+          aws ecs wait services-stable \
+            --region "$AWS_REGION" \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
+
+      - name: Smoke test API health
+        if: env.TAILWAG_ALB_BASE_URL != ''
+        env:
+          TAILWAG_API_BEARER_TOKEN: ${{ secrets.TAILWAG_API_BEARER_TOKEN }}
+        run: |
+          base_url="${TAILWAG_ALB_BASE_URL%/}"
+          curl -fsS "$base_url/health"
+          if [ -n "$TAILWAG_API_BEARER_TOKEN" ]; then
+            curl -fsS \
+              -H "Authorization: Bearer ${TAILWAG_API_BEARER_TOKEN}" \
+              "$base_url/argos/providers/memory/resources/memory/health"
+          else
+            echo "TAILWAG_API_BEARER_TOKEN secret is unset; skipped authenticated smoke check"
+          fi
+
+      - name: Smoke test API writes
+        if: env.TAILWAG_ALB_BASE_URL != '' && env.RUN_API_WRITE_SMOKE == 'true'
+        env:
+          TAILWAG_API_BEARER_TOKEN: ${{ secrets.TAILWAG_API_BEARER_TOKEN }}
+        run: |
+          if [ -z "$TAILWAG_API_BEARER_TOKEN" ]; then
+            echo "::error::TAILWAG_API_BEARER_TOKEN is required for API write smoke tests"
+            exit 1
+          fi
+          base_url="${TAILWAG_ALB_BASE_URL%/}"
+          smoke_id="ci_smoke_${GITHUB_SHA}"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${TAILWAG_API_BEARER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "$base_url/argos/providers/memory/resources/memory/request/episodes_record" \
+            -d "$(jq -n --arg id "$smoke_id" '{
+              episode: {
+                id: $id,
+                episode_type: "conversation",
+                start_time: "2026-07-15T12:00:00+00:00",
+                end_time: "2026-07-15T12:02:00+00:00",
+                transcript: "Jamie: Tailwag CI deployed successfully.",
+                retention_class: "standard",
+                place: {building_code: "AWS", room_id: "ci-smoke"},
+                participants: [{id: "person_ci_smoke", display_name: "CI Smoke", role: "speaker"}]
+              },
+              extract_memory: false
+            }')"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${TAILWAG_API_BEARER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "$base_url/argos/providers/memory/resources/memory/request/person_context" \
+            -d '{"person_id":"person_ci_smoke","current_text":"Tailwag AWS CI smoke test","memory_limit":12,"recent_episode_limit":5}'
+
+      - name: Smoke test workers
+        if: env.RUN_WORKER_SMOKE == 'true'
+        run: |
+          memory_queue_url="$(
+            aws cloudformation describe-stacks \
+              --region "$AWS_REGION" \
+              --stack-name "$CORE_STACK_NAME" \
+              --query "Stacks[0].Outputs[?OutputKey=='MemoryJobsQueueUrl'].OutputValue" \
+              --output text
+          )"
+          report_queue_url="$(
+            aws cloudformation describe-stacks \
+              --region "$AWS_REGION" \
+              --stack-name "$CORE_STACK_NAME" \
+              --query "Stacks[0].Outputs[?OutputKey=='ReportJobsQueueUrl'].OutputValue" \
+              --output text
+          )"
+          smoke_suffix="${GITHUB_SHA::12}"
+          aws sqs send-message \
+            --region "$AWS_REGION" \
+            --queue-url "$memory_queue_url" \
+            --message-body "{\"job_type\":\"memory_extract_episode\",\"job_id\":\"ci-extract-${smoke_suffix}\",\"episode_id\":\"ci_smoke_${GITHUB_SHA}\",\"person_id\":\"person_ci_smoke\"}"
+          aws sqs send-message \
+            --region "$AWS_REGION" \
+            --queue-url "$report_queue_url" \
+            --message-body "{\"job_type\":\"report_generate\",\"job_id\":\"ci-report-${smoke_suffix}\",\"reports\":[\"memory_items\"],\"output_prefix\":\"ci-smoke/${GITHUB_SHA}\",\"limit\":25}"
+          sleep 30
+          for queue_name in \
+            "${PROJECT_NAME}-${ENVIRONMENT_NAME}-memory-jobs-dlq" \
+            "${PROJECT_NAME}-${ENVIRONMENT_NAME}-report-jobs-dlq"; do
+            dlq_url="$(aws sqs get-queue-url --region "$AWS_REGION" --queue-name "$queue_name" --query QueueUrl --output text)"
+            visible="$(
+              aws sqs get-queue-attributes \
+                --region "$AWS_REGION" \
+                --queue-url "$dlq_url" \
+                --attribute-names ApproximateNumberOfMessages \
+                --query 'Attributes.ApproximateNumberOfMessages' \
+                --output text
+            )"
+            if [ "$visible" != "0" ]; then
+              echo "::error::$queue_name has $visible visible messages"
+              exit 1
+            fi
+          done
