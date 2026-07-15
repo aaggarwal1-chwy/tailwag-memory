@@ -51,12 +51,12 @@ Parameters:
     Description: Set to true to create Lambda workers and SQS event source mappings.
   WorkerCodeS3Bucket:
     Type: String
-    Default: ""
-    Description: S3 bucket containing the packaged worker Lambda zip. Required when CreateWorkerLambdas is true.
+    Default: tailwag-worker-code-placeholder
+    Description: S3 bucket containing the packaged worker Lambda zip. Replace this placeholder when CreateWorkerLambdas is true.
   WorkerCodeS3Key:
     Type: String
-    Default: ""
-    Description: S3 key for the packaged worker Lambda zip. Required when CreateWorkerLambdas is true.
+    Default: lambda/tailwag-memory-worker-placeholder.zip
+    Description: S3 key for the packaged worker Lambda zip. Replace this placeholder when CreateWorkerLambdas is true.
   WorkerRuntime:
     Type: String
     Default: python3.12
@@ -133,6 +133,15 @@ Parameters:
     Type: String
     Default: aaggarwal1-tailwag/api-bearer-token
     Description: Secrets Manager secret id or ARN whose SecretString is TAILWAG_API_BEARER_TOKEN.
+
+Rules:
+  WorkerCodeRequiredWhenWorkersEnabled:
+    RuleCondition: !Equals [!Ref CreateWorkerLambdas, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref WorkerCodeS3Bucket, tailwag-worker-code-placeholder]]
+        AssertDescription: WorkerCodeS3Bucket must be set to the uploaded worker zip bucket when CreateWorkerLambdas is true.
+      - Assert: !Not [!Equals [!Ref WorkerCodeS3Key, lambda/tailwag-memory-worker-placeholder.zip]]
+        AssertDescription: WorkerCodeS3Key must be set to the uploaded worker zip key when CreateWorkerLambdas is true.
 
 Conditions:
   HasReportsBucketName: !Not [!Equals [!Ref ReportsBucketName, ""]]
