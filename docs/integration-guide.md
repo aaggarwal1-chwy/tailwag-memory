@@ -50,22 +50,23 @@ Manager mapping.
 
 ## HTTP Service Integration For Argos Or Another Caller
 
-The deployed AWS environment exposes Tailwag as a private HTTP service. A
-caller should use that service boundary instead of connecting directly to
-Neo4j or importing Tailwag's AWS worker internals.
+The deployed AWS environment exposes Tailwag through a public HTTPS API Gateway
+backed by a private ALB and ECS service. A caller should use that service
+boundary instead of connecting directly to Neo4j or importing Tailwag's AWS
+worker internals.
 
 The live development endpoint is:
 
 ```text
-http://internal-aaggarwal1-tailwag-alb-1363405968.us-east-2.elb.amazonaws.com
+https://a9vhnyd929.execute-api.us-east-2.amazonaws.com
 ```
 
-It is an internal ALB. The caller must run in the shared VPC or have an
-approved VPN, transit, or tunnel route into it. Store these values in the
-caller's runtime configuration or secret store:
+The caller needs ordinary outbound HTTPS connectivity; it does not need a route
+into the Tailwag VPC. Store these values in the caller's runtime configuration
+or secret store:
 
 ```text
-TAILWAG_BASE_URL=http://internal-aaggarwal1-tailwag-alb-1363405968.us-east-2.elb.amazonaws.com
+TAILWAG_BASE_URL=https://a9vhnyd929.execute-api.us-east-2.amazonaws.com
 TAILWAG_BEARER_TOKEN=<value from aaggarwal1-tailwag/api-bearer-token>
 ```
 
@@ -161,7 +162,7 @@ person node.
 
 ### Caller rollout checklist
 
-1. Confirm the caller can resolve and reach the internal ALB.
+1. Confirm the caller can resolve and reach the public API Gateway endpoint.
 2. Load the bearer token from the caller's secret store.
 3. Check unauthenticated `/health`.
 4. Check authenticated

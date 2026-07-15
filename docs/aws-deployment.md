@@ -16,6 +16,8 @@ control.
 The functional development deployment is live:
 
 - the core CloudFormation stack is `UPDATE_COMPLETE`
+- the edge CloudFormation stack is `CREATE_COMPLETE`
+- the public API Gateway health and authenticated provider paths are verified
 - the ECS API service is active with one healthy Fargate task
 - the internal Application Load Balancer has one healthy target
 - Neo4j is running on a private EC2 instance with encrypted EBS storage
@@ -28,16 +30,21 @@ The functional development deployment is live:
 - all resources are grouped under the AWS Application
   `aaggarwal1-tailwag-dev`
 
-The environment is a private development deployment, not a production-ready
-public service. See [Known Gaps](#known-gaps).
+The environment has a public HTTPS entry point to a private development
+backend. It is not a production-ready public service. See
+[Known Gaps](#known-gaps).
 
 ## Architecture
 
 ```text
 Caller such as Argos
-  (inside the VPC, or connected by an approved VPN/tunnel)
+  (ordinary outbound HTTPS)
         |
-        | HTTP + bearer token
+        | HTTPS + bearer token
+        v
+API Gateway HTTP API
+        |
+        | VPC Link, HTTP :80
         v
 Internal ALB :80
         |
@@ -77,12 +84,16 @@ resources and security groups inside that VPC.
 | AWS account | `032318240470` |
 | Region | `us-east-2` |
 | AWS Application | `aaggarwal1-tailwag-dev` |
-| CloudFormation stack | `aaggarwal1-tailwag-core-dev` |
+| Core CloudFormation stack | `aaggarwal1-tailwag-core-dev` |
+| Edge CloudFormation stack | `aaggarwal1-tailwag-edge-dev` |
 | Resource prefix | `aaggarwal1-tailwag` |
 | Environment | `dev` |
 
 Resources carry the `awsApplication` tag for the Tailwag application. The
 shared VPC and shared subnets intentionally do not.
+
+`AWS::ApiGatewayV2::VpcLink` is not a supported standalone AppRegistry
+resource-group type, so it is represented through the associated edge stack.
 
 ### Network
 
@@ -94,14 +105,16 @@ shared VPC and shared subnets intentionally do not.
 | Private subnet, `us-east-2b` | `subnet-04c5d8d8ca431dc7f` |
 | Private subnet, `us-east-2c` | `subnet-0ba5e9930bd4e3815` |
 | ALB security group | `sg-0cd8c5bc8a094c8ef` |
+| API Gateway VPC Link security group | `sg-03a4ec3efc17d1f02` |
 | API security group | `sg-09d7a300548c72ac6` |
 | Worker security group | `sg-0c8c107cc03cec6c4` |
 | Neo4j security group | `sg-026c58f7ac8c20938` |
 
-The internal ALB accepts HTTP from the approved VPC CIDR. The API security
-group accepts port `8000` only from the ALB security group. Neo4j accepts Bolt
-`7687` only from the API and worker security groups. Neo4j Browser is not
-publicly exposed.
+The internal ALB accepts HTTP from the approved VPC CIDR and the API Gateway
+VPC Link security group. The VPC Link security group sends TCP `80` only to
+the ALB security group. The API security group accepts port `8000` only from
+the ALB security group. Neo4j accepts Bolt `7687` only from the API and worker
+security groups. Neo4j Browser is not publicly exposed.
 
 ### API
 
@@ -114,17 +127,26 @@ publicly exposed.
 | Deployed image tag | `dev-001` |
 | Internal ALB | `aaggarwal1-tailwag-alb` |
 | Target group | `aaggarwal1-tailwag-api-tg` |
+| API Gateway HTTP API | `a9vhnyd929` |
+| API Gateway VPC Link | `dg0r0q` |
 | Container port | `8000` |
 | Health path | `/health` |
 
-The internal API base URL is:
+The normal caller base URL is:
+
+```text
+https://a9vhnyd929.execute-api.us-east-2.amazonaws.com
+```
+
+The private backend URL is:
 
 ```text
 http://internal-aaggarwal1-tailwag-alb-1363405968.us-east-2.elb.amazonaws.com
 ```
 
-That hostname resolves only through an approved network path into the VPC. It
-is not intended to be reachable from the public internet.
+External callers should not use the private backend URL. API Gateway preserves
+the request path and forwards the `Authorization` header to Tailwag through
+the VPC Link.
 
 ### Neo4j
 
@@ -338,14 +360,11 @@ Neo4j or read the worker queues and DynamoDB tables.
 
 ### Network and credentials
 
-The caller must have a network path to the internal ALB, for example:
+The caller needs outbound HTTPS connectivity to the API Gateway endpoint. No
+VPN, transit route, or Tailwag VPC access is required.
 
-- an ECS task, EC2 instance, or Lambda in the shared VPC
-- an approved corporate VPN or transit-network route
-- an operator-only tunnel for a temporary smoke test
-
-For a laptop-only smoke test, forward a local port through the SSM-managed
-Neo4j host to the internal ALB:
+For an operator-only test of the private backend, a local port can still be
+forwarded through the SSM-managed Neo4j host:
 
 ```bash
 aws ssm start-session \
@@ -359,15 +378,14 @@ aws ssm start-session \
   }'
 ```
 
-Keep the session open and set `TAILWAG_BASE_URL=http://localhost:8080` in the
-laptop caller. This tunnel is for operator testing; a persistent Argos runtime
-needs an approved durable network path.
+Keep the session open and set `TAILWAG_BASE_URL=http://localhost:8080` only
+for that backend test. Persistent callers should use API Gateway.
 
 Give the caller these runtime values through its own secret/configuration
 system:
 
 ```text
-TAILWAG_BASE_URL=http://internal-aaggarwal1-tailwag-alb-1363405968.us-east-2.elb.amazonaws.com
+TAILWAG_BASE_URL=https://a9vhnyd929.execute-api.us-east-2.amazonaws.com
 TAILWAG_BEARER_TOKEN=<value from aaggarwal1-tailwag/api-bearer-token>
 ```
 
@@ -511,6 +529,9 @@ clear rollback target.
 Use the CloudFormation template under `deploy/aws/cloudformation/` and preserve
 the stack's `awsApplication`, project, environment, and governance tags. Review
 a change set before applying replacement-prone or cost-increasing changes.
+Associate every Tailwag stack with the existing `aaggarwal1-tailwag-dev`
+application using `APPLY_APPLICATION_TAG`; do not create per-stack
+applications.
 
 ### Schema changes
 
@@ -527,6 +548,11 @@ aws cloudformation describe-stacks \
   --region us-east-2 \
   --stack-name aaggarwal1-tailwag-core-dev \
   --query 'Stacks[0].StackStatus'
+
+aws cloudformation describe-stacks \
+  --region us-east-2 \
+  --stack-name aaggarwal1-tailwag-edge-dev \
+  --query 'Stacks[0].{status:StackStatus,outputs:Outputs}'
 
 aws ecs describe-services \
   --region us-east-2 \
@@ -547,6 +573,7 @@ Check CloudWatch log groups:
 - `/aws/lambda/aaggarwal1-tailwag-dev-poll-worker`
 - `/aws/lambda/aaggarwal1-tailwag-dev-memory-worker`
 - `/aws/lambda/aaggarwal1-tailwag-dev-report-worker`
+- `/aws/apigateway/aaggarwal1-tailwag-dev`
 
 Any visible message in a DLQ requires investigation before replay.
 
@@ -578,7 +605,7 @@ The deployed development environment does not yet have:
 - production CloudWatch alarms and alert routing
 - a documented automated Neo4j EBS snapshot policy
 - confirmed DynamoDB point-in-time recovery for both state tables
-- a completed external Argos configuration and rollout test
+- a completed live robot Argos conversation and memory-retrieval rollout test
 
 These are production-hardening or external-integration tasks, not missing core
 AWS runtime components. Broad network exposure, credential rotation, resource
@@ -587,6 +614,7 @@ replacement, or materially cost-increasing changes require explicit approval.
 ## Repository Deployment Resources
 
 - [`deploy/aws/cloudformation/tailwag-memory-core.yaml`](../deploy/aws/cloudformation/tailwag-memory-core.yaml)
+- [`deploy/aws/cloudformation/tailwag-memory-edge.yaml`](../deploy/aws/cloudformation/tailwag-memory-edge.yaml)
 - [`deploy/ecs-task-definition.example.json`](../deploy/ecs-task-definition.example.json)
 - [`deploy/aws/scripts/build-push-api-image.sh`](../deploy/aws/scripts/build-push-api-image.sh)
 - [`deploy/aws/scripts/package-worker-zip.sh`](../deploy/aws/scripts/package-worker-zip.sh)

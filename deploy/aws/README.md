@@ -8,6 +8,7 @@ workflow are documented in
 ## Files
 
 - `cloudformation/tailwag-memory-core.yaml`: shared AWS resources for the Tailwag API image and background worker flow.
+- `cloudformation/tailwag-memory-edge.yaml`: public HTTPS API Gateway and private VPC Link to the Tailwag ALB.
 - `deployment.env.example`: shell environment values used by the helper script and AWS CLI examples.
 - `iam/tailwag-api-task-policy.example.json`: ECS task policy example for the Tailwag API container.
 - `iam/tailwag-github-actions-deploy-policy.example.json`: GitHub Actions dev deploy role permissions example.
@@ -108,6 +109,66 @@ The examples use one Secrets Manager namespace for all Tailwag runtime secrets:
 - `aaggarwal1-tailwag/slack-bot-token`
 - `aaggarwal1-tailwag/api-bearer-token`
 
+## Edge Stack
+
+The edge stack creates an API Gateway HTTP API, a VPC Link to the existing
+private ALB listener, a dedicated security group, ALB ingress from that security
+group, and metadata-only access logs. API Gateway performs no authorization;
+Tailwag continues to validate the existing bearer token.
+
+Deploy the live development edge with:
+
+```bash
+aws cloudformation deploy \
+  --region us-east-2 \
+  --stack-name aaggarwal1-tailwag-edge-dev \
+  --template-file deploy/aws/cloudformation/tailwag-memory-edge.yaml \
+  --parameter-overrides \
+    ProjectName=aaggarwal1-tailwag \
+    EnvironmentName=dev \
+    VpcId=vpc-00914e14c0001c9d8 \
+    VpcLinkSubnetIds=subnet-00f10aeac0f8d4ad5,subnet-04c5d8d8ca431dc7f \
+    AlbListenerArn=arn:aws:elasticloadbalancing:us-east-2:032318240470:listener/app/aaggarwal1-tailwag-alb/0a2bc296c3d68f79/93a7f8faa0d7950f \
+    AlbSecurityGroupId=sg-0cd8c5bc8a094c8ef \
+  --tags \
+    awsApplication=arn:aws:resource-groups:us-east-2:032318240470:group/aaggarwal1-tailwag-dev/04671zpuoetw1clhbngkthqih7 \
+    Project=aaggarwal1-tailwag \
+    Environment=dev \
+    chewy:environment=dev \
+    chewy:owner_email=dl-robotics@chewy.com \
+    chewy:cost_center=demm \
+    chewy:app_name=physical_ai_robotics \
+    chewy:data_classification=internal
+```
+
+Associate a newly created edge stack with the existing AWS Application using
+`APPLY_APPLICATION_TAG`, matching the core stack. Do not create a second
+application:
+
+```bash
+EDGE_STACK_ARN="$(aws cloudformation describe-stacks \
+  --region us-east-2 \
+  --stack-name aaggarwal1-tailwag-edge-dev \
+  --query 'Stacks[0].StackId' \
+  --output text)"
+
+aws servicecatalog-appregistry associate-resource \
+  --region us-east-2 \
+  --application 04671zpuoetw1clhbngkthqih7 \
+  --resource "$EDGE_STACK_ARN" \
+  --resource-type CFN_STACK \
+  --options APPLY_APPLICATION_TAG
+```
+
+The stack output `PublicApiEndpoint` is the caller base URL. The generated
+`execute-api` URL stays stable for normal stack updates, but changes if the
+API resource or entire stack is replaced.
+
+AppRegistry lists the edge stack and supported tagged resources such as the
+HTTP API, log group, and security group. `AWS::ApiGatewayV2::VpcLink` is not a
+supported standalone AppRegistry resource-group type; it remains managed and
+accounted for as a resource of the associated edge stack.
+
 ## Build And Push The API Image
 
 Copy the example values and set the account, region, and tag:
@@ -131,7 +192,8 @@ builds the local `Dockerfile`, tags the image, and pushes it.
 ## Runtime Wiring
 
 The ECS API service uses the pushed image and the existing FastAPI container
-entrypoint. Argos calls the Tailwag API through the ECS service or load balancer.
+entrypoint. External callers use API Gateway; traffic then crosses the VPC Link
+and private ALB to the ECS service.
 
 The SQS, DynamoDB, and S3 resources are the AWS-side dependencies for background
 workers. Worker entrypoints should use:
