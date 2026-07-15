@@ -8,10 +8,10 @@ deployments only: it builds and pushes the API image, uploads an immutable
 worker zip, updates the core CloudFormation stack, registers a new ECS task
 definition, and rolls the existing ECS service.
 
-The first-time AWS environment setup still follows the
-[Beginner AWS Deployment Runbook](aws-beginner-deployment-runbook.md). In v1,
-CI/CD does not create the VPC, subnets, ALB, ECS cluster, ECS service, Neo4j
-EC2 instance, ECS task roles, EventBridge schedules, or CloudWatch alarms.
+The first-time AWS environment setup and live resource inventory are documented
+in [AWS Deployment And Operations](aws-deployment.md). In v1, CI/CD does not
+create the VPC, subnets, ALB, ECS cluster, ECS service, Neo4j EC2 instance, ECS
+task roles, EventBridge schedules, or CloudWatch alarms.
 
 ## Workflows
 
@@ -122,7 +122,8 @@ without separate resource names and a separate GitHub environment.
 
 Before the first workflow deploy:
 
-1. Complete the one-time AWS setup in the beginner runbook through ECS service
+1. Complete the one-time AWS setup described in
+   [AWS Deployment And Operations](aws-deployment.md) through ECS service
    creation.
 2. Confirm the core CloudFormation stack already exists. The workflow refuses to
    push an image before the stack exists so the ECR repository stays stack-owned.
@@ -149,10 +150,10 @@ curl -H "Authorization: Bearer $TAILWAG_API_BEARER_TOKEN" \
   "$TAILWAG_ALB/argos/providers/memory/resources/memory/health"
 ```
 
-For worker validation, use the manual SQS smoke tests in the beginner runbook
-after a deploy, or set `RUN_API_WRITE_SMOKE=true` and `RUN_WORKER_SMOKE=true`
-for the GitHub `dev` environment once the smoke writes are acceptable in dev.
-Confirm:
+For worker validation, use the manual SQS smoke tests in
+[AWS Deployment And Operations](aws-deployment.md) after a deploy, or set
+`RUN_API_WRITE_SMOKE=true` and `RUN_WORKER_SMOKE=true` for the GitHub `dev`
+environment once the smoke writes are acceptable in dev. Confirm:
 
 - Lambda logs have no handler startup errors
 - SQS DLQs remain empty
