@@ -195,6 +195,59 @@ The Neo4j password is the value originally supplied through the repository
 `.env`. Secret values must never be committed, copied into documentation, or
 placed directly in shell history when a safer retrieval mechanism is available.
 
+## View Reports In S3
+
+Generated reports are stored in the private reports bucket in `us-east-2`.
+The operator needs AWS CLI credentials for account `032318240470` and read
+access to the bucket. Verify the active identity, then list the available
+report prefixes and files:
+
+```bash
+aws sts get-caller-identity --query "{Account:Account,Arn:Arn}" --output json
+
+aws s3 ls \
+  s3://aaggarwal1-tailwag-reports-032318240470-us-east-2/ \
+  --recursive \
+  --region us-east-2
+```
+
+Choose a prefix from that listing. For example, download the
+`manual-smoke-002` report and its shared browser assets with:
+
+```bash
+REPORT_PREFIX=manual-smoke-002
+mkdir -p "/tmp/tailwag-report/${REPORT_PREFIX}"
+
+aws s3 cp \
+  "s3://aaggarwal1-tailwag-reports-032318240470-us-east-2/${REPORT_PREFIX}/" \
+  "/tmp/tailwag-report/${REPORT_PREFIX}/" \
+  --recursive \
+  --region us-east-2
+```
+
+Download the whole prefix rather than only one HTML object. The report pages
+load `tailwag-inspect.css` and `tailwag-inspect.js` from the same directory.
+
+Open a downloaded HTML file directly, or serve the directory locally:
+
+```bash
+python3 -m http.server 8000 \
+  --directory "/tmp/tailwag-report/${REPORT_PREFIX}"
+```
+
+Keep that process running and browse to the report that exists in the prefix,
+for example:
+
+```text
+http://localhost:8000/tailwag-memory-items.html
+http://localhost:8000/tailwag-person-timeline.html
+http://localhost:8000/tailwag-followup-validity.html
+```
+
+Only report types requested by the corresponding report job will be present.
+The bucket can also be browsed in the AWS S3 console, but downloading the full
+prefix is the reliable way to preserve the relative report asset links.
+
 ## Connect To Neo4j From A Laptop
 
 Neo4j is private by design. Use AWS Systems Manager port forwarding; do not add
