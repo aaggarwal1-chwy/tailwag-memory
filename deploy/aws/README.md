@@ -11,8 +11,6 @@ workflow are documented in
 - `cloudformation/tailwag-memory-edge.yaml`: public HTTPS API Gateway and private VPC Link to the Tailwag ALB.
 - `deployment.env.example`: shell environment values used by the helper script and AWS CLI examples.
 - `iam/tailwag-api-task-policy.example.json`: ECS task policy example for the Tailwag API container.
-- `iam/tailwag-github-actions-deploy-policy.example.json`: GitHub Actions dev deploy role permissions example.
-- `iam/tailwag-github-actions-deploy-trust.example.json`: GitHub Actions OIDC trust policy example.
 - `iam/tailwag-scheduler-policy.example.json`: EventBridge Scheduler role policy example for sending jobs to SQS.
 - `iam/tailwag-worker-policy.example.json`: Lambda worker policy example for queue, state, and report access.
 - `scheduler/slack-poll-schedule.example.json`: EventBridge Scheduler payload for recurring Slack poll jobs.
@@ -207,10 +205,10 @@ EventBridge Scheduler can use the JSON examples in `scheduler/` to enqueue
 recurring Slack poll jobs and daily report jobs. Replace channel IDs, ARNs,
 schedule expressions, and job payload fields before creating schedules.
 
-## GitHub Actions CI/CD
+## Updating The Deployed Application
 
-The v1 CI/CD workflow is documented in
-[`docs/aws-cicd.md`](../../docs/aws-cicd.md). It assumes the runbook-created dev
-ECS service, ALB, VPC, and Neo4j resources already exist, then automates repeat
-deployments from `main` by pushing the API image to ECR, uploading an immutable
-worker zip to S3, updating this core stack, and rolling the ECS service.
+Repository changes are deployed by an authenticated operator. Follow
+[`docs/aws-manual-updates.md`](../../docs/aws-manual-updates.md) for API image,
+worker package, verification, and rollback commands. Normal application updates
+reuse the existing core and edge stacks; they do not recreate API Gateway, the
+VPC Link, ALB, or Neo4j.

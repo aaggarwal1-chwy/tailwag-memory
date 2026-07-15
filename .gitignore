@@ -7,4 +7,6 @@ __pycache__/
 build/
 dist/
 .env
+deploy/aws/deployment.env
+task-definition.json
 .tailwag/

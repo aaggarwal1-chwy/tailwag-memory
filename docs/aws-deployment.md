@@ -547,7 +547,10 @@ For the complete route catalog and schemas, see
 
 ## Deploy Application Changes
 
-There is no automatic repository-to-AWS synchronization yet.
+Repository changes are deployed manually by an authenticated operator. The
+complete command-by-command procedure is in
+[AWS Manual Updates](aws-manual-updates.md). There is no repository-triggered
+deployment.
 
 ### API changes
 
@@ -653,7 +656,6 @@ an avoidable outage.
 The deployed development environment does not yet have:
 
 - HTTPS on the internal ALB
-- automated CI/CD from repository changes
 - production CloudWatch alarms and alert routing
 - a documented automated Neo4j EBS snapshot policy
 - confirmed DynamoDB point-in-time recovery for both state tables

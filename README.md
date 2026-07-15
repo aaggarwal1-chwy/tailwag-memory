@@ -11,7 +11,7 @@ The focused docs are the source of truth:
 - [Memory endpoints reference](docs/memory-endpoints.md): Python APIs, service constructors, input models, return shapes, and optional HTTP routes.
 - [AWS deployment and operations](docs/aws-deployment.md): current live resources, private network topology, laptop Neo4j access, caller hookup, deployment workflow, verification, and known gaps.
 - [AWS deployment resources](deploy/aws/README.md): local CloudFormation, IAM policy examples, image build/push helper, and worker packaging helper for AWS deployment.
-- [AWS CI/CD](docs/aws-cicd.md): GitHub Actions validation and automatic dev deployment to existing AWS resources.
+- [AWS manual updates](docs/aws-manual-updates.md): operator-run API, worker, and infrastructure update procedures with verification and rollback.
 - [CLI reference](docs/cli-reference.md): local schema setup, ingestion, retrieval, memory maintenance, inspect, and Slack command examples.
 - [Inspect reference](docs/inspect-reference.md): read-only report behavior, generated assets, filters, and affect report requirements.
 - [Slack ingestion guide](docs/slack-ingestion.md): Slack app setup, polling, state handling, and inspection queries.
