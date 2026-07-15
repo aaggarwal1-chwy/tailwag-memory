@@ -87,8 +87,8 @@ python -m uvicorn tailwag_memory.api.app:create_app --factory --host 0.0.0.0 --p
 For containerized serving, build the repository `Dockerfile`; it installs the
 API extra, runs Uvicorn on `TAILWAG_API_PORT` defaulting to `8000`, and exposes
 `GET /health` for container and load-balancer checks. See
-[AWS Planned Architecture](aws-planned-architecture.md) for the AWS topology and
-[AWS ECS Deployment](aws-ecs-deployment.md) for the ECS/Fargate API shape.
+[AWS Deployment And Operations](aws-deployment.md) for the live AWS topology,
+private caller path, and ECS/worker deployment workflow.
 
 `GET /health` is unauthenticated and does not initialize Neo4j or OpenAI clients. Provider health and memory API routes require:
 

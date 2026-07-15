@@ -54,8 +54,9 @@ class DynamoDBJobIdempotencyStore:
         }
         expression = "SET #status = :status, updated_at = :updated_at"
         if result is not None:
+            names["#result"] = "result"
             values[":result"] = result
-            expression += ", result = :result"
+            expression += ", #result = :result"
         self.table.update_item(
             Key={"job_id": job_id},
             UpdateExpression=expression,
@@ -67,8 +68,8 @@ class DynamoDBJobIdempotencyStore:
         """Mark a claimed job as failed."""
         self.table.update_item(
             Key={"job_id": job_id},
-            UpdateExpression="SET #status = :status, updated_at = :updated_at, error = :error",
-            ExpressionAttributeNames={"#status": "status"},
+            UpdateExpression="SET #status = :status, updated_at = :updated_at, #error = :error",
+            ExpressionAttributeNames={"#status": "status", "#error": "error"},
             ExpressionAttributeValues={
                 ":status": "failed",
                 ":updated_at": _epoch_seconds(),

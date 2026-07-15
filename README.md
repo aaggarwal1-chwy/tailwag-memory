@@ -7,17 +7,14 @@ Neo4j-only hybrid memory service with OpenAI-backed embeddings and deterministic
 The focused docs are the source of truth:
 
 - [Architecture](docs/architecture.md): current scope, graph model, design boundaries, privacy/biometric boundaries, and deferred concepts.
-- [Python package integration guide](docs/integration-guide.md): installation from another repo, runtime configuration, setup sequence, and integration responsibilities.
+- [Python package and caller integration guide](docs/integration-guide.md): package installation, runtime configuration, and HTTP integration for Argos or another caller.
 - [Memory endpoints reference](docs/memory-endpoints.md): Python APIs, service constructors, input models, return shapes, and optional HTTP routes.
-- [AWS planned architecture](docs/aws-planned-architecture.md): cloud topology, service interactions, background workers, and report publishing.
-- [Beginner AWS deployment runbook](docs/aws-beginner-deployment-runbook.md): console-first Tailwag AWS deployment steps for `us-east-2` using the `aaggarwal1-tailwag` resource prefix.
-- [AWS ECS deployment note](docs/aws-ecs-deployment.md): container image, ECS task shape, runtime config, and health checks for the Tailwag API.
+- [AWS deployment and operations](docs/aws-deployment.md): current live resources, private network topology, laptop Neo4j access, caller hookup, deployment workflow, verification, and known gaps.
 - [AWS deployment resources](deploy/aws/README.md): local CloudFormation, IAM policy examples, image build/push helper, and worker packaging helper for AWS deployment.
 - [AWS CI/CD](docs/aws-cicd.md): GitHub Actions validation and automatic dev deployment to existing AWS resources.
 - [CLI reference](docs/cli-reference.md): local schema setup, ingestion, retrieval, memory maintenance, inspect, and Slack command examples.
 - [Inspect reference](docs/inspect-reference.md): read-only report behavior, generated assets, filters, and affect report requirements.
 - [Slack ingestion guide](docs/slack-ingestion.md): Slack app setup, polling, state handling, and inspection queries.
-- [Argos compatibility note](docs/argos-migration.md): current Argos integration boundary and compatibility expectations.
 - [Repository agent instructions](AGENTS.md) and [agent trigger matrix](docs/agent-trigger-matrix.md): contributor agent workflow.
 
 ## Current Scope
