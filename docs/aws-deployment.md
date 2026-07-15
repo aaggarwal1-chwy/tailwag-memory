@@ -487,6 +487,58 @@ Use stable caller-owned person and episode IDs. Treat Tailwag memory-item IDs as
 opaque. Retry only with the same episode ID when the payload represents the
 same logical episode.
 
+### Argos robot rollout checklist
+
+Use this checklist after the Argos API Gateway integration change is deployed
+to the robot:
+
+1. Inject the current value of Secrets Manager secret
+   `aaggarwal1-tailwag/api-bearer-token` as
+   `TAILWAG_API_BEARER_TOKEN` through the robot's approved runtime secret
+   mechanism. Do not store it in a manifest, shell script, or repository.
+2. From the robot, set the public base URL and run both health checks:
+
+   ```bash
+   export TAILWAG_BASE_URL=https://a9vhnyd929.execute-api.us-east-2.amazonaws.com
+
+   curl -fsS "$TAILWAG_BASE_URL/health"
+
+   curl -fsS \
+     -H "Authorization: Bearer $TAILWAG_API_BEARER_TOKEN" \
+     "$TAILWAG_BASE_URL/argos/providers/memory/resources/memory/health"
+   ```
+
+   Both commands must succeed. No VPN or Tailwag VPC route is required.
+3. With explicit operator approval for live robot and audio activity, start the
+   normal Argos profile:
+
+   ```bash
+   cd ~/argos-agent
+   source setup_shell.sh
+   python3 run_profile.py --profile static_interaction
+   ```
+
+4. Have one enrolled, recognized speaker hold a short conversation containing a
+   distinctive, non-sensitive fact suitable for later search.
+5. Confirm all of the following:
+
+   - Argos receives that person's Tailwag context without authentication or
+     timeout errors.
+   - Tailwag records the completed conversation episode for the resolved person.
+   - An authenticated `semantic_search` request can retrieve the episode.
+   - API Gateway logs in `/aws/apigateway/aaggarwal1-tailwag-dev` and API logs
+     in `/ecs/aaggarwal1-tailwag-api` show successful Tailwag events without
+     bearer-token, request-body, or memory-content logging.
+
+6. Only after those checks pass, mark the live Argos rollout gap in
+   [Known Gaps](#known-gaps) complete.
+
+If the gateway or hosted service is unavailable, stop the live runtime and rely
+on Argos's existing memory-unavailable behavior while investigating. To roll
+back the configuration, restore the prior memory-provider endpoint in all three
+Argos manifests and restart Argos. Rolling back Argos or deleting the edge stack
+does not modify Tailwag's Neo4j data.
+
 Slack polling is already owned by the Tailwag EventBridge schedule. Argos
 should not start a second Slack poller for channel `C0896C8CE83`.
 
