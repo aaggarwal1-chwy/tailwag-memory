@@ -1,21 +1,24 @@
-# Python Package Integration Guide
+# Tailwag Integration Guide
 
 ## Purpose
 
-`tailwag-memory` is intended to be used by another Python repo as a package. The calling system owns IDs, identity decisions, biometric embedding generation, raw media handling, runtime orchestration, and retention policy. Tailwag owns durable Neo4j memory storage, embeddings, memory extraction/consolidation, retrieval, person context, employee-directory row storage, and source adapters.
+`tailwag-memory` can be consumed as a Python package or through its private HTTP
+service. The calling system owns IDs, identity decisions, biometric embedding
+generation, raw media handling, runtime orchestration, and retention policy.
+Tailwag owns durable Neo4j memory storage, embeddings, memory
+extraction/consolidation, retrieval, person context, employee-directory row
+storage, and source adapters.
 
 This guide stays at the package setup and integration-boundary level. For detailed command syntax, endpoint signatures, payload shapes, and source-adapter operation, use the focused references below.
 
 ## Reference Map
 
 - Current graph model, scope, and deferred concepts: [Architecture](architecture.md)
-- Python endpoints, parameters, input models, return shapes, and service constructors: [Memory Endpoints Reference](memory-endpoints.md)
-- AWS service topology, background workers, and report publishing: [AWS Planned Architecture](aws-planned-architecture.md)
-- ECS/Fargate container packaging and deployment shape: [AWS ECS Deployment](aws-ecs-deployment.md)
+- Python endpoints, HTTP schemas, return shapes, and service constructors: [Memory Endpoints Reference](memory-endpoints.md)
+- Live AWS topology, resources, access, deployment, and operations: [AWS Deployment And Operations](aws-deployment.md)
 - Local command examples and CLI workflow: [CLI Reference](cli-reference.md)
 - Read-only local inspection reports and generated report assets: [Inspect Reference](inspect-reference.md)
 - Slack app setup, CLI polling, package-level polling, and Slack state behavior: [Slack Ingestion Guide](slack-ingestion.md)
-- Current Argos integration boundary and compatibility expectations: [Argos Compatibility Note](argos-migration.md)
 
 ## Install From Another Local Repo
 
@@ -41,13 +44,143 @@ python -m pip install -e "/path/to/tailwag-memory[api]"
 
 The repository includes a production-oriented Docker image for the FastAPI
 adapter and AWS worker helpers for polling, memory jobs, and report publishing.
-See [AWS Planned Architecture](aws-planned-architecture.md) for the full cloud
-shape and [AWS ECS Deployment](aws-ecs-deployment.md) for the API image command,
-ECS task definition example, health checks, and Secrets Manager mapping.
+See [AWS Deployment And Operations](aws-deployment.md) for the live cloud
+shape, API image workflow, ECS health checks, worker deployment, and Secrets
+Manager mapping.
+
+## HTTP Service Integration For Argos Or Another Caller
+
+The deployed AWS environment exposes Tailwag as a private HTTP service. A
+caller should use that service boundary instead of connecting directly to
+Neo4j or importing Tailwag's AWS worker internals.
+
+The live development endpoint is:
+
+```text
+http://internal-aaggarwal1-tailwag-alb-1363405968.us-east-2.elb.amazonaws.com
+```
+
+It is an internal ALB. The caller must run in the shared VPC or have an
+approved VPN, transit, or tunnel route into it. Store these values in the
+caller's runtime configuration or secret store:
+
+```text
+TAILWAG_BASE_URL=http://internal-aaggarwal1-tailwag-alb-1363405968.us-east-2.elb.amazonaws.com
+TAILWAG_BEARER_TOKEN=<value from aaggarwal1-tailwag/api-bearer-token>
+```
+
+The variable names are recommended examples; an existing Argos configuration
+layer may use different names. The requirements are the same base URL and an
+`Authorization: Bearer <token>` header. Never commit the token.
+
+### Minimal provider adapter
+
+The following synchronous adapter shows the caller boundary. A real Argos
+provider can place equivalent code in its memory-provider package and register
+it through Argos's existing provider factory:
+
+```python
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+
+class TailwagHttpMemoryProvider:
+    def __init__(self, base_url: str, bearer_token: str) -> None:
+        self._client = httpx.Client(
+            base_url=base_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {bearer_token}"},
+            timeout=30.0,
+        )
+
+    def close(self) -> None:
+        self._client.close()
+
+    def _post(self, request_id: str, payload: dict[str, Any]) -> Any:
+        response = self._client.post(
+            f"/argos/providers/memory/resources/memory/request/{request_id}",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def person_context(self, person_id: str, *, current_text: str = "") -> str:
+        result = self._post(
+            "person_context",
+            {"person_id": person_id, "current_text": current_text},
+        )
+        return str(result["context_markdown"])
+
+    def record_episode(self, episode: dict[str, Any], *, extract_memory: bool = True) -> dict[str, Any]:
+        return self._post(
+            "episodes_record",
+            {"episode": episode, "extract_memory": extract_memory},
+        )
+
+    def semantic_search(self, text: str, person_id: str, *, limit: int = 5) -> dict[str, Any]:
+        return self._post(
+            "semantic_search",
+            {"text": text, "person_id": person_id, "limit": limit},
+        )
+```
+
+Use a context manager or application shutdown hook to close the HTTP client.
+An asynchronous caller can implement the same contract with
+`httpx.AsyncClient`.
+
+### Argos contract mapping
+
+Argos should:
+
+- call `person_context` before prompt assembly and map `context_markdown` into
+  its existing memory/about/follow-up prompt fields
+- call `episodes_record` after a live transcript is complete, using
+  `episode_type="conversation"`, `source="live_chat"`, and stable caller-owned
+  person and episode IDs
+- call `semantic_search` for explicit memory-search tools and preserve the
+  separate `episodes` and `memory_items` response lists
+- use the people, identity, profile, biometric, and turn-owner routes when
+  those existing Argos workflows require them
+- treat Tailwag memory-item IDs as opaque
+- retry the same logical episode with the same episode ID
+
+Tailwag owns durable Neo4j memory, extraction, consolidation, retrieval, and
+Slack ingestion. Argos continues to own realtime turn behavior, robot identity,
+raw media and transcript production, upstream face/speaker embeddings,
+retention decisions, and final prompt assembly.
+
+Slack channel `C0896C8CE83` is already polled by Tailwag's EventBridge
+schedule. Argos must not start a second poller for that channel.
+
+Slack-created temporary people can use IDs such as `slack:<user_id>`. When
+Argos confirms a canonical identity by email, use the rekey-by-email operation
+so existing graph relationships and memories remain attached to the same
+person node.
+
+### Caller rollout checklist
+
+1. Confirm the caller can resolve and reach the internal ALB.
+2. Load the bearer token from the caller's secret store.
+3. Check unauthenticated `/health`.
+4. Check authenticated
+   `/argos/providers/memory/resources/memory/health`.
+5. Request context for a known test person and consume `context_markdown`.
+6. Record an idempotent test episode.
+7. Confirm that subsequent context or semantic search includes the episode.
+8. Run the caller's provider/factory and prompt-mapping tests.
+
+For copyable curl commands, the live network requirements, and the exact AWS
+secret name, see [Connect A Caller Such As Argos](aws-deployment.md#connect-a-caller-such-as-argos).
 
 ## Runtime Configuration
 
-Set runtime configuration in the consuming process or its environment:
+The following direct runtime configuration applies when the consuming process
+imports the Tailwag Python package or runs the Tailwag API. An HTTP-only caller
+such as Argos needs only its Tailwag base URL and bearer token.
+
+Set package/runtime configuration in the consuming process or its environment:
 
 ```bash
 export NEO4J_URI=bolt://localhost:7687

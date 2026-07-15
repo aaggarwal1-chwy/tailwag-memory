@@ -100,6 +100,7 @@ class SlackDynamoDBPollStateStoreTest(unittest.TestCase):
             },
         )
         self.assertEqual(table.put_calls[0]["ConditionExpression"], "attribute_not_exists(#channel_key)")
+        self.assertEqual(table.put_calls[0]["ExpressionAttributeNames"], {"#channel_key": "channel_id"})
         self.assertNotIn("ExpressionAttributeValues", table.put_calls[0])
 
     def test_save_existing_channel_uses_version_condition_and_increments_version(self) -> None:
@@ -123,6 +124,10 @@ class SlackDynamoDBPollStateStoreTest(unittest.TestCase):
         self.assertEqual(table.items["C123"]["active_threads"], {})
         self.assertEqual(table.items["C123"]["version"], Decimal("4"))
         self.assertEqual(table.put_calls[0]["ConditionExpression"], "#version = :expected_version")
+        self.assertEqual(
+            table.put_calls[0]["ExpressionAttributeNames"],
+            {"#version": "version"},
+        )
         self.assertEqual(table.put_calls[0]["ExpressionAttributeValues"], {":expected_version": Decimal("3")})
 
     def test_stale_expected_version_raises_poll_state_conflict(self) -> None:

@@ -80,6 +80,12 @@ class AwsWorkerHelpersTest(unittest.TestCase):
         self.assertEqual(table.items["job-1"]["status"], "failed")
         self.assertEqual(table.items["job-1"]["result"], {"ok": True})
         self.assertEqual(table.items["job-1"]["error"], "boom")
+        success_update = table.updates[0]
+        self.assertIn("#result = :result", success_update["UpdateExpression"])
+        self.assertEqual(success_update["ExpressionAttributeNames"]["#result"], "result")
+        failure_update = table.updates[1]
+        self.assertIn("#error = :error", failure_update["UpdateExpression"])
+        self.assertEqual(failure_update["ExpressionAttributeNames"]["#error"], "error")
 
     def test_sqs_send_job_serializes_payload_and_attributes(self) -> None:
         sqs = FakeSqsClient()

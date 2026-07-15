@@ -1,8 +1,9 @@
 # Tailwag AWS Deployment Resources
 
 This directory contains local deployment resources for running Tailwag in AWS.
-The planned service topology is described in
-[`docs/aws-planned-architecture.md`](../../docs/aws-planned-architecture.md).
+The live service topology, resource inventory, access paths, and deployment
+workflow are documented in
+[`docs/aws-deployment.md`](../../docs/aws-deployment.md).
 
 ## Files
 

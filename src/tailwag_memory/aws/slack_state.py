@@ -48,14 +48,12 @@ class SlackDynamoDBPollStateStore:
         new_version = self._next_version(expected_version, channel=channel)
         item = self._serialize_channel_state(channel=channel, state=state, version=new_version)
 
-        expression_names = {
-            "#channel_key": self.channel_key,
-            "#version": self.version_attribute,
-        }
         expression_values: dict[str, Any] = {}
         if expected_version is None:
+            expression_names = {"#channel_key": self.channel_key}
             condition = "attribute_not_exists(#channel_key)"
         else:
+            expression_names = {"#version": self.version_attribute}
             condition = "#version = :expected_version"
             expression_values[":expected_version"] = expected_version
 
