@@ -30,6 +30,7 @@ from the authorized AWS inventory; do not commit a populated deployment file.
 export AWS_REGION=us-east-2
 export CORE_STACK_NAME=<core-stack-name>
 export EDGE_STACK_NAME=<edge-stack-name>
+export OBSERVABILITY_STACK_NAME=<observability-stack-name>
 export ECR_REPOSITORY=<api-ecr-repository-name>
 export ECS_CLUSTER=<ecs-cluster-name>
 export ECS_SERVICE=<ecs-service-name>
@@ -77,6 +78,16 @@ sh -n deploy/aws/scripts/package-worker-zip.sh
 aws cloudformation validate-template \
   --region "$AWS_REGION" \
   --template-body file://deploy/aws/cloudformation/tailwag-memory-core.yaml \
+  >/dev/null
+
+aws cloudformation validate-template \
+  --region "$AWS_REGION" \
+  --template-body file://deploy/aws/cloudformation/tailwag-memory-edge.yaml \
+  >/dev/null
+
+aws cloudformation validate-template \
+  --region "$AWS_REGION" \
+  --template-body file://deploy/aws/cloudformation/tailwag-memory-observability.yaml \
   >/dev/null
 ```
 
@@ -229,6 +240,13 @@ The current PowerUser access may deploy application and worker changes but does
 not grant unrestricted IAM administration. Stop if CloudFormation proposes an
 unexpected replacement or reports an IAM authorization failure.
 
+For observability updates, deploy
+`deploy/aws/cloudformation/tailwag-memory-observability.yaml` to
+`$OBSERVABILITY_STACK_NAME`. Preserve the current parameters and stack tags;
+changing `AlarmEmail` creates a new confirmation flow. Review the change set
+before execution and verify that ordinary threshold changes do not replace the
+SNS topic or email subscription.
+
 ## Verify The Deployment
 
 Confirm ECS converged on the new revision:
@@ -239,6 +257,16 @@ aws ecs describe-services \
   --cluster "$ECS_CLUSTER" \
   --services "$ECS_SERVICE" \
   --query 'services[0].{desired:desiredCount,running:runningCount,pending:pendingCount,task:taskDefinition,events:events[0:3]}'
+
+aws cloudformation describe-stacks \
+  --region "$AWS_REGION" \
+  --stack-name "$OBSERVABILITY_STACK_NAME" \
+  --query 'Stacks[0].{status:StackStatus,outputs:Outputs}'
+
+aws cloudwatch describe-alarms \
+  --region "$AWS_REGION" \
+  --alarm-name-prefix aaggarwal1-tailwag-dev- \
+  --query 'MetricAlarms[].{name:AlarmName,state:StateValue,actions:ActionsEnabled}'
 ```
 
 Discover the public endpoint from the edge stack and run read-only health

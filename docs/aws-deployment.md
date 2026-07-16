@@ -27,6 +27,10 @@ The functional development deployment is live:
 - the daily report schedule is enabled for 10:00 UTC
 - DynamoDB Slack checkpoint creation and recurring updates are verified
 - API, memory worker, report worker, and Slack worker smoke tests passed
+- DynamoDB point-in-time recovery is enabled with a 35-day window on both state tables
+- 17 first-wave CloudWatch alarms are enabled and currently healthy
+- AWS Backup failure events route to the Tailwag alarm topic
+- the alarm email subscription is confirmed and active
 - all resources are grouped under the AWS Application
   `aaggarwal1-tailwag-dev`
 
@@ -216,6 +220,26 @@ Runtime values are stored in Secrets Manager under:
 The Neo4j password is the value originally supplied through the repository
 `.env`. Secret values must never be committed, copied into documentation, or
 placed directly in shell history when a safer retrieval mechanism is available.
+
+### Observability
+
+| Resource | Value |
+| --- | --- |
+| CloudFormation stack | `aaggarwal1-tailwag-observability-dev` |
+| SNS topic | `aaggarwal1-tailwag-dev-alarms` |
+| Alarm count | 17 |
+| Backup failure rule | `aaggarwal1-tailwag-dev-backup-job-failure` |
+
+The first-wave alarms cover API Gateway 5xx responses and p95 integration
+latency, ALB unhealthy targets, errors and throttles for each Lambda worker,
+oldest-message age and DLQ visibility for each SQS flow, and Neo4j EC2 status
+checks and sustained CPU. Alarm and recovery notifications use the same SNS
+topic. The backup rule reports failed, aborted, or expired AWS Backup jobs; it
+does not itself create a backup plan.
+
+The stack, all 17 alarms, the SNS topic, and the EventBridge rule carry the
+existing `awsApplication` tag. The email subscription and topic policy are not
+independently taggable and are represented through the tagged topic and stack.
 
 ## View Reports In S3
 
@@ -609,6 +633,16 @@ aws cloudformation describe-stacks \
   --stack-name aaggarwal1-tailwag-edge-dev \
   --query 'Stacks[0].{status:StackStatus,outputs:Outputs}'
 
+aws cloudformation describe-stacks \
+  --region us-east-2 \
+  --stack-name aaggarwal1-tailwag-observability-dev \
+  --query 'Stacks[0].{status:StackStatus,outputs:Outputs}'
+
+aws cloudwatch describe-alarms \
+  --region us-east-2 \
+  --alarm-name-prefix aaggarwal1-tailwag-dev- \
+  --query 'MetricAlarms[].{name:AlarmName,state:StateValue,actions:ActionsEnabled}'
+
 aws ecs describe-services \
   --region us-east-2 \
   --cluster aaggarwal1-tailwag-cluster \
@@ -656,9 +690,9 @@ an avoidable outage.
 The deployed development environment does not yet have:
 
 - HTTPS on the internal ALB
-- production CloudWatch alarms and alert routing
-- a documented automated Neo4j EBS snapshot policy
-- confirmed DynamoDB point-in-time recovery for both state tables
+- automated Neo4j EBS backups, intentionally deferred because of recovery-point cost
+- Neo4j disk and memory alarms from the CloudWatch Agent
+- an authenticated synthetic check that proves live Neo4j connectivity
 - a completed live robot Argos conversation and memory-retrieval rollout test
 
 These are production-hardening or external-integration tasks, not missing core
@@ -669,6 +703,7 @@ replacement, or materially cost-increasing changes require explicit approval.
 
 - [`deploy/aws/cloudformation/tailwag-memory-core.yaml`](../deploy/aws/cloudformation/tailwag-memory-core.yaml)
 - [`deploy/aws/cloudformation/tailwag-memory-edge.yaml`](../deploy/aws/cloudformation/tailwag-memory-edge.yaml)
+- [`deploy/aws/cloudformation/tailwag-memory-observability.yaml`](../deploy/aws/cloudformation/tailwag-memory-observability.yaml)
 - [`deploy/ecs-task-definition.example.json`](../deploy/ecs-task-definition.example.json)
 - [`deploy/aws/scripts/build-push-api-image.sh`](../deploy/aws/scripts/build-push-api-image.sh)
 - [`deploy/aws/scripts/package-worker-zip.sh`](../deploy/aws/scripts/package-worker-zip.sh)

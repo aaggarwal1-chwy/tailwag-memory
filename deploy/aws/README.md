@@ -9,6 +9,7 @@ workflow are documented in
 
 - `cloudformation/tailwag-memory-core.yaml`: shared AWS resources for the Tailwag API image and background worker flow.
 - `cloudformation/tailwag-memory-edge.yaml`: public HTTPS API Gateway and private VPC Link to the Tailwag ALB.
+- `cloudformation/tailwag-memory-observability.yaml`: first-wave CloudWatch alarms, SNS email routing, and AWS Backup failure routing.
 - `deployment.env.example`: shell environment values used by the helper script and AWS CLI examples.
 - `iam/tailwag-api-task-policy.example.json`: ECS task policy example for the Tailwag API container.
 - `iam/tailwag-scheduler-policy.example.json`: EventBridge Scheduler role policy example for sending jobs to SQS.
@@ -166,6 +167,49 @@ AppRegistry lists the edge stack and supported tagged resources such as the
 HTTP API, log group, and security group. `AWS::ApiGatewayV2::VpcLink` is not a
 supported standalone AppRegistry resource-group type; it remains managed and
 accounted for as a resource of the associated edge stack.
+
+## Observability Stack
+
+The observability stack creates 17 first-wave alarms covering API Gateway 5xx
+and latency, ALB unhealthy targets, Lambda worker errors and throttles, SQS
+queue age and DLQ messages, and Neo4j EC2 status checks and sustained CPU. It
+also creates an SNS alarm topic, an email subscription, and an EventBridge rule
+that routes failed, aborted, or expired AWS Backup jobs to the topic.
+
+Deploy it only after discovering the live API, load balancer, target group,
+Neo4j instance, AWS Application tag, and intended notification email. The email
+recipient must confirm the subscription before notifications are delivered.
+
+```bash
+aws cloudformation deploy \
+  --region us-east-2 \
+  --stack-name aaggarwal1-tailwag-observability-dev \
+  --template-file deploy/aws/cloudformation/tailwag-memory-observability.yaml \
+  --parameter-overrides \
+    ProjectName=aaggarwal1-tailwag \
+    EnvironmentName=dev \
+    ApplicationTagValue=<aws-application-resource-group-arn> \
+    AlarmEmail=<alarm-email> \
+    ApiGatewayId=<http-api-id> \
+    LoadBalancerFullName=<app/name/id> \
+    TargetGroupFullName=<targetgroup/name/id> \
+    Neo4jInstanceId=<instance-id> \
+  --tags \
+    awsApplication=<aws-application-resource-group-arn> \
+    Project=aaggarwal1-tailwag \
+    Environment=dev \
+    chewy:environment=dev \
+    chewy:owner_email=dl-robotics@chewy.com \
+    chewy:cost_center=demm \
+    chewy:app_name=physical_ai_robotics \
+    chewy:data_classification=internal
+```
+
+CloudFormation stack tags associate supported resources with the existing AWS
+Application. The template also applies `awsApplication` directly to every
+taggable alarm and routing resource. The SNS subscription and topic policy do
+not support independent tags and are represented through their tagged topic
+and stack.
 
 ## Build And Push The API Image
 

@@ -1,0 +1,448 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: First-wave alarms and notification routing for Tailwag memory.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: tailwag-memory
+    Description: Name prefix used by Tailwag resources.
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment suffix used by Tailwag resources.
+  ApplicationTagValue:
+    Type: String
+    Description: Existing awsApplication resource-group ARN for the Tailwag application.
+  AlarmEmail:
+    Type: String
+    NoEcho: true
+    Description: Email endpoint that confirms and receives Tailwag alarm notifications.
+  ApiGatewayId:
+    Type: String
+    Description: HTTP API id for the public Tailwag API Gateway.
+  ApiGatewayStage:
+    Type: String
+    Default: "$default"
+    Description: API Gateway stage dimension used by CloudWatch metrics.
+  LoadBalancerFullName:
+    Type: String
+    Description: ALB full name, for example app/name/id, used by CloudWatch metrics.
+  TargetGroupFullName:
+    Type: String
+    Description: Target group full name, for example targetgroup/name/id, used by CloudWatch metrics.
+  Neo4jInstanceId:
+    Type: AWS::EC2::Instance::Id
+    Description: EC2 instance running the private Neo4j database.
+  Api5xxThreshold:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: API Gateway 5xx responses in five minutes that trigger an alarm.
+  ApiLatencyThresholdMilliseconds:
+    Type: Number
+    Default: 5000
+    MinValue: 1
+    Description: API Gateway p95 integration latency threshold.
+  QueueAgeThresholdSeconds:
+    Type: Number
+    Default: 600
+    MinValue: 60
+    Description: Oldest main-queue message age that triggers an alarm.
+  Neo4jCpuThresholdPercent:
+    Type: Number
+    Default: 85
+    MinValue: 1
+    MaxValue: 100
+    Description: Sustained Neo4j EC2 average CPU threshold.
+
+Resources:
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-${EnvironmentName}-alarms"
+      DisplayName: Tailwag alarms
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+      TopicArn: !Ref AlarmTopic
+
+  BackupFailureRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentName}-backup-job-failure"
+      Description: Route failed, aborted, or expired AWS Backup jobs to Tailwag alarms.
+      State: ENABLED
+      EventPattern:
+        source: [aws.backup]
+        detail-type: [Backup Job State Change]
+        detail:
+          state: [FAILED, ABORTED, EXPIRED]
+      Targets:
+        - Arn: !Ref AlarmTopic
+          Id: TailwagAlarmTopic
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  AlarmTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref AlarmTopic]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudWatchAlarms
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref AlarmTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*"
+          - Sid: AllowBackupFailureRule
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref AlarmTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: !GetAtt BackupFailureRule.Arn
+
+  ApiGateway5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-api-gateway-5xx"
+      AlarmDescription: Public Tailwag API returned one or more 5xx responses in five minutes.
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref ApiGatewayId
+        - Name: Stage
+          Value: !Ref ApiGatewayStage
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: !Ref Api5xxThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  ApiGatewayLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-api-gateway-integration-latency"
+      AlarmDescription: Public Tailwag API p95 integration latency exceeded five seconds for ten minutes.
+      Namespace: AWS/ApiGateway
+      MetricName: IntegrationLatency
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref ApiGatewayId
+        - Name: Stage
+          Value: !Ref ApiGatewayStage
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: !Ref ApiLatencyThresholdMilliseconds
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  AlbUnhealthyTargetsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-alb-unhealthy-targets"
+      AlarmDescription: The internal Tailwag ALB has an unhealthy API target for two minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !Ref TargetGroupFullName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  PollWorkerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-poll-worker-errors"
+      AlarmDescription: Tailwag poll worker reported an invocation error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Sub "${ProjectName}-${EnvironmentName}-poll-worker"}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  MemoryWorkerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-memory-worker-errors"
+      AlarmDescription: Tailwag memory worker reported an invocation error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Sub "${ProjectName}-${EnvironmentName}-memory-worker"}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  ReportWorkerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-report-worker-errors"
+      AlarmDescription: Tailwag report worker reported an invocation error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Sub "${ProjectName}-${EnvironmentName}-report-worker"}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  PollWorkerThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-poll-worker-throttles"
+      AlarmDescription: Tailwag poll worker was throttled.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{Name: FunctionName, Value: !Sub "${ProjectName}-${EnvironmentName}-poll-worker"}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  MemoryWorkerThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-memory-worker-throttles"
+      AlarmDescription: Tailwag memory worker was throttled.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{Name: FunctionName, Value: !Sub "${ProjectName}-${EnvironmentName}-memory-worker"}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  ReportWorkerThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-report-worker-throttles"
+      AlarmDescription: Tailwag report worker was throttled.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{Name: FunctionName, Value: !Sub "${ProjectName}-${EnvironmentName}-report-worker"}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  PollJobsDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-poll-jobs-dlq-visible"
+      AlarmDescription: The Tailwag poll jobs dead-letter queue contains a message.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions: [{Name: QueueName, Value: !Sub "${ProjectName}-${EnvironmentName}-poll-jobs-dlq"}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  MemoryJobsDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-memory-jobs-dlq-visible"
+      AlarmDescription: The Tailwag memory jobs dead-letter queue contains a message.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions: [{Name: QueueName, Value: !Sub "${ProjectName}-${EnvironmentName}-memory-jobs-dlq"}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  ReportJobsDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-report-jobs-dlq-visible"
+      AlarmDescription: The Tailwag report jobs dead-letter queue contains a message.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions: [{Name: QueueName, Value: !Sub "${ProjectName}-${EnvironmentName}-report-jobs-dlq"}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  PollJobsAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-poll-jobs-oldest-message"
+      AlarmDescription: The oldest Tailwag poll job has waited more than ten minutes.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions: [{Name: QueueName, Value: !Sub "${ProjectName}-${EnvironmentName}-poll-jobs"}]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref QueueAgeThresholdSeconds
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  MemoryJobsAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-memory-jobs-oldest-message"
+      AlarmDescription: The oldest Tailwag memory job has waited more than ten minutes.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions: [{Name: QueueName, Value: !Sub "${ProjectName}-${EnvironmentName}-memory-jobs"}]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref QueueAgeThresholdSeconds
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  ReportJobsAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-report-jobs-oldest-message"
+      AlarmDescription: The oldest Tailwag report job has waited more than ten minutes.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions: [{Name: QueueName, Value: !Sub "${ProjectName}-${EnvironmentName}-report-jobs"}]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref QueueAgeThresholdSeconds
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  Neo4jStatusCheckAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-neo4j-status-check"
+      AlarmDescription: The Neo4j EC2 instance failed an instance or system status check for two minutes.
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed
+      Dimensions: [{Name: InstanceId, Value: !Ref Neo4jInstanceId}]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+  Neo4jHighCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-neo4j-high-cpu"
+      AlarmDescription: The Neo4j EC2 instance averaged high CPU utilization for fifteen minutes.
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions: [{Name: InstanceId, Value: !Ref Neo4jInstanceId}]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: !Ref Neo4jCpuThresholdPercent
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      OKActions: [!Ref AlarmTopic]
+      Tags: [{Key: awsApplication, Value: !Ref ApplicationTagValue}]
+
+Outputs:
+  AlarmTopicArn:
+    Description: SNS topic used for Tailwag alarm and recovery notifications.
+    Value: !Ref AlarmTopic
+  BackupFailureRuleArn:
+    Description: EventBridge rule that routes failed AWS Backup jobs.
+    Value: !GetAtt BackupFailureRule.Arn
