@@ -87,7 +87,7 @@ Generate prompt-ready person context:
 tailwag person context --person-id person_jamie
 tailwag person context --person-id person_jamie --semantic-scope "chargers"
 tailwag person context --person-id person_jamie --current-text "robot demo later today"
-tailwag person context --person-id person_jamie --memory-limit 8 --recent-episode-limit 3
+tailwag person context --person-id person_jamie --memory-limit 8
 tailwag person profile --person-id person_jamie
 ```
 

@@ -718,8 +718,6 @@ class CliTest(unittest.TestCase):
                                 "robot demo",
                                 "--memory-limit",
                                 "4",
-                                "--recent-episode-limit",
-                                "2",
                             ]
                         )
 
@@ -733,7 +731,7 @@ class CliTest(unittest.TestCase):
                     "semantic_scope": None,
                     "current_text": "robot demo",
                     "memory_limit": 4,
-                    "recent_episode_limit": 2,
+                    "recent_episode_limit": 5,
                 }
             ],
         )

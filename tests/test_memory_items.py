@@ -863,18 +863,14 @@ class MemoryItemMarkdownTest(unittest.TestCase):
             ),
         ]
 
-        markdown = format_person_memory_markdown(
-            items,
-            recent_episode_lines=["2026-06-16: Jamie mentioned Luna had a vet visit tomorrow."],
-            now=now,
-        )
+        markdown = format_person_memory_markdown(items, now=now)
 
         self.assertIn("[PERSON MEMORY]", markdown)
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Preferences:"))
         self.assertIn("- boundary: avoid loud surprise greetings", markdown)
         self.assertIn("Potential Follow-Ups:", markdown)
         self.assertIn("- Cape Cod trip planned for the weekend.", markdown)
-        self.assertIn("Recent Episodes:", markdown)
+        self.assertNotIn("Recent Episodes:", markdown)
         self.assertNotIn("Notes:", markdown)
 
     def test_markdown_prioritizes_semantic_hits_and_sanitizes_lines(self) -> None:
@@ -907,11 +903,11 @@ class MemoryItemMarkdownTest(unittest.TestCase):
         self.assertNotIn("\nwith continuation", markdown)
 
     def test_empty_markdown_context_returns_empty_string(self) -> None:
-        self.assertEqual(format_person_memory_markdown([], recent_episode_lines=[]), "")
+        self.assertEqual(format_person_memory_markdown([]), "")
 
 
 class PersonMemoryContextServiceTest(unittest.TestCase):
-    def test_markdown_for_person_includes_boundaries_before_preferences_and_facts_with_recent_episodes(self) -> None:
+    def test_markdown_for_person_excludes_recent_episode_transcripts(self) -> None:
         runner = RecordingQueryRunner(
             results=[
                 [
@@ -945,16 +941,7 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
                         "status": "active",
                         "observed_at": "2026-06-16T09:00:00+00:00",
                     },
-                ],
-                [
-                    {
-                        "episode_id": "episode_1",
-                        "person_id": "person_jamie",
-                        "display_name": "Jamie",
-                        "transcript": "Jamie: Luna has a vet visit tomorrow.\nCasey: I can drive.",
-                        "start_time": "2026-06-16T14:00:00+00:00",
-                    }
-                ],
+                ]
             ]
         )
         service = PersonMemoryContextService(runner)
@@ -963,7 +950,6 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
             "person_jamie",
             now=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
             memory_limit=12,
-            recent_episode_limit=1,
         )
 
         self.assertIn("Boundaries:", markdown)
@@ -972,89 +958,12 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
         self.assertIn("- preferred language: Spanish", markdown)
         self.assertIn("Facts:", markdown)
         self.assertIn("- working on robot social memory extraction", markdown)
-        self.assertIn("Recent Episodes:", markdown)
-        self.assertIn("- 2026-06-16: Jamie: Luna has a vet visit tomorrow.", markdown)
-        self.assertNotIn("Casey: I can drive.", markdown)
+        self.assertNotIn("Recent Episodes:", markdown)
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Preferences:"))
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Facts:"))
-        self.assertLess(markdown.index("Facts:"), markdown.index("Recent Episodes:"))
         self.assertEqual(runner.queries[0].parameters["person_id"], "person_jamie")
         self.assertEqual(runner.queries[0].parameters["statuses"], ["active"])
-        self.assertEqual(runner.queries[1].parameters, {"person_id": "person_jamie", "limit": 1})
-
-    def test_markdown_for_person_uses_shared_recent_episode_rows(self) -> None:
-        runner = RecordingQueryRunner(
-            results=[
-                [],
-                [
-                    {
-                        "episode_id": "episode_1",
-                        "item_id": "episode_1",
-                        "item_type": "episode",
-                        "person_id": "person_jamie",
-                        "display_name": "Jamie",
-                        "transcript": "Assistant: Do you need anything?\nJamie: Luna has a vet visit tomorrow.",
-                        "text": "Assistant: Do you need anything?\nJamie: Luna has a vet visit tomorrow.",
-                        "start_time": "2026-06-16T14:00:00+00:00",
-                    }
-                ],
-            ]
-        )
-        service = PersonMemoryContextService(runner)
-
-        markdown = service.markdown_for_person(" person_jamie ", recent_episode_limit=2)
-
-        self.assertIn("Recent Episodes:", markdown)
-        self.assertIn("- 2026-06-16: Jamie: Luna has a vet visit tomorrow.", markdown)
-        self.assertNotIn("Assistant: Do you need anything?", markdown)
-        self.assertEqual(runner.queries[1].parameters, {"person_id": "person_jamie", "limit": 2})
-        self.assertIn("e.id AS episode_id", runner.queries[1].query)
-        self.assertIn("'episode' AS item_type", runner.queries[1].query)
-
-    def test_markdown_for_person_matches_person_id_speaker_when_display_name_is_missing(self) -> None:
-        runner = RecordingQueryRunner(
-            results=[
-                [],
-                [
-                    {
-                        "episode_id": "episode_1",
-                        "person_id": "person_jamie",
-                        "display_name": None,
-                        "transcript": "person_jamie: I like robot demos.\nAssistant: Noted.",
-                        "start_time": "2026-06-16T14:00:00+00:00",
-                    }
-                ],
-            ]
-        )
-        service = PersonMemoryContextService(runner)
-
-        markdown = service.markdown_for_person("person_jamie", recent_episode_limit=1)
-
-        self.assertIn("- 2026-06-16: person_jamie: I like robot demos.", markdown)
-        self.assertNotIn("Assistant: Noted.", markdown)
-
-    def test_markdown_for_person_splits_single_line_speaker_turns(self) -> None:
-        runner = RecordingQueryRunner(
-            results=[
-                [],
-                [
-                    {
-                        "episode_id": "episode_1",
-                        "person_id": "person_jamie",
-                        "display_name": "Jamie",
-                        "speaker_labels": ["Jamie", "Assistant"],
-                        "transcript": "Jamie: Do we have chargers? Assistant: They are at the desk.",
-                        "start_time": "2026-06-16T14:00:00+00:00",
-                    }
-                ],
-            ]
-        )
-        service = PersonMemoryContextService(runner)
-
-        markdown = service.markdown_for_person("person_jamie", recent_episode_limit=1)
-
-        self.assertIn("- 2026-06-16: Jamie: Do we have chargers?", markdown)
-        self.assertNotIn("Assistant: They are at the desk.", markdown)
+        self.assertEqual(len(runner.queries), 1)
 
 
 class EpisodeMemoryExtractionServiceTest(unittest.TestCase):
