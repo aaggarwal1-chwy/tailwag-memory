@@ -123,7 +123,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     context_parser.add_argument("--semantic-scope", help="optional semantic focus for OpenAI-backed vector retrieval")
     context_parser.add_argument("--current-text", help="optional current utterance or task for memory item retrieval")
     context_parser.add_argument("--memory-limit", type=int, default=12, help="maximum durable memory items per section")
-    context_parser.add_argument("--recent-episode-limit", type=int, default=5, help="maximum recent episodes inspected for target-person transcript lines")
     profile_parser = person_subparsers.add_parser("profile")
     profile_parser.add_argument("--person-id", required=True, help="person id to inspect")
 
@@ -339,7 +338,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                         semantic_scope=args.semantic_scope,
                         current_text=args.current_text,
                         memory_limit=args.memory_limit,
-                        recent_episode_limit=args.recent_episode_limit,
                     )
                 )
                 return 0

@@ -321,9 +321,8 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 current_text: str | None = None,
                 now=None,
                 memory_limit: int = 12,
-                recent_episode_limit: int = 5,
             ) -> str:
-                memory_calls.append((person_id, current_text, now, memory_limit, recent_episode_limit))
+                memory_calls.append((person_id, current_text, now, memory_limit))
                 return "[PERSON MEMORY]\nPreferences:\n- likes robot demos"
 
         class FakeRetrieval:
@@ -356,7 +355,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
             context,
             "[PERSON MEMORY]\nPreferences:\n- likes robot demos",
         )
-        self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4, 2)])
+        self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4)])
         self.assertEqual(retrieval_calls, [("person_jamie", 3, "chargers")])
 
     def test_search_semantic_memory_returns_episode_and_memory_item_results(self) -> None:
