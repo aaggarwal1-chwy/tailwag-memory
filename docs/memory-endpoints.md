@@ -88,7 +88,7 @@ For containerized serving, build the repository `Dockerfile`; it installs the
 API extra, runs Uvicorn on `TAILWAG_API_PORT` defaulting to `8000`, and exposes
 `GET /health` for container and load-balancer checks. See
 [AWS Deployment And Operations](aws-deployment.md) for the live AWS topology,
-private caller path, and ECS/worker deployment workflow.
+public caller endpoint, private backend path, and ECS/worker deployment workflow.
 
 `GET /health` is unauthenticated and does not initialize Neo4j or OpenAI clients. Provider health and memory API routes require:
 
@@ -716,7 +716,7 @@ Notes:
 - Consolidation can merge related memories into one active merged memory. Source memories are marked `superseded`, linked to the merged memory with `SUPERSEDED_BY`, and excluded from normal endpoint/query results.
 - This is slower background work; normal live ingestion should use `record_episode()`.
 - The tunable defaults are intentionally isolated for tests and scheduled jobs: `min_evidence_episodes`, `seed_limit`, `neighbor_limit`, `cluster_limit`, and `episode_text_limit`.
-- Consolidation is not the deferred asynchronous semantic consolidation queue/orchestrator and does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
+- Consolidation writes only `MemoryItem` records and their supported lifecycle and evidence relationships. It does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
 
 ## Input Models
 

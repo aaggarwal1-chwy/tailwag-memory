@@ -8,7 +8,7 @@ This document is the source of truth for current architecture and scope boundari
 
 ## Current Scope
 
-Implemented now:
+Runtime components:
 
 - `Person`
 - `Episode`
@@ -46,19 +46,19 @@ Implemented now:
 - source-provided event attendees
 - optional read-only inspect reports for follow-up validity, affect, person timelines, and memory items
 
-Deferred intentionally:
+Excluded from the runtime:
 
 - `Robot`
 - `ObjectConcept`
 - `Activity`
 - `Utterance`
 - `SemanticFact`
-- asynchronous semantic consolidation queue or orchestrator
+- a separate semantic-fact queue or ontology orchestrator
 - persistent graph confidence ratings and confidence properties
 - `org_id`
 - external vector databases
 - Postgres or other secondary persistence
-- Outlook/Microsoft Graph polling and distribution list expansion
+- Outlook/Microsoft Graph polling and distribution-list expansion
 
 ## Design Boundaries
 
@@ -222,7 +222,7 @@ Events represent place-linked happenings such as scheduled meetings or room acti
 })
 ```
 
-Only `building_code` and `room_id` are in current scope. Later place enrichment can add display names, maps, floors, or coordinates without changing the current episode/event-to-place relationship model.
+`Place` stores only `building_code` and `room_id`.
 
 ### MemoryItem
 
@@ -299,11 +299,11 @@ Related or redundant memories can be merged into one active memory. Superseded s
 
 `MENTIONED_IN.source` records how the calling system decided the person was named or referenced in the episode. It does not imply the person was present, does not update `Person.last_seen`, and does not make the person a memory-extraction target.
 
-`ATTENDED.source` records how the calling system determined attendance. For a future Outlook adapter, `source="outlook"` and `response="accepted"` can map accepted RSVP data without adding Outlook polling to current scope.
+`ATTENDED.source` records how the calling system determined attendance. `response` and `response_time` preserve caller-supplied attendance state without adding a source-specific graph model.
 
 `HAS_DIRECTORY_RECORD` links a person to one or more Tailwag-owned employee
 directory rows used for profile projection and identity resolution. The code
-currently reconciles generic person writes by email username; site-specific
+reconciles generic person writes by email username; site-specific
 metadata is used only where the caller supplies a site.
 
 `HAS_FACE_REFERENCE` and `HAS_VOICE_REFERENCE` link people to active or archived
@@ -448,7 +448,7 @@ Core runtime settings are loaded from environment variables or `.env`:
 
 Neo4j Browser shows internal identity fields such as `<id>` and `<elementId>` in addition to application-level key properties.
 
-- `<id>` is Neo4j's legacy internal numeric node or relationship ID.
+- `<id>` is Neo4j's internal numeric node or relationship ID.
 - `<elementId>` is Neo4j's internal string identifier for a graph element.
 - `id` is the application-level identifier for `Person`, `Episode`, `Event`, `MemoryItem`, `FaceReference`, and `VoiceReference`.
 - `Place` uses `(building_code, room_id)`.
@@ -456,14 +456,9 @@ Neo4j Browser shows internal identity fields such as `<id>` and `<elementId>` in
 
 Application code should use application-level keys, not Neo4j internal IDs.
 
-## Extension Path
+## Runtime Exclusions
 
-Deferred concepts should be added as parallel modules and schema sections only after scope is intentionally updated. Expected future labels and relationships remain out of current runtime scope:
-
-- `(:Robot)-[:OBSERVED_OR_HANDLED]->(:Episode)`
-- `(:Episode)-[:MENTIONED]->(:ObjectConcept)`
-- `(:Episode)-[:HAS_ACTIVITY]->(:Activity)`
-- `(:Episode)-[:CONTAINS]->(:Utterance)`
-- `(:SemanticFact)-[:SUPPORTED_BY]->(:Episode)`
-
-Before adding any deferred concept, update this architecture doc, the trigger matrix, and the relevant agent role card so implementation ownership is explicit.
+The graph contains no `Robot`, `ObjectConcept`, `Activity`, `Utterance`, or
+`SemanticFact` labels. It also contains no persistent confidence properties,
+`org_id`, external vector database, or secondary persistence layer. Durable
+person memory uses the `MemoryItem` model described above.

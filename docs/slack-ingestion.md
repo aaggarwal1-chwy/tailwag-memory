@@ -195,6 +195,8 @@ LIMIT 20;
 - Deleted, bot, join, leave, file-only/empty-text, and messages missing `user` or `ts` are skipped.
 - After a successful history poll, the state cursor advances to the latest returned history timestamp, or to the poll start timestamp when history is empty. This can advance even when all returned messages were skipped.
 
-## Mention Backfill
+## Mention Semantics
 
-No Neo4j schema migration is required for `MENTIONED_IN`; new relationship types can be written by episode ingestion. Existing Slack episodes remain valid but do not gain mention edges automatically. To add mention edges for historical Slack messages, re-ingest or backfill those Slack threads from source messages with memory extraction disabled so old conversations are not reprocessed for durable memories.
+Slack messages with user mention tokens populate `EpisodeInput.mentioned_people`.
+Episode ingestion writes `MENTIONED_IN` relationships for those people without
+changing participation or `last_seen`.

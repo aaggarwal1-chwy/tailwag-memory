@@ -4,10 +4,9 @@
 
 This document is the source of truth for the deployed Tailwag development
 environment in AWS. It records the live architecture, resource names, access
-paths, deployment workflow, verification commands, and known production
-hardening gaps.
+paths, deployment workflow, verification commands, and deployment constraints.
 
-The inventory was last verified on 2026-07-15 in AWS account `032318240470`,
+The inventory was verified on 2026-07-16 in AWS account `032318240470`,
 region `us-east-2`. Never place secret values in this document or in source
 control.
 
@@ -17,6 +16,7 @@ The functional development deployment is live:
 
 - the core CloudFormation stack is `UPDATE_COMPLETE`
 - the edge CloudFormation stack is `CREATE_COMPLETE`
+- the observability CloudFormation stack is `CREATE_COMPLETE`
 - the public API Gateway health and authenticated provider paths are verified
 - the ECS API service is active with one healthy Fargate task
 - the internal Application Load Balancer has one healthy target
@@ -25,10 +25,11 @@ The functional development deployment is live:
 - SQS event source mappings are enabled
 - Slack polling for channel `C0896C8CE83` is enabled every 30 minutes
 - the daily report schedule is enabled for 10:00 UTC
+- daily memory consolidation is enabled for 1:00 AM America/New_York
 - DynamoDB Slack checkpoint creation and recurring updates are verified
 - API, memory worker, report worker, and Slack worker smoke tests passed
 - DynamoDB point-in-time recovery is enabled with a 35-day window on both state tables
-- 17 first-wave CloudWatch alarms are enabled and currently healthy
+- 17 CloudWatch alarms are enabled and currently healthy
 - AWS Backup failure events route to the Tailwag alarm topic
 - the alarm email subscription is confirmed and active
 - all resources are grouped under the AWS Application
@@ -36,7 +37,7 @@ The functional development deployment is live:
 
 The environment has a public HTTPS entry point to a private development
 backend. It is not a production-ready public service. See
-[Known Gaps](#known-gaps).
+[Current Deployment Constraints](#current-deployment-constraints).
 
 ## Architecture
 
@@ -69,6 +70,7 @@ SQS poll / memory / report queues + DLQs
 EventBridge Scheduler
   - Slack every 30 minutes
   - reports daily at 10:00 UTC
+  - memory consolidation daily at 1:00 AM America/New_York
 
 Worker state and output:
   - DynamoDB: Slack channel cursor and job idempotency
@@ -90,6 +92,7 @@ resources and security groups inside that VPC.
 | AWS Application | `aaggarwal1-tailwag-dev` |
 | Core CloudFormation stack | `aaggarwal1-tailwag-core-dev` |
 | Edge CloudFormation stack | `aaggarwal1-tailwag-edge-dev` |
+| Observability CloudFormation stack | `aaggarwal1-tailwag-observability-dev` |
 | Resource prefix | `aaggarwal1-tailwag` |
 | Environment | `dev` |
 
@@ -181,11 +184,16 @@ face references, and voice references.
 | Slack cadence | `rate(30 minutes)` |
 | Report schedule | `aaggarwal1-tailwag-dev-daily-report` |
 | Report cadence | `cron(0 10 * * ? *)`, UTC |
+| Memory consolidation schedule | `aaggarwal1-tailwag-dev-daily-memory-consolidation` |
+| Memory consolidation cadence | `cron(0 1 * * ? *)`, `America/New_York` |
 
 Scheduler payloads include `<aws.scheduler.execution-id>` in `job_id`, so each
-execution has a unique idempotency key. A superseded daily report schedule with
-the same name remains disabled in the default schedule group; the enabled copy
-is in the application schedule group.
+execution has a unique idempotency key. The application schedule group contains the enabled Slack, report, and
+memory-consolidation schedules. Slack poll jobs store episodes without inline
+extraction and enqueue one memory-extraction job per ingested episode. The daily
+memory job runs `memory_consolidate_all` with `person_limit=100`. The daily report
+job publishes memory-item, person-timeline, and follow-up-validity reports under
+`daily/`.
 
 ### Queues, state, and storage
 
@@ -201,10 +209,10 @@ is in the application schedule group.
   - `aaggarwal1-tailwag-reports-032318240470-us-east-2`
   - `aaggarwal1-tailwag-worker-code-032318240470-us-east-2`
 
-The reports bucket is private. The worker-code bucket contains immutable ZIPs
-such as `dev-001` through `dev-005`; only the object selected by the
-CloudFormation `WorkerCodeS3Key` parameter runs. Older objects are rollback
-artifacts, not additional environments or Lambda fleets.
+The reports bucket is private. The worker-code bucket stores immutable
+deployment ZIPs. The core stack selects
+`lambda/tailwag-memory-worker-dev-005.zip` through the `WorkerCodeS3Key`
+parameter, and that object supplies all three worker functions.
 
 ### Secrets
 
@@ -217,8 +225,8 @@ Runtime values are stored in Secrets Manager under:
 - `aaggarwal1-tailwag/slack-bot-token`
 - `aaggarwal1-tailwag/api-bearer-token`
 
-The Neo4j password is the value originally supplied through the repository
-`.env`. Secret values must never be committed, copied into documentation, or
+The Neo4j password is read from Secrets Manager by the API and workers. Secret
+values must never be committed, copied into documentation, or
 placed directly in shell history when a safer retrieval mechanism is available.
 
 ### Observability
@@ -230,7 +238,7 @@ placed directly in shell history when a safer retrieval mechanism is available.
 | Alarm count | 17 |
 | Backup failure rule | `aaggarwal1-tailwag-dev-backup-job-failure` |
 
-The first-wave alarms cover API Gateway 5xx responses and p95 integration
+The alarms cover API Gateway 5xx responses and p95 integration
 latency, ALB unhealthy targets, errors and throttles for each Lambda worker,
 oldest-message age and DLQ visibility for each SQS flow, and Neo4j EC2 status
 checks and sustained CPU. Alarm and recovery notifications use the same SNS
@@ -511,10 +519,10 @@ Use stable caller-owned person and episode IDs. Treat Tailwag memory-item IDs as
 opaque. Retry only with the same episode ID when the payload represents the
 same logical episode.
 
-### Argos robot rollout checklist
+### Argos robot validation
 
-Use this checklist after the Argos API Gateway integration change is deployed
-to the robot:
+Use this checklist to validate an Argos robot against the deployed Tailwag
+service:
 
 1. Inject the current value of Secrets Manager secret
    `aaggarwal1-tailwag/api-bearer-token` as
@@ -554,14 +562,10 @@ to the robot:
      in `/ecs/aaggarwal1-tailwag-api` show successful Tailwag events without
      bearer-token, request-body, or memory-content logging.
 
-6. Only after those checks pass, mark the live Argos rollout gap in
-   [Known Gaps](#known-gaps) complete.
+6. Record the validation result in the operator run log.
 
 If the gateway or hosted service is unavailable, stop the live runtime and rely
-on Argos's existing memory-unavailable behavior while investigating. To roll
-back the configuration, restore the prior memory-provider endpoint in all three
-Argos manifests and restart Argos. Rolling back Argos or deleting the edge stack
-does not modify Tailwag's Neo4j data.
+on Argos's existing memory-unavailable behavior while investigating. Deleting the edge stack does not modify Tailwag's Neo4j data.
 
 Slack polling is already owned by the Tailwag EventBridge schedule. Argos
 should not start a second Slack poller for channel `C0896C8CE83`.
@@ -594,7 +598,7 @@ The helper is [`deploy/aws/scripts/build-push-api-image.sh`](../deploy/aws/scrip
 2. Build the ZIP with
    [`deploy/aws/scripts/package-worker-zip.sh`](../deploy/aws/scripts/package-worker-zip.sh).
 3. Upload it under a new immutable key such as
-   `lambda/tailwag-memory-worker-dev-006.zip`.
+   `lambda/<git-commit-sha>/tailwag-memory-worker.zip`.
 4. Update `WorkerCodeS3Key` on `aaggarwal1-tailwag-core-dev` through
    CloudFormation.
 5. Verify all Lambda updates and SQS mappings.
@@ -654,6 +658,18 @@ aws scheduler get-schedule \
   --group-name aaggarwal1-tailwag-dev \
   --name aaggarwal1-tailwag-dev-slack-poll-C0896C8CE83 \
   --query '{state:State,expression:ScheduleExpression}'
+
+aws scheduler get-schedule \
+  --region us-east-2 \
+  --group-name aaggarwal1-tailwag-dev \
+  --name aaggarwal1-tailwag-dev-daily-report \
+  --query '{state:State,expression:ScheduleExpression,timezone:ScheduleExpressionTimezone}'
+
+aws scheduler get-schedule \
+  --region us-east-2 \
+  --group-name aaggarwal1-tailwag-dev \
+  --name aaggarwal1-tailwag-dev-daily-memory-consolidation \
+  --query '{state:State,expression:ScheduleExpression,timezone:ScheduleExpressionTimezone}'
 ```
 
 Check CloudWatch log groups:
@@ -685,15 +701,15 @@ Rotate the API bearer token by updating
 the caller's secret, and rerunning provider health. Plan the ordering to avoid
 an avoidable outage.
 
-## Known Gaps
+## Current Deployment Constraints
 
-The deployed development environment does not yet have:
+The deployed development environment has these constraints:
 
-- HTTPS on the internal ALB
-- automated Neo4j EBS backups, intentionally deferred because of recovery-point cost
-- Neo4j disk and memory alarms from the CloudWatch Agent
-- an authenticated synthetic check that proves live Neo4j connectivity
-- a completed live robot Argos conversation and memory-retrieval rollout test
+- the internal ALB accepts HTTP only
+- no automated Neo4j EBS backup plan
+- no Neo4j disk or memory alarms from the CloudWatch Agent
+- no authenticated synthetic check that proves live Neo4j connectivity
+- no recorded live robot Argos conversation and memory-retrieval validation
 
 These are production-hardening or external-integration tasks, not missing core
 AWS runtime components. Broad network exposure, credential rotation, resource

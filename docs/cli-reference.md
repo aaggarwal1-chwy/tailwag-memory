@@ -57,7 +57,7 @@ Create an episode and run default transcript memory extraction:
 tailwag episode create --file examples/episode.json
 ```
 
-Create a later episode for an existing person by ID:
+Create another episode for an existing person by ID:
 
 ```bash
 tailwag episode create --file examples/existing-person-episode.json

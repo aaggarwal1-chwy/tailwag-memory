@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`tailwag-memory` can be consumed as a Python package or through its private HTTP
+`tailwag-memory` can be consumed as a Python package or through its authenticated HTTP
 service. The calling system owns IDs, identity decisions, biometric embedding
 generation, raw media handling, runtime orchestration, and retention policy.
 Tailwag owns durable Neo4j memory storage, embeddings, memory
@@ -13,7 +13,7 @@ This guide stays at the package setup and integration-boundary level. For detail
 
 ## Reference Map
 
-- Current graph model, scope, and deferred concepts: [Architecture](architecture.md)
+- Graph model, runtime scope, and boundaries: [Architecture](architecture.md)
 - Python endpoints, HTTP schemas, return shapes, and service constructors: [Memory Endpoints Reference](memory-endpoints.md)
 - Live AWS topology, resources, access, deployment, and operations: [AWS Deployment And Operations](aws-deployment.md)
 - Local command examples and CLI workflow: [CLI Reference](cli-reference.md)

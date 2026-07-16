@@ -9,7 +9,7 @@ workflow are documented in
 
 - `cloudformation/tailwag-memory-core.yaml`: shared AWS resources for the Tailwag API image and background worker flow.
 - `cloudformation/tailwag-memory-edge.yaml`: public HTTPS API Gateway and private VPC Link to the Tailwag ALB.
-- `cloudformation/tailwag-memory-observability.yaml`: first-wave CloudWatch alarms, SNS email routing, and AWS Backup failure routing.
+- `cloudformation/tailwag-memory-observability.yaml`: CloudWatch alarms, SNS email routing, and AWS Backup failure routing.
 - `deployment.env.example`: shell environment values used by the helper script and AWS CLI examples.
 - `iam/tailwag-api-task-policy.example.json`: ECS task policy example for the Tailwag API container.
 - `iam/tailwag-scheduler-policy.example.json`: EventBridge Scheduler role policy example for sending jobs to SQS.
@@ -97,7 +97,7 @@ references.
 When Neo4j runs on a private EC2 address, pass `WorkerSubnetIds` and
 `WorkerSecurityGroupIds` so worker Lambdas can reach Bolt. The selected worker
 subnets need outbound access to AWS APIs, Slack, and OpenAI, typically through a
-NAT gateway for the first deployment.
+NAT gateway for the Lambda runtime.
 
 The examples use one Secrets Manager namespace for all Tailwag runtime secrets:
 
@@ -140,7 +140,7 @@ aws cloudformation deploy \
     chewy:data_classification=internal
 ```
 
-Associate a newly created edge stack with the existing AWS Application using
+Associate the edge stack with the existing AWS Application using
 `APPLY_APPLICATION_TAG`, matching the core stack. Do not create a second
 application:
 
@@ -170,7 +170,7 @@ accounted for as a resource of the associated edge stack.
 
 ## Observability Stack
 
-The observability stack creates 17 first-wave alarms covering API Gateway 5xx
+The observability stack creates 17 alarms covering API Gateway 5xx
 and latency, ALB unhealthy targets, Lambda worker errors and throttles, SQS
 queue age and DLQ messages, and Neo4j EC2 status checks and sustained CPU. It
 also creates an SNS alarm topic, an email subscription, and an EventBridge rule
@@ -245,9 +245,11 @@ workers. Worker entrypoints should use:
 - S3 for generated report HTML and static assets
 - Secrets Manager for Neo4j, OpenAI, Slack, and API tokens
 
-EventBridge Scheduler can use the JSON examples in `scheduler/` to enqueue
-recurring Slack poll jobs and daily report jobs. Replace channel IDs, ARNs,
-schedule expressions, and job payload fields before creating schedules.
+EventBridge Scheduler uses the application schedule group for Slack polling,
+daily report generation, and daily memory consolidation. The JSON examples in
+`scheduler/` cover the Slack and report job payloads; the live memory schedule
+enqueues `memory_consolidate_all` for the memory worker. Replace channel IDs,
+ARNs, schedule expressions, and job payload fields before creating schedules.
 
 ## Updating The Deployed Application
 

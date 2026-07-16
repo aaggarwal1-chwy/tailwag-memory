@@ -6,10 +6,10 @@ Neo4j-only hybrid memory service with OpenAI-backed embeddings and deterministic
 
 The focused docs are the source of truth:
 
-- [Architecture](docs/architecture.md): current scope, graph model, design boundaries, privacy/biometric boundaries, and deferred concepts.
+- [Architecture](docs/architecture.md): runtime scope, graph model, design boundaries, and privacy/biometric boundaries.
 - [Python package and caller integration guide](docs/integration-guide.md): package installation, runtime configuration, and HTTP integration for Argos or another caller.
 - [Memory endpoints reference](docs/memory-endpoints.md): Python APIs, service constructors, input models, return shapes, and optional HTTP routes.
-- [AWS deployment and operations](docs/aws-deployment.md): current live resources, private network topology, laptop Neo4j access, caller hookup, deployment workflow, verification, and known gaps.
+- [AWS deployment and operations](docs/aws-deployment.md): live resources, private network topology, laptop Neo4j access, caller hookup, deployment workflow, verification, and deployment constraints.
 - [AWS deployment resources](deploy/aws/README.md): local CloudFormation, IAM policy examples, image build/push helper, and worker packaging helper for AWS deployment.
 - [AWS manual updates](docs/aws-manual-updates.md): operator-run API, worker, and infrastructure update procedures with verification and rollback.
 - [CLI reference](docs/cli-reference.md): local schema setup, ingestion, retrieval, memory maintenance, inspect, and Slack command examples.
@@ -19,7 +19,7 @@ The focused docs are the source of truth:
 
 ## Current Scope
 
-Tailwag stores caller-owned people, places, episodes, events, directory rows, biometric references, and transcript-derived memory items in Neo4j. For implemented and deferred scope, see [Architecture](docs/architecture.md).
+Tailwag stores caller-owned people, places, episodes, events, directory rows, biometric references, and transcript-derived memory items in Neo4j. For the complete runtime scope and explicit boundaries, see [Architecture](docs/architecture.md).
 
 ## Local Setup
 
