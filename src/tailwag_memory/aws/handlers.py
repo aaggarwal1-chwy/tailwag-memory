@@ -19,7 +19,6 @@ from .jobs import (
     parse_sqs_event,
 )
 from .reports import publish_report_files, render_report_files
-from .sqs import send_job
 
 
 def slack_poll_handler(event: dict[str, Any], context: object) -> dict[str, list[dict[str, str]]]:
@@ -84,30 +83,19 @@ def _process_slack_poll_job(job: WorkerJob) -> dict[str, Any]:
             history_limit=job.history_limit,
             reply_limit=job.reply_limit,
             extract_memory=job.extract_memory,
+            enqueue_memory_extraction=job.enqueue_memory_extraction,
         )
-
-    queued_memory_jobs: list[str | None] = []
-    memory_queue_url = os.getenv("TAILWAG_MEMORY_JOBS_QUEUE_URL")
-    if job.enqueue_memory_extraction and not job.extract_memory and memory_queue_url:
-        sqs_client = _boto3_client("sqs")
-        for episode_id in result.ingested_episode_ids:
-            queued_memory_jobs.append(
-                send_job(
-                    sqs_client,
-                    queue_url=memory_queue_url,
-                    job=MemoryExtractEpisodeJob(
-                        job_id=f"memory-extract:{episode_id}",
-                        episode_id=episode_id,
-                    ),
-                )
-            )
 
     return {
         "channel": result.channel,
         "checked_threads": result.checked_threads,
         "ingested_threads": result.ingested_threads,
         "ingested_episode_ids": result.ingested_episode_ids,
-        "queued_memory_jobs": [message_id for message_id in queued_memory_jobs if message_id],
+        "queued_memory_jobs": [
+            record.memory_extraction_job_id
+            for record in result.episode_records
+            if record.memory_extraction_job_id
+        ],
     }
 
 

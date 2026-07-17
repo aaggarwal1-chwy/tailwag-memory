@@ -114,10 +114,20 @@ class TailwagHttpMemoryProvider:
         )
         return str(result["context_markdown"])
 
-    def record_episode(self, episode: dict[str, Any], *, extract_memory: bool = True) -> dict[str, Any]:
+    def record_episode(
+        self,
+        episode: dict[str, Any],
+        *,
+        extract_memory: bool = True,
+        enqueue_memory_extraction: bool = True,
+    ) -> dict[str, Any]:
         return self._post(
             "episodes_record",
-            {"episode": episode, "extract_memory": extract_memory},
+            {
+                "episode": episode,
+                "extract_memory": extract_memory,
+                "enqueue_memory_extraction": enqueue_memory_extraction,
+            },
         )
 
     def semantic_search(self, text: str, person_id: str, *, limit: int = 5) -> dict[str, Any]:

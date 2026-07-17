@@ -45,7 +45,7 @@ Deleting a memory item also deletes memories reachable through outgoing
 
 ## Episode And Event Ingestion
 
-Create an episode from JSON without transcript memory extraction:
+Create an episode from JSON and defer transcript memory extraction to SQS (requires `TAILWAG_MEMORY_JOBS_QUEUE_URL`):
 
 ```bash
 tailwag episode create --file examples/episode.json --skip-memory-extraction
@@ -87,7 +87,7 @@ Generate prompt-ready person context:
 tailwag person context --person-id person_jamie
 tailwag person context --person-id person_jamie --semantic-scope "chargers"
 tailwag person context --person-id person_jamie --current-text "robot demo later today"
-tailwag person context --person-id person_jamie --memory-limit 8 --recent-episode-limit 3
+tailwag person context --person-id person_jamie --memory-limit 8
 tailwag person profile --person-id person_jamie
 ```
 

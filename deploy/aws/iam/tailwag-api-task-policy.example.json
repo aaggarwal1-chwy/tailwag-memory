@@ -10,6 +10,12 @@
       "Resource": [
         "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/*"
       ]
+    },
+    {
+      "Sid": "SendDeferredMemoryExtraction",
+      "Effect": "Allow",
+      "Action": "sqs:SendMessage",
+      "Resource": "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-memory-jobs"
     }
   ]
 }

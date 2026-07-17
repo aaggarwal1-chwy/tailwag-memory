@@ -81,12 +81,10 @@ def _memory_router() -> APIRouter:
     ) -> PersonContextResponse:
         rendered = client.person_context(
             payload.person_id,
-            limit=payload.limit,
             semantic_scope=payload.semantic_scope,
             current_text=payload.current_text,
             now=payload.now,
             memory_limit=payload.memory_limit,
-            recent_episode_limit=payload.recent_episode_limit,
         )
         return PersonContextResponse(
             person_id=payload.person_id,
@@ -102,6 +100,7 @@ def _memory_router() -> APIRouter:
         result = client.record_episode(
             EpisodeInput.from_dict(payload.episode.as_dict()),
             extract_memory=payload.extract_memory,
+            enqueue_memory_extraction=payload.enqueue_memory_extraction,
         )
         return asdict(result)
 

@@ -7,8 +7,6 @@ from .embeddings import EmbeddingProvider
 from .memory_item_helpers import _is_expired, _parse_iso
 from .memory_items import MemoryItemService, PINNED_MEMORY_KEYS, followup_is_visible
 from .models import MemoryItemResult
-from .retrieval import recent_episode_rows_for_person
-from .transcript_parsing import row_speaker_labels, target_transcript_turns
 
 
 class PersonMemoryContextService:
@@ -26,7 +24,6 @@ class PersonMemoryContextService:
         current_text: str | None = None,
         now: datetime | None = None,
         memory_limit: int = 12,
-        recent_episode_limit: int = 5,
     ) -> str:
         """Return durable memory markdown for a person."""
         memory_service = MemoryItemService(self.runner, self.embeddings or _NoopEmbeddingProvider())
@@ -39,52 +36,21 @@ class PersonMemoryContextService:
                 now=now,
             )
             items = _merge_items(items, vector_items)
-        recent_episodes = self._recent_episode_lines(person_id, recent_episode_limit)
-        return format_person_memory_markdown(items, recent_episode_lines=recent_episodes, now=now, limit=memory_limit)
-
-    def _recent_episode_lines(self, person_id: str, limit: int) -> list[str]:
-        """Return sanitized recent episode transcript lines."""
-        rows = recent_episode_rows_for_person(
-            self.runner,
-            str(person_id or "").strip(),
-            max(1, int(limit or 5)),
-        )
-        lines: list[str] = []
-        for row in rows:
-            transcript = str(row.get("transcript") or "").strip()
-            if not transcript:
-                continue
-            speech_lines = _target_speech_lines(
-                transcript,
-                person_id=str(row.get("person_id") or person_id or ""),
-                display_name=str(row.get("display_name") or ""),
-                speaker_labels=row_speaker_labels(row),
-            )
-            if not speech_lines:
-                continue
-            start_time = str(row.get("start_time") or "").strip()
-            prefix = start_time[:10] if len(start_time) >= 10 else start_time
-            rendered = " ".join(speech_lines)
-            line = f"{prefix}: {rendered}" if prefix else rendered
-            lines.append(_sanitize_context_line(line))
-        return lines
-
+        return format_person_memory_markdown(items, now=now, limit=memory_limit)
 
 def format_person_memory_markdown(
     items: list[MemoryItemResult],
     *,
-    recent_episode_lines: list[str] | None = None,
     now: datetime | None = None,
     limit: int = 12,
 ) -> str:
-    """Format memory items and episodes as markdown context."""
+    """Format durable memory items as prompt-ready markdown."""
     sections = [
         ("Boundaries", _section_lines(items, "boundary", now=now, limit=limit)),
         ("Preferences", _section_lines(items, "preference", now=now, limit=limit)),
         ("Pets", _section_lines(items, "pet", now=now, limit=limit)),
         ("Facts", _section_lines(items, "fact", now=now, limit=limit)),
         ("Potential Follow-Ups", _section_lines(items, "followup", now=now, limit=limit)),
-        ("Recent Episodes", list(recent_episode_lines or [])),
     ]
     lines = ["[PERSON MEMORY]"]
     for title, values in sections:
@@ -112,25 +78,6 @@ def _merge_items(left: list[MemoryItemResult], right: list[MemoryItemResult]) ->
         merged.append(item)
         seen.add(item.memory_id)
     return merged
-
-
-def _target_speech_lines(
-    transcript: str,
-    *,
-    person_id: str,
-    display_name: str,
-    speaker_labels: list[str],
-) -> list[str]:
-    """Return transcript lines whose speaker matches the target person."""
-    return [
-        f"{turn.speaker}: {turn.text}"
-        for turn in target_transcript_turns(
-            transcript,
-            person_id=person_id,
-            display_name=display_name,
-            speaker_labels=speaker_labels,
-        )
-    ]
 
 
 def _section_lines(

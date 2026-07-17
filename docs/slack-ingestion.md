@@ -15,7 +15,7 @@ The adapter does not add Slack-specific Neo4j labels or relationships. It maps S
 
 Slack ingestion does not create face or voice biometric reference nodes. When Slack resolves to an existing caller-owned canonical person, Slack uses the canonical ID for participation but does not send Slack display name or email into the person upsert, so caller-owned profile fields remain authoritative. When no canonical email match exists, the Slack-owned temporary person keeps the normalized email as identity evidence; Tailwag uses it to attach later same-email writes and rekeys the temporary Slack ID when a matching canonical `person_*` write arrives.
 
-Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. The adapter also preserves those mention targets in `EpisodeInput.mentioned_people`, resolving them through the same canonical-email path as speakers. Rendered person context uses bounded recent transcript lines spoken by the target person; mention-only people are not treated as speakers.
+Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. The adapter also preserves those mention targets in `EpisodeInput.mentioned_people`, resolving them through the same canonical-email path as speakers. Rendered person context contains only durable memory items; mention-only people are not treated as speakers.
 
 ## Slack App Setup
 
@@ -163,7 +163,7 @@ with TailwagMemoryClient.from_env() as memory:
         time.sleep(60)
 ```
 
-`TailwagMemoryClient` satisfies the poller's episode recorder contract, so package-level polling records the same episode and memory extraction result shapes as the CLI. `include_email=True` mirrors `--include-email`; `extract_memory=False` mirrors `--skip-memory-extraction`; `force_backfill=True` requires `backfill_hours`.
+`TailwagMemoryClient` satisfies the poller's episode recorder contract, so package-level polling records the same episode and memory extraction result shapes as the CLI. `include_email=True` mirrors `--include-email`; `extract_memory=False` defers extraction to SQS by default; `enqueue_memory_extraction=False` is the explicit no-extraction opt-out; `force_backfill=True` requires `backfill_hours`.
 
 The same runtime requirements still apply: the Slack token must have the needed scopes, episode recording needs Neo4j configuration, and production episode embeddings need OpenAI configuration. A first package poll without `backfill_hours` only arms the cursor, just like the CLI. Use `force_backfill=True` only for one-shot package backfills; continuous loops should rely on the saved state cursor so they do not replay the same backfill window.
 

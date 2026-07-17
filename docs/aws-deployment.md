@@ -452,9 +452,7 @@ curl -fsS \
   -d '{
     "person_id": "person_jamie",
     "current_text": "robot demo later today",
-    "limit": 10,
-    "memory_limit": 12,
-    "recent_episode_limit": 5
+    "memory_limit": 12
   }' \
   "$TAILWAG_BASE_URL/argos/providers/memory/resources/memory/request/person_context"
 ```

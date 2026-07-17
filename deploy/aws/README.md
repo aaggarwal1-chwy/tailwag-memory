@@ -11,7 +11,7 @@ workflow are documented in
 - `cloudformation/tailwag-memory-edge.yaml`: public HTTPS API Gateway and private VPC Link to the Tailwag ALB.
 - `cloudformation/tailwag-memory-observability.yaml`: CloudWatch alarms, SNS email routing, and AWS Backup failure routing.
 - `deployment.env.example`: shell environment values used by the helper script and AWS CLI examples.
-- `iam/tailwag-api-task-policy.example.json`: ECS task policy example for the Tailwag API container.
+- `iam/tailwag-api-task-policy.example.json`: ECS task policy example for the Tailwag API container, including send-only access to the memory extraction queue.
 - `iam/tailwag-scheduler-policy.example.json`: EventBridge Scheduler role policy example for sending jobs to SQS.
 - `iam/tailwag-worker-policy.example.json`: Lambda worker policy example for queue, state, and report access.
 - `scheduler/slack-poll-schedule.example.json`: EventBridge Scheduler payload for recurring Slack poll jobs.

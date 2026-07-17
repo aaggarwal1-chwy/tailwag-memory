@@ -10,7 +10,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 
 RUN python -m pip install --upgrade pip \
-    && python -m pip install ".[api]" \
+    && python -m pip install ".[api,aws]" \
     && addgroup --system tailwag \
     && adduser --system --ingroup tailwag --home /app tailwag \
     && chown -R tailwag:tailwag /app

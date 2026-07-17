@@ -103,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     create_parser.add_argument(
         "--skip-memory-extraction",
         action="store_true",
-        help="store the episode without OpenAI-backed memory extraction",
+        help="store the episode and defer memory extraction to SQS",
     )
 
     event_parser = subparsers.add_parser("event")
@@ -119,11 +119,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     person_subparsers = person_parser.add_subparsers(dest="person_command", required=True)
     context_parser = person_subparsers.add_parser("context")
     context_parser.add_argument("--person-id", required=True, help="person id to summarize")
-    context_parser.add_argument("--limit", type=int, default=10, help="maximum context items to retrieve")
     context_parser.add_argument("--semantic-scope", help="optional semantic focus for OpenAI-backed vector retrieval")
     context_parser.add_argument("--current-text", help="optional current utterance or task for memory item retrieval")
     context_parser.add_argument("--memory-limit", type=int, default=12, help="maximum durable memory items per section")
-    context_parser.add_argument("--recent-episode-limit", type=int, default=5, help="maximum recent episodes inspected for target-person transcript lines")
     profile_parser = person_subparsers.add_parser("profile")
     profile_parser.add_argument("--person-id", required=True, help="person id to inspect")
 
@@ -165,7 +163,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     slack_poll_parser.add_argument("--active-thread-hours", type=float, default=24.0, help="hours to keep checking recent roots")
     slack_poll_parser.add_argument("--history-limit", type=int, default=200, help="Slack history page size")
     slack_poll_parser.add_argument("--reply-limit", type=int, default=200, help="Slack replies page size")
-    slack_poll_parser.add_argument("--skip-memory-extraction", action="store_true", help="store episodes without memory extraction")
+    slack_poll_parser.add_argument("--skip-memory-extraction", action="store_true", help="store episodes and defer memory extraction to SQS")
     slack_poll_parser.add_argument("--include-email", action="store_true", help="store Slack profile email when available")
 
     memory_parser = subparsers.add_parser("memory")
@@ -335,11 +333,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     client.person_context(
                         args.person_id,
-                        limit=args.limit,
                         semantic_scope=args.semantic_scope,
                         current_text=args.current_text,
                         memory_limit=args.memory_limit,
-                        recent_episode_limit=args.recent_episode_limit,
                     )
                 )
                 return 0

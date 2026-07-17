@@ -129,11 +129,9 @@ Request:
 ```json
 {
   "person_id": "person_jamie",
-  "limit": 10,
   "semantic_scope": "workplace help",
   "current_text": "robot demo later today",
-  "memory_limit": 12,
-  "recent_episode_limit": 5
+  "memory_limit": 12
 }
 ```
 
@@ -165,7 +163,8 @@ Request:
     "place": {"building_code": "MAIN", "room_id": "101"},
     "participants": [{"id": "person_jamie", "role": "speaker"}]
   },
-  "extract_memory": true
+  "extract_memory": false,
+  "enqueue_memory_extraction": true
 }
 ```
 
@@ -574,7 +573,7 @@ Current policy prefers an accepted voice candidate when present, marks
 match, falls back to face when voice is absent, and otherwise returns
 `owner_source="unknown"`.
 
-### `record_episode(episode, *, extract_memory=True)`
+### `record_episode(episode, *, extract_memory=True, enqueue_memory_extraction=True)`
 
 Stores an episode, place, participants, participant relationships, and transcript embedding. By default it also runs transcript-derived memory extraction for the episode participants.
 
@@ -583,7 +582,8 @@ Parameters:
 | Name | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `episode` | `EpisodeInput` | yes | Caller-owned episode payload. |
-| `extract_memory` | `bool` | no | When true, create durable person memory items, support open follow-ups, or address resolved follow-ups from the transcript after storing the episode. |
+| `extract_memory` | `bool` | no | When true, create durable person memory items, support open follow-ups, or address resolved follow-ups from the transcript after storing the episode. When false, extraction is deferred to SQS by default. |
+| `enqueue_memory_extraction` | `bool` | no | Defaults to `true`. Set to `false` with `extract_memory=false` to store the episode without extracting or queuing memory. |
 
 Returns: `EpisodeRecordResult`.
 
@@ -592,6 +592,7 @@ Return fields:
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `episode_id` | `str` | Stored episode ID. |
+| `memory_extraction_job_id` | `str | None` | Idempotent SQS job ID when extraction was deferred; otherwise `None`. |
 | `memory_results` | `list[PersonMemoryExtractionResult]` | Per-person extraction results. Empty when `extract_memory=False`. |
 | `memory_errors` | `list[dict[str, str]]` | Extraction errors by person, if any. Episode storage can still succeed. |
 
@@ -599,23 +600,22 @@ Notes:
 
 - Episode storage always generates text embeddings, so production use requires `OPENAI_API_KEY`.
 - `extract_memory=True` uses OpenAI-backed memory extraction.
+- With `extract_memory=False`, Tailwag enqueues `memory_extract_episode` to `TAILWAG_MEMORY_JOBS_QUEUE_URL`; a missing URL raises before episode storage. Set `enqueue_memory_extraction=False` only when the caller intentionally wants no extraction.
 - Participants with role `speaker` are not required for `record_episode`, but roles help downstream extraction and retrieval semantics.
 
-### `person_context(person_id, limit=10, semantic_scope=None, *, current_text=None, now=None, memory_limit=12, recent_episode_limit=5)`
+### `person_context(person_id, semantic_scope=None, *, current_text=None, now=None, memory_limit=12)`
 
-Returns prompt-ready context for a person. The output combines deterministic durable memory markdown, visible follow-ups, and bounded recent transcript lines spoken by that person.
+Returns prompt-ready context containing deterministic durable memory markdown and visible follow-ups.
 
 Parameters:
 
 | Name | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `person_id` | `str` | yes | Caller-owned `Person.id`. |
-| `limit` | `int` | no | Reserved retrieval limit for lower-level person context evidence. Episode lines in high-level context are controlled by `recent_episode_limit`. |
 | `semantic_scope` | `str \| None` | no | Topic reused for durable memory ranking when `current_text` is omitted, and for a scoped episode no-match check. |
 | `current_text` | `str \| None` | no | Current utterance/task used to vector-rank durable memory items. When omitted, `semantic_scope` is reused for durable memory ranking. |
 | `now` | `datetime \| None` | no | Reference time for follow-up visibility in the deterministic durable memory section. |
 | `memory_limit` | `int` | no | Maximum durable memory lines per section. |
-| `recent_episode_limit` | `int` | no | Maximum recent episodes inspected for transcript lines spoken by the target person. |
 
 Returns: `str`.
 
@@ -645,8 +645,6 @@ Facts:
 Potential Follow-Ups:
 - Cape Cod trip with their parents planned for the weekend of 2026-06-20.
 
-Recent Episodes:
-- 2026-06-16: Jamie: Luna has a vet visit tomorrow.
 ```
 
 ### `search_semantic_memory(*, text, person_id, building_code=None, limit=5, now=None)`
@@ -983,7 +981,7 @@ When `semantic_scope` is provided, `embeddings` is required.
 
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
-| `markdown_for_person(...)` | `person_id`, optional `current_text`, `now`, `memory_limit`, `recent_episode_limit` | `str` | Deterministic durable memory and recent episode markdown. |
+| `markdown_for_person(...)` | `person_id`, optional `current_text`, `now`, `memory_limit` | `str` | Deterministic durable memory markdown. |
 
 ## Extraction And Consolidation Services
 

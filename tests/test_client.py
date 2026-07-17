@@ -279,11 +279,40 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 return episode.id
 
         with patch("tailwag_memory.client.EpisodeIngestionService", FakeIngestion):
-            result = TailwagMemoryClient(runner, _settings()).record_episode(_episode(), extract_memory=False)
+            result = TailwagMemoryClient(runner, _settings()).record_episode(
+                _episode(),
+                extract_memory=False,
+                enqueue_memory_extraction=False,
+            )
 
         self.assertEqual(calls, [("ingest", "episode_1")])
         self.assertEqual(result.memory_results, [])
         self.assertEqual(result.memory_errors, [])
+
+    def test_record_episode_queues_deferred_memory_extraction(self) -> None:
+        runner = RecordingQueryRunner()
+        calls = []
+
+        class FakeIngestion:
+            def __init__(self, runner_arg, embeddings) -> None:
+                pass
+
+            def ingest(self, episode: EpisodeInput) -> str:
+                calls.append(("ingest", episode.id))
+                return episode.id
+
+        with patch.dict("tailwag_memory.client.os.environ", {"TAILWAG_MEMORY_JOBS_QUEUE_URL": "https://sqs.example/memory"}):
+            with patch("tailwag_memory.client.EpisodeIngestionService", FakeIngestion):
+                with patch("tailwag_memory.client._enqueue_memory_extraction_job") as enqueue:
+                    result = TailwagMemoryClient(runner, _settings()).record_episode(
+                        _episode(),
+                        extract_memory=False,
+                    )
+
+        self.assertEqual(calls, [("ingest", "episode_1")])
+        enqueue.assert_called_once_with("https://sqs.example/memory", "episode_1")
+        self.assertEqual(result.memory_extraction_job_id, "memory-extract:episode_1")
+        self.assertEqual(result.memory_results, [])
 
     def test_extract_memory_for_episode_uses_stored_episode_path(self) -> None:
         runner = RecordingQueryRunner()
@@ -321,9 +350,8 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 current_text: str | None = None,
                 now=None,
                 memory_limit: int = 12,
-                recent_episode_limit: int = 5,
             ) -> str:
-                memory_calls.append((person_id, current_text, now, memory_limit, recent_episode_limit))
+                memory_calls.append((person_id, current_text, now, memory_limit))
                 return "[PERSON MEMORY]\nPreferences:\n- likes robot demos"
 
         class FakeRetrieval:
@@ -344,20 +372,18 @@ class TailwagMemoryClientTest(unittest.TestCase):
             with patch("tailwag_memory.client.PersonContextRetrievalService", FakeRetrieval):
                 context = TailwagMemoryClient(RecordingQueryRunner(), _settings()).person_context(
                     "person_jamie",
-                    limit=3,
                     semantic_scope="chargers",
                     current_text="robot demo",
                     now=now,
                     memory_limit=4,
-                    recent_episode_limit=2,
                 )
 
         self.assertEqual(
             context,
             "[PERSON MEMORY]\nPreferences:\n- likes robot demos",
         )
-        self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4, 2)])
-        self.assertEqual(retrieval_calls, [("person_jamie", 3, "chargers")])
+        self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4)])
+        self.assertEqual(retrieval_calls, [("person_jamie", 10, "chargers")])
 
     def test_search_semantic_memory_returns_episode_and_memory_item_results(self) -> None:
         runner = RecordingQueryRunner()

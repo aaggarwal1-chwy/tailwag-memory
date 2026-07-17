@@ -33,7 +33,13 @@ class SlackConversationClient(Protocol):
 class EpisodeRecorder(Protocol):
     """Describe the episode recording behavior needed by Slack polling."""
 
-    def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
+    def record_episode(
+        self,
+        episode: EpisodeInput,
+        *,
+        extract_memory: bool = True,
+        enqueue_memory_extraction: bool = True,
+    ) -> EpisodeRecordResult:
         """Record one episode and optionally extract memory."""
         ...
 
@@ -297,6 +303,7 @@ class SlackMemoryPoller:
         history_limit: int = 200,
         reply_limit: int = 200,
         extract_memory: bool = True,
+        enqueue_memory_extraction: bool = True,
     ) -> SlackPollResult:
         """Run one Slack channel polling pass."""
         if force_backfill and backfill_hours is None:
@@ -371,6 +378,11 @@ class SlackMemoryPoller:
                     self.episode_recorder.record_episode(
                         episode,
                         extract_memory=extract_memory,
+                        **(
+                            {"enqueue_memory_extraction": False}
+                            if not enqueue_memory_extraction
+                            else {}
+                        ),
                     )
                 )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
+import os
 
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
@@ -270,13 +271,11 @@ class TailwagMemoryClient:
     def person_context(
         self,
         person_id: str,
-        limit: int = 10,
         semantic_scope: str | None = None,
         *,
         current_text: str | None = None,
         now: datetime | None = None,
         memory_limit: int = 12,
-        recent_episode_limit: int = 5,
     ) -> str:
         """Return deterministic durable and retrieved context for a person."""
         memory_context = PersonMemoryContextService(self.runner, self._embeddings()).markdown_for_person(
@@ -284,11 +283,9 @@ class TailwagMemoryClient:
             current_text=current_text or semantic_scope,
             now=now,
             memory_limit=memory_limit,
-            recent_episode_limit=recent_episode_limit,
         )
         retrieved_context = PersonContextRetrievalService(self.runner, self._embeddings()).markdown_for_person(
             person_id,
-            limit=limit,
             semantic_scope=semantic_scope,
         )
         return "\n\n".join(part for part in [memory_context, retrieved_context] if part)
@@ -334,12 +331,25 @@ class TailwagMemoryClient:
             "memory_items": [asdict(result) for result in memory_item_results],
         }
 
-    def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
-        """Store an episode and optionally extract durable memory items."""
+    def record_episode(
+        self,
+        episode: EpisodeInput,
+        *,
+        extract_memory: bool = True,
+        enqueue_memory_extraction: bool = True,
+    ) -> EpisodeRecordResult:
+        """Store an episode and extract memory inline or queue it for extraction."""
         episode = normalize_robot_speaker_labels(episode)
+        memory_queue_url = _memory_queue_url() if not extract_memory and enqueue_memory_extraction else None
         episode_id = EpisodeIngestionService(self.runner, self._embeddings()).ingest(episode)
         if not extract_memory:
-            return EpisodeRecordResult(episode_id=episode_id)
+            if memory_queue_url is None:
+                return EpisodeRecordResult(episode_id=episode_id)
+            _enqueue_memory_extraction_job(memory_queue_url, episode_id)
+            return EpisodeRecordResult(
+                episode_id=episode_id,
+                memory_extraction_job_id=f"memory-extract:{episode_id}",
+            )
         extraction = self._memory_extraction_service().extract_for_episode(episode, speaker_only=False)
         return EpisodeRecordResult(
             episode_id=episode_id,
@@ -437,3 +447,28 @@ class TailwagMemoryClient:
             face_embedding_model=self.settings.face_embedding_model,
             voice_embedding_model=self.settings.voice_embedding_model,
         )
+
+
+def _memory_queue_url() -> str:
+    """Return the required SQS queue URL for deferred extraction."""
+    queue_url = str(os.getenv("TAILWAG_MEMORY_JOBS_QUEUE_URL") or "").strip()
+    if not queue_url:
+        raise RuntimeError(
+            "TAILWAG_MEMORY_JOBS_QUEUE_URL is required when "
+            "extract_memory=False and enqueue_memory_extraction=True"
+        )
+    return queue_url
+
+
+def _enqueue_memory_extraction_job(queue_url: str, episode_id: str) -> None:
+    """Enqueue idempotent memory extraction after the episode is stored."""
+    import boto3
+
+    from .aws.jobs import MemoryExtractEpisodeJob
+    from .aws.sqs import send_job
+
+    send_job(
+        boto3.client("sqs"),
+        queue_url=queue_url,
+        job=MemoryExtractEpisodeJob(job_id=f"memory-extract:{episode_id}", episode_id=episode_id),
+    )

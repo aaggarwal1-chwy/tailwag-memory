@@ -146,11 +146,9 @@ class TailwagApiAppTest(unittest.TestCase):
             headers=_auth_header(),
             json={
                 "person_id": "person_jamie",
-                "limit": 3,
                 "semantic_scope": "chargers",
                 "current_text": "robot demo",
                 "memory_limit": 4,
-                "recent_episode_limit": 2,
             },
         )
 
@@ -166,12 +164,10 @@ class TailwagApiAppTest(unittest.TestCase):
                     "person_context",
                     "person_jamie",
                     {
-                        "limit": 3,
                         "semantic_scope": "chargers",
                         "current_text": "robot demo",
                         "now": None,
                         "memory_limit": 4,
-                        "recent_episode_limit": 2,
                     },
                 )
             ],
@@ -203,6 +199,7 @@ class TailwagApiAppTest(unittest.TestCase):
                 ],
             },
             "extract_memory": False,
+            "enqueue_memory_extraction": False,
         }
 
         response = TestClient(app).post(f"{API_BASE}/episodes_record", headers=_auth_header(), json=payload)
@@ -212,6 +209,7 @@ class TailwagApiAppTest(unittest.TestCase):
             response.json(),
             {
                 "episode_id": "episode_1",
+                "memory_extraction_job_id": None,
                 "memory_results": [
                     {
                         "person_id": "person_jamie",
@@ -229,6 +227,7 @@ class TailwagApiAppTest(unittest.TestCase):
         self.assertIsInstance(fake.calls[0][1], EpisodeInput)
         self.assertEqual(fake.calls[0][1].participants[0].official_name, "Jamie Example")
         self.assertFalse(fake.calls[0][2]["extract_memory"])
+        self.assertFalse(fake.calls[0][2]["enqueue_memory_extraction"])
 
     def test_episode_endpoint_rejects_malformed_payload_as_422(self) -> None:
         from tailwag_memory.api.app import create_app
@@ -615,8 +614,23 @@ class _FakeClient:
         self.calls.append(("person_context", person_id, kwargs))
         return "[PERSON MEMORY]\n- likes robot demos"
 
-    def record_episode(self, episode: EpisodeInput, *, extract_memory: bool = True) -> EpisodeRecordResult:
-        self.calls.append(("record_episode", episode, {"extract_memory": extract_memory}))
+    def record_episode(
+        self,
+        episode: EpisodeInput,
+        *,
+        extract_memory: bool = True,
+        enqueue_memory_extraction: bool = True,
+    ) -> EpisodeRecordResult:
+        self.calls.append(
+            (
+                "record_episode",
+                episode,
+                {
+                    "extract_memory": extract_memory,
+                    "enqueue_memory_extraction": enqueue_memory_extraction,
+                },
+            )
+        )
         return EpisodeRecordResult(
             episode_id=episode.id,
             memory_results=[

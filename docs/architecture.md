@@ -33,7 +33,7 @@ Runtime components:
 - OpenAI-backed memory item embeddings
 - Neo4j 5.26 local Docker runtime
 - Neo4j constraints and vector indexes for episode text, biometric reference vectors, and `MemoryItem.summary_embedding`
-- deterministic/vector-derived person context with durable memory sections and the target person's recent transcript lines
+- deterministic/vector-derived person context with durable memory sections
 - transcript-derived person memory items
 - per-person memory consolidation and merged memories from repeated or related episode evidence into `MemoryItem`
 - caller-supplied `FaceReference.embedding`
@@ -399,7 +399,7 @@ places.
 
 Tailwag provides graph lookups for episodes by person, episodes by place, events by place, and biometric person recognition. Vector retrieval supports episode transcript search, hybrid person/place-filtered episode search, and memory item summary search.
 
-`person_context()` returns one prompt-ready deterministic context surface. It combines active durable memory items, visible follow-ups, and bounded recent transcript lines spoken by the target person. When `current_text` or `semantic_scope` is supplied, memory item ranking can use vector similarity, but rendered episode context remains bounded to the target person's lines.
+`person_context()` returns one prompt-ready deterministic context surface. It combines active durable memory items, visible follow-ups, and. When `current_text` or `semantic_scope` is supplied, memory item ranking can use vector similarity, but rendered episode context remains bounded to the target person's lines.
 
 ## Source Adapters
 
