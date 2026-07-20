@@ -86,7 +86,6 @@ def _memory_router() -> APIRouter:
             current_text=payload.current_text,
             now=payload.now,
             memory_limit=payload.memory_limit,
-            recent_episode_limit=payload.recent_episode_limit,
         )
         return PersonContextResponse(
             person_id=payload.person_id,

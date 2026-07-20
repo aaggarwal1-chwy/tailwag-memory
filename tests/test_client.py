@@ -377,7 +377,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
                     current_text="robot demo",
                     now=now,
                     memory_limit=4,
-                    recent_episode_limit=2,
                 )
 
         self.assertEqual(

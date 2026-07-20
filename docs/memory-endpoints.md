@@ -132,8 +132,7 @@ Request:
   "limit": 10,
   "semantic_scope": "workplace help",
   "current_text": "robot demo later today",
-  "memory_limit": 12,
-  "recent_episode_limit": 5
+  "memory_limit": 12
 }
 ```
 
@@ -605,7 +604,7 @@ Notes:
 - With `extract_memory=False`, Tailwag enqueues `memory_extract_episode` to `TAILWAG_MEMORY_JOBS_QUEUE_URL`; a missing URL raises before episode storage. Set `enqueue_memory_extraction=False` only when the caller intentionally wants no extraction.
 - Participants with role `speaker` are not required for `record_episode`, but roles help downstream extraction and retrieval semantics.
 
-### `person_context(person_id, limit=10, semantic_scope=None, *, current_text=None, now=None, memory_limit=12, recent_episode_limit=5)`
+### `person_context(person_id, limit=10, semantic_scope=None, *, current_text=None, now=None, memory_limit=12)`
 
 Returns prompt-ready context for a person. The output combines deterministic durable memory markdown and visible follow-ups while excluding episode transcript text.
 
@@ -619,7 +618,6 @@ Parameters:
 | `current_text` | `str \| None` | no | Current utterance/task used to vector-rank durable memory items. When omitted, `semantic_scope` is reused for durable memory ranking. |
 | `now` | `datetime \| None` | no | Reference time for follow-up visibility in the deterministic durable memory section. |
 | `memory_limit` | `int` | no | Maximum durable memory lines per section. |
-| `recent_episode_limit` | `int` | no | Compatibility field still sent by Argos; accepted but ignored because transcripts are excluded. |
 
 Returns: `str`.
 

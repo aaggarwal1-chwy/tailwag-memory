@@ -150,7 +150,6 @@ class TailwagApiAppTest(unittest.TestCase):
                 "semantic_scope": "chargers",
                 "current_text": "robot demo",
                 "memory_limit": 4,
-                "recent_episode_limit": 2,
             },
         )
 
@@ -171,7 +170,6 @@ class TailwagApiAppTest(unittest.TestCase):
                         "current_text": "robot demo",
                         "now": None,
                         "memory_limit": 4,
-                        "recent_episode_limit": 2,
                     },
                 )
             ],

@@ -277,10 +277,8 @@ class TailwagMemoryClient:
         current_text: str | None = None,
         now: datetime | None = None,
         memory_limit: int = 12,
-        recent_episode_limit: int = 5,
     ) -> str:
-        """Return durable context while accepting Argos's legacy episode-limit field."""
-        del recent_episode_limit
+        """Return durable, transcript-free context for a person."""
         memory_context = PersonMemoryContextService(self.runner, self._embeddings()).markdown_for_person(
             person_id,
             current_text=current_text or semantic_scope,

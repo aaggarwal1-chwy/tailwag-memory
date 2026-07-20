@@ -742,7 +742,6 @@ class CliTest(unittest.TestCase):
                 *,
                 current_text: str | None = None,
                 memory_limit: int = 12,
-                recent_episode_limit: int = 5,
             ) -> str:
                 calls.append(
                     {
@@ -751,7 +750,6 @@ class CliTest(unittest.TestCase):
                         "semantic_scope": semantic_scope,
                         "current_text": current_text,
                         "memory_limit": memory_limit,
-                        "recent_episode_limit": recent_episode_limit,
                     }
                 )
                 return "[PERSON MEMORY]\nPreferences:\n- likes robot demos\n\nJamie recently asked about chargers."
@@ -786,7 +784,6 @@ class CliTest(unittest.TestCase):
                     "semantic_scope": None,
                     "current_text": "robot demo",
                     "memory_limit": 4,
-                    "recent_episode_limit": 5,
                 }
             ],
         )

@@ -99,7 +99,6 @@ class PersonContextRequest(StrictRequest):
     current_text: str | None = None
     now: datetime | None = None
     memory_limit: int = 12
-    recent_episode_limit: int = 5
 
 
 class PersonContextResponse(StrictRequest):
