@@ -251,56 +251,68 @@ independently taggable and are represented through the tagged topic and stack.
 
 ## View Reports In S3
 
-Generated reports are stored in the private reports bucket in `us-east-2`.
+Generated reports are stored in a private S3 bucket in `us-east-2`. Opening a
+bucket or object URL directly in a browser can return a 404 error because the
+bucket is not public. Download the entire report prefix and serve it locally
+instead; the HTML pages require the CSS and JavaScript assets that sit beside
+them.
+
 The operator needs AWS CLI credentials for account `032318240470` and read
-access to the bucket. Verify the active identity, then list the available
-report prefixes and files:
+access to the bucket. Run the following commands in order to view the daily
+follow-up validity report:
 
 ```bash
 aws sts get-caller-identity --query "{Account:Account,Arn:Arn}" --output json
-
-aws s3 ls \
-  s3://aaggarwal1-tailwag-reports-032318240470-us-east-2/ \
-  --recursive \
-  --region us-east-2
 ```
 
-Choose a prefix from that listing. For example, download the
-`manual-smoke-002` report and its shared browser assets with:
+```bash
+export REPORT_BUCKET="aaggarwal1-tailwag-reports-032318240470-us-east-2"
+export REPORT_PREFIX="daily"
+export REPORT_DIR="/tmp/tailwag-report/${REPORT_PREFIX}"
+```
 
 ```bash
-REPORT_PREFIX=manual-smoke-002
-mkdir -p "/tmp/tailwag-report/${REPORT_PREFIX}"
+aws s3 ls "s3://${REPORT_BUCKET}/${REPORT_PREFIX}/" --recursive --region us-east-2
+```
 
+Confirm the listing includes `tailwag-followup-validity.html`,
+`tailwag-inspect.css`, and `tailwag-inspect.js`, then download the complete
+prefix:
+
+```bash
+mkdir -p "${REPORT_DIR}"
+```
+
+```bash
 aws s3 cp \
-  "s3://aaggarwal1-tailwag-reports-032318240470-us-east-2/${REPORT_PREFIX}/" \
-  "/tmp/tailwag-report/${REPORT_PREFIX}/" \
+  "s3://${REPORT_BUCKET}/${REPORT_PREFIX}/" \
+  "${REPORT_DIR}/" \
   --recursive \
   --region us-east-2
 ```
 
-Download the whole prefix rather than only one HTML object. The report pages
-load `tailwag-inspect.css` and `tailwag-inspect.js` from the same directory.
-
-Open a downloaded HTML file directly, or serve the directory locally:
+Serve the downloaded directory locally:
 
 ```bash
-python3 -m http.server 8000 \
-  --directory "/tmp/tailwag-report/${REPORT_PREFIX}"
+python3 -m http.server 8000 --directory "${REPORT_DIR}"
 ```
 
-Keep that process running and browse to the report that exists in the prefix,
-for example:
+Keep that process running and open:
+
+```text
+http://localhost:8000/tailwag-followup-validity.html
+```
+
+If the corresponding files are present, the other daily reports are available
+at:
 
 ```text
 http://localhost:8000/tailwag-memory-items.html
 http://localhost:8000/tailwag-person-timeline.html
-http://localhost:8000/tailwag-followup-validity.html
 ```
 
-Only report types requested by the corresponding report job will be present.
-The bucket can also be browsed in the AWS S3 console, but downloading the full
-prefix is the reliable way to preserve the relative report asset links.
+Only report types requested by the report job will be present. Press `Ctrl-C`
+in the terminal when you are done serving the reports.
 
 ## Connect To Neo4j From A Laptop
 
