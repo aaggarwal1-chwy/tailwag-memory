@@ -42,6 +42,26 @@ For HTTP serving with FastAPI:
 python -m pip install -e "/path/to/tailwag-memory[api]"
 ```
 
+For deferred memory extraction through SQS, install the AWS extra in the
+process that records the episode and enqueues the extraction job:
+
+```bash
+python -m pip install -e "/path/to/tailwag-memory[aws]"
+```
+
+Combine extras when the FastAPI service will enqueue deferred extraction:
+
+```bash
+python -m pip install -e "/path/to/tailwag-memory[api,aws]"
+```
+
+The `aws` extra provides `boto3`. It is required when calling
+`record_episode(..., extract_memory=False)` with the default
+`enqueue_memory_extraction=True`, along with a configured
+`TAILWAG_MEMORY_JOBS_QUEUE_URL`. Inline extraction and the explicit
+no-extraction combination (`extract_memory=False`,
+`enqueue_memory_extraction=False`) do not require the AWS extra.
+
 The repository includes a production-oriented Docker image for the FastAPI
 adapter and AWS worker helpers for polling, memory jobs, and report publishing.
 See [AWS Deployment And Operations](aws-deployment.md) for the live cloud

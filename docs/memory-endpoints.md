@@ -1058,13 +1058,13 @@ Constructor parameters:
 | Name | Type | Meaning |
 | --- | --- | --- |
 | `client` | `SlackConversationClient` | Slack API client or test fake. |
-| `episode_recorder` | `EpisodeRecorder` | Object with `record_episode(episode, extract_memory=True)`. `TailwagMemoryClient` satisfies this and also exposes canonical email resolution. |
+| `episode_recorder` | `EpisodeRecorder` | Object with `record_episode(episode, *, extract_memory=True, enqueue_memory_extraction=True) -> EpisodeRecordResult`. `TailwagMemoryClient` satisfies this and also exposes canonical email resolution. The poller omits the enqueue keyword when it is `True` and passes it explicitly only for the `False` opt-out. |
 | `state_store` | `SlackPollStateStore` | Poll cursor store. Use `SlackFilePollStateStore(Path(...))` for local JSON state or `SlackDynamoDBPollStateStore` for AWS DynamoDB-backed state. |
 | `retention_class` | `str` | Retention class assigned to Slack episodes. |
 | `active_thread_hours` | `float` | How long standalone roots stay active for later replies. |
 | `person_id_resolver` | `Callable[[str], str \| None] \| None` | Optional normalized-email resolver. When omitted, the poller uses `episode_recorder.canonical_person_id_by_email` when available. |
 
-### `poll_once(channel, *, backfill_hours=None, force_backfill=False, history_limit=200, reply_limit=200, extract_memory=True)`
+### `poll_once(channel, *, backfill_hours=None, force_backfill=False, history_limit=200, reply_limit=200, extract_memory=True, enqueue_memory_extraction=True)`
 
 Runs one Slack channel polling pass.
 
@@ -1079,7 +1079,8 @@ Parameters:
 | `force_backfill` | `bool` | Ignore saved cursor and replay the backfill window. Requires `backfill_hours`. |
 | `history_limit` | `int` | Slack API page size for channel history requests. |
 | `reply_limit` | `int` | Slack API page size for thread reply requests. |
-| `extract_memory` | `bool` | Whether recorded episodes run memory extraction. |
+| `extract_memory` | `bool` | Whether recorded episodes run memory extraction inline. Passed through to `EpisodeRecorder.record_episode`. |
+| `enqueue_memory_extraction` | `bool` | When `extract_memory=False`, whether `TailwagMemoryClient` queues deferred extraction. Defaults to `True`; set both flags to `False` to record without extracting or queuing memory. |
 
 Returns: `SlackPollResult`.
 
@@ -1092,9 +1093,22 @@ Return fields:
 | `ingested_threads` | Threads recorded as episodes. |
 | `latest_history_ts` | Saved Slack history cursor. |
 | `armed_without_backfill` | True when first run only initialized the cursor. |
-| `memory_extraction_enabled` | Whether extraction was requested. |
+| `memory_extraction_enabled` | Whether inline extraction was requested (`extract_memory`); this does not report deferred queue status. |
 | `ingested_episode_ids` | Recorded episode IDs. |
-| `episode_records` | `EpisodeRecordResult` values from recording. |
+| `episode_records` | `EpisodeRecordResult` values from recording, including inline `memory_results`/`memory_errors` or a deferred `memory_extraction_job_id`. |
+
+Extraction behavior with `TailwagMemoryClient`:
+
+| `extract_memory` | `enqueue_memory_extraction` | Behavior |
+| --- | --- | --- |
+| `True` | either value | Record the episode and extract memory inline. |
+| `False` | `True` | Require `TAILWAG_MEMORY_JOBS_QUEUE_URL`, record the episode, and enqueue a `memory_extract_episode` job. |
+| `False` | `False` | Record the episode without inline or deferred memory extraction. |
+
+An exception from Slack history/replies, episode recording, or state saving is
+propagated. The poller saves its updated cursor only after all selected threads
+have been processed. Per-person inline extraction errors returned normally in
+`EpisodeRecordResult.memory_errors` do not fail the polling pass.
 
 ### `build_episode_from_slack_thread(*, channel, messages, client, retention_class="standard", person_id_resolver=None)`
 

@@ -127,6 +127,7 @@ with TailwagMemoryClient.from_env() as memory:
         "C0123456789",
         backfill_hours=2,
         extract_memory=True,
+        enqueue_memory_extraction=True,
     )
 
 print(result.ingested_episode_ids)
@@ -163,7 +164,38 @@ with TailwagMemoryClient.from_env() as memory:
         time.sleep(60)
 ```
 
-`TailwagMemoryClient` satisfies the poller's episode recorder contract, so package-level polling records the same episode and memory extraction result shapes as the CLI. `include_email=True` mirrors `--include-email`; `extract_memory=False` defers extraction to SQS by default; `enqueue_memory_extraction=False` is the explicit no-extraction opt-out; `force_backfill=True` requires `backfill_hours`.
+`TailwagMemoryClient` satisfies the poller's `EpisodeRecorder` contract:
+
+```python
+def record_episode(
+    episode: EpisodeInput,
+    *,
+    extract_memory: bool = True,
+    enqueue_memory_extraction: bool = True,
+) -> EpisodeRecordResult: ...
+```
+
+`poll_once()` passes `extract_memory` to every episode recording call. It leaves
+`enqueue_memory_extraction` at the recorder default when the poll option is
+`True`, and explicitly passes `False` when deferred extraction is disabled. A
+protocol-compliant custom recorder accepts both keyword arguments; omitting the
+default enqueue keyword also preserves the normal path for older recorders,
+while the explicit opt-out requires support for that keyword.
+
+| `extract_memory` | `enqueue_memory_extraction` | `TailwagMemoryClient` behavior |
+| --- | --- | --- |
+| `True` | either value | Record the episode and extract memory inline. |
+| `False` | `True` | Require `TAILWAG_MEMORY_JOBS_QUEUE_URL`, record the episode, and enqueue a `memory_extract_episode` job. |
+| `False` | `False` | Record the episode without inline or deferred memory extraction. |
+
+`SlackPollResult.memory_extraction_enabled` mirrors `extract_memory`; it does not
+indicate whether deferred extraction was queued or completed. Inspect each
+`EpisodeRecordResult.memory_extraction_job_id` in `episode_records` for the
+queued job ID. Inline extraction results and per-person errors remain available
+in each record's `memory_results` and `memory_errors`.
+
+`include_email=True` mirrors `--include-email`, and `force_backfill=True`
+requires `backfill_hours`.
 
 The same runtime requirements still apply: the Slack token must have the needed scopes, episode recording needs Neo4j configuration, and production episode embeddings need OpenAI configuration. A first package poll without `backfill_hours` only arms the cursor, just like the CLI. Use `force_backfill=True` only for one-shot package backfills; continuous loops should rely on the saved state cursor so they do not replay the same backfill window.
 
