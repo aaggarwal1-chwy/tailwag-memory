@@ -70,29 +70,22 @@ Manager mapping.
 
 ## HTTP Service Integration For Argos Or Another Caller
 
-The deployed AWS environment exposes Tailwag through a public HTTPS API Gateway
-backed by a private ALB and ECS service. A caller should use that service
-boundary instead of connecting directly to Neo4j or importing Tailwag's AWS
-worker internals.
-
-The live development endpoint is:
+Use a deployed Tailwag HTTP service instead of connecting directly to Neo4j or
+importing Tailwag's worker internals. Store the deployment-specific URL and
+token in the caller's runtime configuration or secret store:
 
 ```text
-https://a9vhnyd929.execute-api.us-east-2.amazonaws.com
-```
-
-The caller needs ordinary outbound HTTPS connectivity; it does not need a route
-into the Tailwag VPC. Store these values in the caller's runtime configuration
-or secret store:
-
-```text
-TAILWAG_BASE_URL=https://a9vhnyd929.execute-api.us-east-2.amazonaws.com
-TAILWAG_BEARER_TOKEN=<value from aaggarwal1-tailwag/api-bearer-token>
+TAILWAG_BASE_URL=<deployment base URL>
+TAILWAG_BEARER_TOKEN=<secret value>
 ```
 
 The variable names are recommended examples; an existing Argos configuration
 layer may use different names. The requirements are the same base URL and an
 `Authorization: Bearer <token>` header. Never commit the token.
+
+An HTTP-only caller does not need to install the Tailwag package. The sample
+adapter below uses `httpx`, which the caller must provide as its own dependency
+(for example, `python -m pip install httpx`).
 
 ### Minimal provider adapter
 
@@ -168,8 +161,8 @@ Argos should:
 - call `person_context` before prompt assembly and map `context_markdown` into
   its existing memory/about/follow-up prompt fields
 - call `episodes_record` after a live transcript is complete, using
-  `episode_type="conversation"`, `source="live_chat"`, and stable caller-owned
-  person and episode IDs
+  `episode_type="conversation"`, stable caller-owned person and episode IDs,
+  and `source="live_chat"` on each applicable participant payload
 - call `semantic_search` for explicit memory-search tools and preserve the
   separate `episodes` and `memory_items` response lists
 - use the people, identity, profile, biometric, and turn-owner routes when
@@ -182,8 +175,9 @@ Slack ingestion. Argos continues to own realtime turn behavior, robot identity,
 raw media and transcript production, upstream face/speaker embeddings,
 retention decisions, and final prompt assembly.
 
-Slack channel `C0896C8CE83` is already polled by Tailwag's EventBridge
-schedule. Argos must not start a second poller for that channel.
+Before enabling a source poller in another caller, check the current deployment
+ownership in [AWS Deployment And Operations](aws-deployment.md) to avoid
+polling the same source twice.
 
 Slack-created temporary people can use IDs such as `slack:<user_id>`. When
 Argos confirms a canonical identity by email, use the rekey-by-email operation
@@ -192,7 +186,7 @@ person node.
 
 ### Caller rollout checklist
 
-1. Confirm the caller can resolve and reach the public API Gateway endpoint.
+1. Confirm the caller can resolve and reach the configured Tailwag base URL.
 2. Load the bearer token from the caller's secret store.
 3. Check unauthenticated `/health`.
 4. Check authenticated
@@ -202,8 +196,9 @@ person node.
 7. Confirm that subsequent context or semantic search includes the episode.
 8. Run the caller's provider/factory and prompt-mapping tests.
 
-For copyable curl commands, the live network requirements, and the exact AWS
-secret name, see [Connect A Caller Such As Argos](aws-deployment.md#connect-a-caller-such-as-argos).
+For copyable curl commands and discovery of the current endpoint, token secret,
+and source-polling ownership, see
+[Connect A Caller Such As Argos](aws-deployment.md#connect-a-caller-such-as-argos).
 
 ## Runtime Configuration
 

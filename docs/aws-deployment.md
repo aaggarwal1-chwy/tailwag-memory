@@ -21,7 +21,8 @@ The functional development deployment is live:
 - the ECS API service is active with one healthy Fargate task
 - the internal Application Load Balancer has one healthy target
 - Neo4j is running on a private EC2 instance with encrypted EBS storage
-- all three Lambda workers are active on worker package `dev-005`
+- all three Lambda workers use the artifact selected by the core stack's
+  `WorkerCodeS3Bucket` and `WorkerCodeS3Key` parameters
 - SQS event source mappings are enabled
 - Slack polling for channel `C0896C8CE83` is enabled every 30 minutes
 - the daily report schedule is enabled for 10:00 UTC
@@ -178,7 +179,7 @@ face references, and voice references.
 | Poll Lambda | `aaggarwal1-tailwag-dev-poll-worker` |
 | Memory Lambda | `aaggarwal1-tailwag-dev-memory-worker` |
 | Report Lambda | `aaggarwal1-tailwag-dev-report-worker` |
-| Deployed worker object | `lambda/tailwag-memory-worker-dev-005.zip` |
+| Worker artifact selection | Core stack parameters `WorkerCodeS3Bucket` and `WorkerCodeS3Key` |
 | Schedule group | `aaggarwal1-tailwag-dev` |
 | Slack schedule | `aaggarwal1-tailwag-dev-slack-poll-C0896C8CE83` |
 | Slack cadence | `rate(30 minutes)` |
@@ -186,6 +187,17 @@ face references, and voice references.
 | Report cadence | `cron(0 10 * * ? *)`, UTC |
 | Memory consolidation schedule | `aaggarwal1-tailwag-dev-daily-memory-consolidation` |
 | Memory consolidation cadence | `cron(0 1 * * ? *)`, `America/New_York` |
+
+All three Lambda functions use the same immutable worker artifact. Discover
+the currently deployed S3 bucket and object key without changing the stack:
+
+```bash
+aws cloudformation describe-stacks \
+  --region us-east-2 \
+  --stack-name aaggarwal1-tailwag-core-dev \
+  --query "Stacks[0].Parameters[?ParameterKey=='WorkerCodeS3Bucket' || ParameterKey=='WorkerCodeS3Key'].{parameter:ParameterKey,value:ParameterValue}" \
+  --output table
+```
 
 Scheduler payloads include `<aws.scheduler.execution-id>` in `job_id`, so each
 execution has a unique idempotency key. The application schedule group contains the enabled Slack, report, and
@@ -210,9 +222,9 @@ job publishes memory-item, person-timeline, and follow-up-validity reports under
   - `aaggarwal1-tailwag-worker-code-032318240470-us-east-2`
 
 The reports bucket is private. The worker-code bucket stores immutable
-deployment ZIPs. The core stack selects
-`lambda/tailwag-memory-worker-dev-005.zip` through the `WorkerCodeS3Key`
-parameter, and that object supplies all three worker functions.
+deployment ZIPs. The core stack selects one S3 object through the
+`WorkerCodeS3Bucket` and `WorkerCodeS3Key` parameters, and that object supplies
+all three worker functions.
 
 ### Secrets
 
