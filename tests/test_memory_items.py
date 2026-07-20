@@ -873,6 +873,7 @@ class MemoryItemMarkdownTest(unittest.TestCase):
         self.assertIn("- boundary: avoid loud surprise greetings", markdown)
         self.assertIn("Potential Follow-Ups:", markdown)
         self.assertIn("- Cape Cod trip planned for the weekend.", markdown)
+        self.assertNotIn("Recent Episodes:", markdown)
         self.assertNotIn("Notes:", markdown)
 
     def test_markdown_prioritizes_semantic_hits_and_sanitizes_lines(self) -> None:
@@ -909,7 +910,7 @@ class MemoryItemMarkdownTest(unittest.TestCase):
 
 
 class PersonMemoryContextServiceTest(unittest.TestCase):
-    def test_markdown_for_person_includes_boundaries_before_preferences_and_facts(self) -> None:
+    def test_markdown_for_person_orders_durable_items_without_recent_episode_transcripts(self) -> None:
         runner = RecordingQueryRunner(
             results=[
                 [
@@ -943,16 +944,7 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
                         "status": "active",
                         "observed_at": "2026-06-16T09:00:00+00:00",
                     },
-                ],
-                [
-                    {
-                        "episode_id": "episode_1",
-                        "person_id": "person_jamie",
-                        "display_name": "Jamie",
-                        "transcript": "Jamie: Luna has a vet visit tomorrow.\nCasey: I can drive.",
-                        "start_time": "2026-06-16T14:00:00+00:00",
-                    }
-                ],
+                ]
             ]
         )
         service = PersonMemoryContextService(runner)
@@ -969,6 +961,7 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
         self.assertIn("- preferred language: Spanish", markdown)
         self.assertIn("Facts:", markdown)
         self.assertIn("- working on robot social memory extraction", markdown)
+        self.assertNotIn("Recent Episodes:", markdown)
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Preferences:"))
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Facts:"))
         self.assertEqual(runner.queries[0].parameters["person_id"], "person_jamie")

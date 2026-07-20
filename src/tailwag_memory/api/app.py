@@ -81,10 +81,12 @@ def _memory_router() -> APIRouter:
     ) -> PersonContextResponse:
         rendered = client.person_context(
             payload.person_id,
+            limit=payload.limit,
             semantic_scope=payload.semantic_scope,
             current_text=payload.current_text,
             now=payload.now,
             memory_limit=payload.memory_limit,
+            recent_episode_limit=payload.recent_episode_limit,
         )
         return PersonContextResponse(
             person_id=payload.person_id,

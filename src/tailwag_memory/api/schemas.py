@@ -94,10 +94,12 @@ class PersonContextRequest(StrictRequest):
     """Request body for prompt-ready person context."""
 
     person_id: str
+    limit: int = 10
     semantic_scope: str | None = None
     current_text: str | None = None
     now: datetime | None = None
     memory_limit: int = 12
+    recent_episode_limit: int = 5
 
 
 class PersonContextResponse(StrictRequest):

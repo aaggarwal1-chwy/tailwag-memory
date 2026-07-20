@@ -15,7 +15,7 @@ The adapter does not add Slack-specific Neo4j labels or relationships. It maps S
 
 Slack ingestion does not create face or voice biometric reference nodes. When Slack resolves to an existing caller-owned canonical person, Slack uses the canonical ID for participation but does not send Slack display name or email into the person upsert, so caller-owned profile fields remain authoritative. When no canonical email match exists, the Slack-owned temporary person keeps the normalized email as identity evidence; Tailwag uses it to attach later same-email writes and rekeys the temporary Slack ID when a matching canonical `person_*` write arrives.
 
-Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. The adapter also preserves those mention targets in `EpisodeInput.mentioned_people`, resolving them through the same canonical-email path as speakers. Rendered person context contains only durable memory items; mention-only people are not treated as speakers.
+Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. The adapter also preserves those mention targets in `EpisodeInput.mentioned_people`, resolving them through the same canonical-email path as speakers. Episode transcripts remain available through episode retrieval and inspection paths, but rendered `person_context` excludes transcript text. Mention-only people are not treated as speakers or memory-extraction targets.
 
 ## Slack App Setup
 

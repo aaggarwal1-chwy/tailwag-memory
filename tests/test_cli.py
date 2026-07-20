@@ -737,17 +737,21 @@ class CliTest(unittest.TestCase):
             def person_context(
                 self,
                 person_id: str,
+                limit: int = 10,
                 semantic_scope: str | None = None,
                 *,
                 current_text: str | None = None,
                 memory_limit: int = 12,
+                recent_episode_limit: int = 5,
             ) -> str:
                 calls.append(
                     {
                         "person_id": person_id,
+                        "limit": limit,
                         "semantic_scope": semantic_scope,
                         "current_text": current_text,
                         "memory_limit": memory_limit,
+                        "recent_episode_limit": recent_episode_limit,
                     }
                 )
                 return "[PERSON MEMORY]\nPreferences:\n- likes robot demos\n\nJamie recently asked about chargers."
@@ -763,6 +767,8 @@ class CliTest(unittest.TestCase):
                                 "context",
                                 "--person-id",
                                 "person_jamie",
+                                "--limit",
+                                "3",
                                 "--current-text",
                                 "robot demo",
                                 "--memory-limit",
@@ -776,9 +782,11 @@ class CliTest(unittest.TestCase):
             [
                 {
                     "person_id": "person_jamie",
+                    "limit": 3,
                     "semantic_scope": None,
                     "current_text": "robot demo",
                     "memory_limit": 4,
+                    "recent_episode_limit": 5,
                 }
             ],
         )

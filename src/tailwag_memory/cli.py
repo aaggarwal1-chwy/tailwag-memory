@@ -119,6 +119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     person_subparsers = person_parser.add_subparsers(dest="person_command", required=True)
     context_parser = person_subparsers.add_parser("context")
     context_parser.add_argument("--person-id", required=True, help="person id to summarize")
+    context_parser.add_argument("--limit", type=int, default=10, help="maximum context items to retrieve")
     context_parser.add_argument("--semantic-scope", help="optional semantic focus for OpenAI-backed vector retrieval")
     context_parser.add_argument("--current-text", help="optional current utterance or task for memory item retrieval")
     context_parser.add_argument("--memory-limit", type=int, default=12, help="maximum durable memory items per section")
@@ -333,6 +334,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     client.person_context(
                         args.person_id,
+                        limit=args.limit,
                         semantic_scope=args.semantic_scope,
                         current_text=args.current_text,
                         memory_limit=args.memory_limit,

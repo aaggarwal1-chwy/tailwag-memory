@@ -372,10 +372,12 @@ class TailwagMemoryClientTest(unittest.TestCase):
             with patch("tailwag_memory.client.PersonContextRetrievalService", FakeRetrieval):
                 context = TailwagMemoryClient(RecordingQueryRunner(), _settings()).person_context(
                     "person_jamie",
+                    limit=3,
                     semantic_scope="chargers",
                     current_text="robot demo",
                     now=now,
                     memory_limit=4,
+                    recent_episode_limit=2,
                 )
 
         self.assertEqual(
@@ -383,7 +385,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
             "[PERSON MEMORY]\nPreferences:\n- likes robot demos",
         )
         self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4)])
-        self.assertEqual(retrieval_calls, [("person_jamie", 10, "chargers")])
+        self.assertEqual(retrieval_calls, [("person_jamie", 3, "chargers")])
 
     def test_search_semantic_memory_returns_episode_and_memory_item_results(self) -> None:
         runner = RecordingQueryRunner()

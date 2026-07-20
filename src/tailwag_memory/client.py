@@ -271,13 +271,16 @@ class TailwagMemoryClient:
     def person_context(
         self,
         person_id: str,
+        limit: int = 10,
         semantic_scope: str | None = None,
         *,
         current_text: str | None = None,
         now: datetime | None = None,
         memory_limit: int = 12,
+        recent_episode_limit: int = 5,
     ) -> str:
-        """Return deterministic durable and retrieved context for a person."""
+        """Return durable context while accepting Argos's legacy episode-limit field."""
+        del recent_episode_limit
         memory_context = PersonMemoryContextService(self.runner, self._embeddings()).markdown_for_person(
             person_id,
             current_text=current_text or semantic_scope,
@@ -286,6 +289,7 @@ class TailwagMemoryClient:
         )
         retrieved_context = PersonContextRetrievalService(self.runner, self._embeddings()).markdown_for_person(
             person_id,
+            limit=limit,
             semantic_scope=semantic_scope,
         )
         return "\n\n".join(part for part in [memory_context, retrieved_context] if part)

@@ -92,7 +92,7 @@ preferences, boundaries, pets, unknown memory IDs, or followups that are not in 
 Followup timing rules:
 Followups must include expires_at and should include due_at only when the transcript states or strongly implies when
 the followup becomes useful. Use the current_time value as the evidence time for relative phrases. If the timing is
-vague, do not create a followup; recent episode context can carry short-lived conversational hooks. For clear event,
+vague, do not create a followup; short-lived conversational hooks are not durable person memory. For clear event,
 meeting, travel, deadline, blocker, or task windows, set due_at to the first useful opportunity after that window and
 expire soon after the useful conversation window. Same-day bugs or tasks should normally expire within a week.
 

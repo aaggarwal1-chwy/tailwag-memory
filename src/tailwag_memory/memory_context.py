@@ -38,6 +38,7 @@ class PersonMemoryContextService:
             items = _merge_items(items, vector_items)
         return format_person_memory_markdown(items, now=now, limit=memory_limit)
 
+
 def format_person_memory_markdown(
     items: list[MemoryItemResult],
     *,
