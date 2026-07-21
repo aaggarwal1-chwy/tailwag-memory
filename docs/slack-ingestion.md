@@ -175,12 +175,13 @@ def record_episode(
 ) -> EpisodeRecordResult: ...
 ```
 
-`poll_once()` passes `extract_memory` to every episode recording call. It leaves
-`enqueue_memory_extraction` at the recorder default when the poll option is
-`True`, and explicitly passes `False` when deferred extraction is disabled. A
-protocol-compliant custom recorder accepts both keyword arguments; omitting the
-default enqueue keyword also preserves the normal path for older recorders,
-while the explicit opt-out requires support for that keyword.
+`poll_once()` passes `extract_memory` to every episode recording call. When the
+recorder accepts `enqueue_memory_extraction` or arbitrary keyword arguments, the
+poller also passes the exact `True` or `False` enqueue value selected by the
+caller. For compatibility with older recorders that do not accept the enqueue
+keyword, the poller omits only that unsupported argument. Custom recorders
+should accept both keywords when they need to distinguish deferred extraction
+from recording without extraction.
 
 | `extract_memory` | `enqueue_memory_extraction` | `TailwagMemoryClient` behavior |
 | --- | --- | --- |

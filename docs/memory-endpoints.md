@@ -1058,7 +1058,7 @@ Constructor parameters:
 | Name | Type | Meaning |
 | --- | --- | --- |
 | `client` | `SlackConversationClient` | Slack API client or test fake. |
-| `episode_recorder` | `EpisodeRecorder` | Object with `record_episode(episode, *, extract_memory=True, enqueue_memory_extraction=True) -> EpisodeRecordResult`. `TailwagMemoryClient` satisfies this and also exposes canonical email resolution. The poller omits the enqueue keyword when it is `True` and passes it explicitly only for the `False` opt-out. |
+| `episode_recorder` | `EpisodeRecorder` | Object with `record_episode(episode, *, extract_memory=True, enqueue_memory_extraction=True) -> EpisodeRecordResult`. `TailwagMemoryClient` satisfies this and also exposes canonical email resolution. The poller passes the exact enqueue value when the recorder accepts that keyword or arbitrary keyword arguments; it omits the unsupported argument only for legacy recorders that do not accept it. |
 | `state_store` | `SlackPollStateStore` | Poll cursor store. Use `SlackFilePollStateStore(Path(...))` for local JSON state or `SlackDynamoDBPollStateStore` for AWS DynamoDB-backed state. |
 | `retention_class` | `str` | Retention class assigned to Slack episodes. |
 | `active_thread_hours` | `float` | How long standalone roots stay active for later replies. |
@@ -1080,7 +1080,7 @@ Parameters:
 | `history_limit` | `int` | Slack API page size for channel history requests. |
 | `reply_limit` | `int` | Slack API page size for thread reply requests. |
 | `extract_memory` | `bool` | Whether recorded episodes run memory extraction inline. Passed through to `EpisodeRecorder.record_episode`. |
-| `enqueue_memory_extraction` | `bool` | When `extract_memory=False`, whether `TailwagMemoryClient` queues deferred extraction. Defaults to `True`; set both flags to `False` to record without extracting or queuing memory. |
+| `enqueue_memory_extraction` | `bool` | Passed explicitly to supporting `EpisodeRecorder` implementations. With `TailwagMemoryClient` and `extract_memory=False`, it controls deferred queueing. Defaults to `True`; set both flags to `False` to record without extracting or queuing memory. |
 
 Returns: `SlackPollResult`.
 
