@@ -8,7 +8,7 @@ from tailwag_memory.ingestion import (
     PersonIngestionService,
     _person_upsert_cypher,
 )
-from tailwag_memory.models import EpisodeInput, EpisodeMentionInput, EventAttendeeInput, EventInput, PersonInput, PlaceInput
+from tailwag_memory.models import EpisodeInput, EpisodeMentionInput, EventAttendeeInput, EventInput, PersonInput, PlaceInput, RobotInput
 import unittest
 
 
@@ -343,6 +343,89 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertNotIn("audio_embedding", query.query)
         _assert_no_deprecated_importing_call(self, query.query)
 
+    def test_ingest_writes_robot_identity_and_episode_snapshot_without_person_side_effects(self) -> None:
+        runner = RecordingQueryRunner()
+        service = EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+        episode = _episode()
+        episode = EpisodeInput(
+            id=episode.id,
+            episode_type=episode.episode_type,
+            start_time=episode.start_time,
+            end_time=episode.end_time,
+            transcript=episode.transcript,
+            retention_class=episode.retention_class,
+            place=episode.place,
+            robots=[RobotInput(id="cody", display_name="Cody")],
+        )
+
+        service.ingest(episode)
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["participant_ids"], [])
+        self.assertEqual(query.parameters["robots"], [
+            {"id": "cody", "display_name": "Cody", "role": "host", "source": "argos"}
+        ])
+        self.assertEqual(query.parameters["robot_ids"], ["cody"])
+        self.assertIn("MERGE (r:Robot {id: robot.id})", query.query)
+        self.assertIn("r.display_name = robot.display_name", query.query)
+        self.assertIn("r.created_at = coalesce(r.created_at, $created_at)", query.query)
+        self.assertIn("r.updated_at = $updated_at", query.query)
+        self.assertIn("MERGE (r)-[participation:PARTICIPATED_IN]->(e)", query.query)
+        self.assertIn(
+            "ON CREATE SET participation.display_name_at_time = robot.display_name",
+            query.query,
+        )
+        self.assertNotIn(
+            "SET participation.role = robot.role,\n                    participation.source = robot.source,",
+            query.query,
+        )
+        robot_block = query.query.split("UNWIND $robots AS robot", 1)[1]
+        self.assertNotIn("Person", robot_block)
+        self.assertNotIn("last_seen", robot_block)
+        self.assertNotIn("FaceReference", robot_block)
+        self.assertNotIn("VoiceReference", robot_block)
+
+    def test_ingest_reconciles_multiple_robot_relationships_by_stable_id(self) -> None:
+        runner = RecordingQueryRunner()
+        service = EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+        episode = _episode()
+        service.ingest(
+            EpisodeInput(
+                id=episode.id,
+                episode_type=episode.episode_type,
+                start_time=episode.start_time,
+                end_time=episode.end_time,
+                transcript=episode.transcript,
+                retention_class=episode.retention_class,
+                place=episode.place,
+                participants=episode.participants,
+                robots=[
+                    RobotInput(id="cody", display_name="Cody Renamed"),
+                    RobotInput(id="puffle", display_name="Cody Renamed", role="observer"),
+                ],
+            )
+        )
+
+        query = runner.queries[-1]
+        self.assertEqual(query.parameters["robot_ids"], ["cody", "puffle"])
+        self.assertEqual(
+            [robot["display_name"] for robot in query.parameters["robots"]],
+            ["Cody Renamed", "Cody Renamed"],
+        )
+        self.assertIn("OPTIONAL MATCH (old_robot:Robot)-[old_robot_rel:PARTICIPATED_IN]->(e)", query.query)
+        self.assertIn("NOT old_robot.id IN $robot_ids", query.query)
+        self.assertIn("DELETE old_robot_rel", query.query)
+        self.assertNotIn("display_name_at_time", query.query.split("SET r.display_name", 1)[0])
+
+    def test_ingest_without_robots_preserves_old_payload_compatibility_and_removes_stale_links(self) -> None:
+        runner = RecordingQueryRunner()
+        EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8)).ingest(_episode())
+
+        query = runner.queries[-1]
+        self.assertEqual(query.parameters["robots"], [])
+        self.assertEqual(query.parameters["robot_ids"], [])
+        self.assertIn("DELETE old_robot_rel", query.query)
+
     def test_ingest_carries_official_name_to_participant_upsert(self) -> None:
         runner = RecordingQueryRunner()
         service = EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8))
@@ -398,7 +481,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertEqual(query.parameters["mentioned_person_ids"], ["person_chandra"])
         self.assertEqual(query.parameters["mentioned_people"][0]["person_id"], "person_chandra")
         self.assertEqual(query.parameters["mentioned_people"][0]["source"], "slack")
-        self.assertEqual(query.query.count("CALL (e) {"), 2)
+        self.assertEqual(query.query.count("CALL (e) {"), 3)
         self.assertIn("MERGE (p)-[r:MENTIONED_IN]->(e)", query.query)
         self.assertIn("SET r.source = mentioned.source", query.query)
         self.assertIn("DELETE old_mention", query.query)

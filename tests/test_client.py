@@ -481,6 +481,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
                         "end_time": "2026-06-01T10:05:00Z",
                         "building_code": "BOS",
                         "room_id": "lab",
+                        "robots": [],
                     }
                 ],
                 "memory_items": [

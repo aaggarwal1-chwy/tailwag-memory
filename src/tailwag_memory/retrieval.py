@@ -4,6 +4,11 @@ import re
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
+from .episode_result_projection import (
+    episode_place_projection_subquery,
+    robot_participation_projection_subquery,
+    robot_participations_from_row,
+)
 from .models import (
     EpisodeMemoryResult,
     EventResult,
@@ -64,6 +69,30 @@ class EpisodeRetrievalService:
         rows = recent_episode_rows_for_person(self.runner, person_id, limit)
         return [self._row_to_result(row) for row in rows]
 
+    def by_robot(self, robot_id: str, limit: int = 10) -> list[EpisodeMemoryResult]:
+        """Return recent episode memories for a robot's stable identity."""
+        rows = self.runner.run(
+            """
+            MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(e:Episode)
+            WITH DISTINCT e
+            """
+            + episode_place_projection_subquery("e")
+            + robot_participation_projection_subquery("e")
+            + """
+            RETURN e.id AS episode_id,
+                   e.transcript AS transcript,
+                   e.start_time AS start_time,
+                   e.end_time AS end_time,
+                   place.building_code AS building_code,
+                   place.room_id AS room_id,
+                   robots AS robots
+            ORDER BY e.start_time DESC
+            LIMIT $limit
+            """,
+            {"robot_id": robot_id, "limit": limit},
+        )
+        return [self._row_to_result(row) for row in rows]
+
     def by_place(self, building_code: str, room_id: str, limit: int = 10) -> list[EpisodeMemoryResult]:
         """Return recent episode memories for a place."""
         rows = self.runner.run(
@@ -72,12 +101,17 @@ class EpisodeRetrievalService:
               building_code: $building_code,
               room_id: $room_id
             })
+            WITH DISTINCT e
+            """
+            + robot_participation_projection_subquery("e")
+            + """
             RETURN e.id AS episode_id,
                    e.transcript AS transcript,
                    e.start_time AS start_time,
                    e.end_time AS end_time,
                    $building_code AS building_code,
-                   $room_id AS room_id
+                   $room_id AS room_id,
+                   robots AS robots
             ORDER BY e.start_time DESC
             LIMIT $limit
             """,
@@ -89,14 +123,16 @@ class EpisodeRetrievalService:
         """Return episode memories ranked by vector similarity."""
         rows = self.runner.run(
             _vector_search_clause("episode_transcript_embedding", "node", "limit")
+            + episode_place_projection_subquery("node")
+            + robot_participation_projection_subquery("node")
             + """
-            OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
             RETURN node.id AS episode_id,
                    node.transcript AS transcript,
                    node.start_time AS start_time,
                    node.end_time AS end_time,
                    place.building_code AS building_code,
                    place.room_id AS room_id,
+                   robots AS robots,
                    score AS score
             ORDER BY score DESC
             """,
@@ -121,25 +157,32 @@ class EpisodeRetrievalService:
         rows = self.runner.run(
             _vector_search_clause("episode_transcript_embedding", "node", "candidate_limit")
             + """
-            OPTIONAL MATCH (person:Person)-[:PARTICIPATED_IN]->(node)
-            OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
-            WITH node, score, collect(DISTINCT person.id) AS person_ids, collect(DISTINCT place) AS places
-            WHERE ($person_id IS NULL OR $person_id IN person_ids)
+            WITH node, score
+            WHERE ($person_id IS NULL OR EXISTS {
+                MATCH (:Person {id: $person_id})-[:PARTICIPATED_IN]->(node)
+            })
+              AND ($robot_id IS NULL OR EXISTS {
+                MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(node)
+              })
               AND (
-                $building_code IS NULL
-                OR any(place IN places WHERE place.building_code = $building_code AND ($room_id IS NULL OR place.room_id = $room_id))
+                ($building_code IS NULL AND $room_id IS NULL)
+                OR EXISTS {
+                    MATCH (node)-[:OCCURRED_AT]->(filter_place:Place)
+                    WHERE ($building_code IS NULL OR filter_place.building_code = $building_code)
+                      AND ($room_id IS NULL OR filter_place.room_id = $room_id)
+                }
               )
-              AND (
-                $room_id IS NULL
-                OR any(place IN places WHERE place.room_id = $room_id AND ($building_code IS NULL OR place.building_code = $building_code))
-              )
-            WITH node, score, head(places) AS place
+            """
+            + episode_place_projection_subquery("node")
+            + robot_participation_projection_subquery("node")
+            + """
             RETURN node.id AS episode_id,
                    node.transcript AS transcript,
                    node.start_time AS start_time,
                    node.end_time AS end_time,
                    place.building_code AS building_code,
                    place.room_id AS room_id,
+                   robots AS robots,
                    score AS score
             ORDER BY score DESC
             LIMIT $limit
@@ -149,6 +192,7 @@ class EpisodeRetrievalService:
                 "limit": query.limit,
                 "embedding": embedding,
                 "person_id": query.person_id,
+                "robot_id": query.robot_id,
                 "building_code": query.building_code,
                 "room_id": query.room_id,
             },
@@ -165,6 +209,7 @@ class EpisodeRetrievalService:
             end_time=str(row["end_time"]) if row.get("end_time") is not None else None,
             building_code=str(row["building_code"]) if row.get("building_code") is not None else None,
             room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
+            robots=robot_participations_from_row(row),
         )
 
 

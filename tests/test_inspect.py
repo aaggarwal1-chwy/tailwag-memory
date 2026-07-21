@@ -114,6 +114,8 @@ class InspectTranscriptRowsTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters, {"limit": 25})
         self.assertIn("MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)", runner.queries[0].query)
         self.assertIn("OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)", runner.queries[0].query)
+        self.assertIn("CALL (person, e) {", runner.queries[0].query)
+        self.assertEqual(runner.queries[0].query.count("CALL (e) {"), 3)
         self.assertIn("count(DISTINCT memory) AS memory_item_count", runner.queries[0].query)
         self.assertIn("memory_item_count AS memory_item_count", runner.queries[0].query)
         self.assertIn("related_memory_items AS related_memory_items", runner.queries[0].query)

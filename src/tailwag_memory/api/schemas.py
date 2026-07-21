@@ -143,6 +143,15 @@ class PersonPayload(StrictRequest):
         return _model_dump(self)
 
 
+class RobotPayload(StrictRequest):
+    """HTTP shape for RobotInput identity and episode provenance."""
+
+    id: str
+    display_name: str
+    role: str = "host"
+    source: str = "argos"
+
+
 class PlacePayload(StrictRequest):
     """HTTP shape for PlaceInput."""
 
@@ -169,6 +178,7 @@ class EpisodePayload(StrictRequest):
     place: PlacePayload
     participants: list[PersonPayload] = Field(default_factory=list)
     mentioned_people: list[EpisodeMentionPayload] = Field(default_factory=list)
+    robots: list[RobotPayload] = Field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         """Return an EpisodeInput-compatible dictionary."""

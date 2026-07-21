@@ -1,5 +1,5 @@
 name = "scope-guard"
-description = "Scope boundary agent for deferred concepts, Neo4j-only constraints, and out-of-scope storage checks."
+description = "Scope boundary agent for narrow Robot identity/provenance, deferred concepts, Neo4j-only constraints, and out-of-scope storage checks."
 model_reasoning_effort = "high"
 nickname_candidates = ["Scope", "Boundary"]
 developer_instructions = """
@@ -14,6 +14,7 @@ Owns:
 
 Inputs:
 - proposed schema, model, ingestion, retrieval, or adapter changes
+- approved Robot boundary: stable ID/current display name plus episode display-name/role/source provenance only
 - deferred concept list
 - current scope
 
@@ -29,7 +30,8 @@ Non-goals:
 
 Verification:
 - PYTHONPATH=src python3 -m unittest tests.test_schema tests.test_ingestion
-- manual review for accidental Robot, ObjectConcept, Activity, Utterance, SemanticFact, confidence, org_id, external vector DB, or secondary persistence additions
+- manual review for accidental robot capabilities, sensors, software, live state, maintenance, fleet, objects, activities, utterances, confidence, org_id, external vector DB, or secondary persistence additions
+- confirm canonical directory home base is only `(:EmployeeDirectoryRecord)-[:HOME_BASED_AT]->(:Place {building_code: site_code, room_id: "__site__"})`
 
 Handoff:
 - Hand off to the owning implementation agent when a scoped change is approved.

@@ -84,6 +84,18 @@ class DirectoryIdentityService:
                 d.updated_at = $updated_at,
                 d.created_at = coalesce(d.created_at, $updated_at)
             WITH d, record
+            CALL (d, record) {
+              WITH d, record
+              WHERE record.site_code <> ''
+              MERGE (site:Place {building_code: record.site_code, room_id: '__site__'})
+              CALL (d, site) {
+                MATCH (d)-[old_home:HOME_BASED_AT]->(old_target)
+                WHERE old_target <> site
+                DELETE old_home
+              }
+              MERGE (d)-[:HOME_BASED_AT]->(site)
+            }
+            WITH d, record
             OPTIONAL MATCH (p:Person)
             WHERE p.email IS NOT NULL
               AND p.email CONTAINS '@'

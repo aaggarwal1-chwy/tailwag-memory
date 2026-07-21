@@ -25,6 +25,16 @@ class PersonInput:
 
 
 @dataclass(frozen=True)
+class RobotInput:
+    """Caller-supplied robot identity and episode provenance."""
+
+    id: str
+    display_name: str
+    role: str = "host"
+    source: str = "argos"
+
+
+@dataclass(frozen=True)
 class PlaceInput:
     """Building and room identifier for a place."""
 
@@ -63,6 +73,7 @@ class EpisodeInput:
     place: PlaceInput
     participants: list[PersonInput] = field(default_factory=list)
     mentioned_people: list[EpisodeMentionInput] = field(default_factory=list)
+    robots: list[RobotInput] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "EpisodeInput":
@@ -71,6 +82,7 @@ class EpisodeInput:
         place = payload.get("place") or {}
         participants = payload.get("participants") or []
         mentioned_people = payload.get("mentioned_people") or []
+        robots = payload.get("robots") or []
         return cls(
             id=payload["id"],
             episode_type=payload["episode_type"],
@@ -108,6 +120,15 @@ class EpisodeInput:
                     source=item.get("source", "caller"),
                 )
                 for item in mentioned_people
+            ],
+            robots=[
+                RobotInput(
+                    id=item["id"],
+                    display_name=item["display_name"],
+                    role=item.get("role", "host"),
+                    source=item.get("source", "argos"),
+                )
+                for item in robots
             ],
         )
 
@@ -167,6 +188,17 @@ class SearchQuery:
     building_code: str | None = None
     room_id: str | None = None
     limit: int = 10
+    robot_id: str | None = None
+
+
+@dataclass(frozen=True)
+class RobotParticipationResult:
+    """Robot identity and provenance attached to an episode result."""
+
+    robot_id: str
+    display_name: str
+    role: str
+    source: str
 
 
 @dataclass(frozen=True)
@@ -180,6 +212,7 @@ class EpisodeMemoryResult:
     end_time: str | None = None
     building_code: str | None = None
     room_id: str | None = None
+    robots: list[RobotParticipationResult] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

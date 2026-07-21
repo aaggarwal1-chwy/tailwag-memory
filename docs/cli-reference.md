@@ -31,15 +31,16 @@ tailwag db delete-node --label MemoryItem --id mem_example_001 --yes
 `db delete-node` is CLI-only maintenance behavior. It supports only `Person`,
 `Episode`, and `MemoryItem` labels and returns JSON with the target label, id,
 status, and deleted counts. A missing node returns `status="not_found"` without
-failing the command. Direct deletes for `Event`, `Place`,
+failing the command. Direct deletes for `Robot`, `Event`, `Place`,
 `EmployeeDirectoryRecord`, `FaceReference`, and `VoiceReference` are out of
 scope.
 
 Targeted deletes are permanent. Deleting a person removes their owned memory
 items, owned biometric references, attendance/directory relationships, and
 single-participant episodes while preserving shared episodes, events, and
-directory records. Deleting an episode preserves linked people, removes or
-updates memory evidence links, and removes its place only when unreferenced.
+directory records. Deleting an episode preserves linked people and robots, removes or
+updates memory evidence links, and removes its place only when no
+`OCCURRED_AT` or `HOME_BASED_AT` relationship still references it.
 Deleting a memory item also deletes memories reachable through outgoing
 `SUPERSEDED_BY` links.
 

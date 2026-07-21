@@ -242,6 +242,60 @@ class TailwagApiAppTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_episode_endpoint_accepts_strict_robot_participation(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        payload = {
+            "episode": {
+                "id": "episode_robot_1",
+                "episode_type": "conversation",
+                "start_time": "2026-07-21T10:00:00+00:00",
+                "end_time": None,
+                "transcript": "Jamie: Hello Cody.",
+                "retention_class": "standard",
+                "place": {"building_code": "BOS3", "room_id": "__site__"},
+                "robots": [{"id": "cody", "display_name": "Cody"}],
+            },
+            "extract_memory": False,
+            "enqueue_memory_extraction": False,
+        }
+
+        response = TestClient(app).post(f"{API_BASE}/episodes_record", headers=_auth_header(), json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        robot = fake.calls[0][1].robots[0]
+        self.assertEqual((robot.id, robot.display_name, robot.role, robot.source), ("cody", "Cody", "host", "argos"))
+
+    def test_episode_endpoint_rejects_operational_robot_fields(self) -> None:
+        from tailwag_memory.api.app import create_app
+
+        payload = {
+            "episode": {
+                "id": "episode_robot_1",
+                "episode_type": "conversation",
+                "start_time": "2026-07-21T10:00:00+00:00",
+                "end_time": None,
+                "transcript": "Jamie: Hello Cody.",
+                "retention_class": "standard",
+                "place": {"building_code": "BOS3", "room_id": "__site__"},
+                "robots": [{"id": "cody", "display_name": "Cody", "battery": 0.9}],
+            },
+            "extract_memory": False,
+            "enqueue_memory_extraction": False,
+        }
+
+        response = TestClient(create_app()).post(
+            f"{API_BASE}/episodes_record",
+            headers=_auth_header(),
+            json=payload,
+        )
+
+        self.assertEqual(response.status_code, 422)
+
     def test_people_endpoints_wrap_primitive_client_returns(self) -> None:
         from tailwag_memory.api.app import create_app
         from tailwag_memory.api.dependencies import get_client

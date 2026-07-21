@@ -61,6 +61,9 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         query = runner.queries[0]
         self.assertIn("EmployeeDirectoryRecord", query.query)
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
+        self.assertIn("MERGE (site:Place {building_code: record.site_code, room_id: '__site__'})", query.query)
+        self.assertIn("MERGE (d)-[:HOME_BASED_AT]->(site)", query.query)
+        self.assertIn("WHERE old_target <> site", query.query)
         self.assertIn("p.official_name", query.query)
         self.assertIn("p.name = p.id", query.query)
         self.assertIn("d.name = record.official_name", query.query)
@@ -71,6 +74,44 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         self.assertEqual(query.parameters["records"][0]["display_name"], "Jamie Example")
         self.assertEqual(query.parameters["records"][0]["name"], "Jamie Example")
         self.assertEqual(query.parameters["records"][0]["source"], "snowflake")
+
+    def test_sync_directory_people_uses_each_records_site_for_canonical_home_base(self) -> None:
+        runner = RecordingQueryRunner()
+        service = DirectoryIdentityService(runner)
+
+        service.sync_directory_people(
+            "BOS3",
+            [
+                DirectoryPersonRecord(site_code="BOS3", username="jamie", official_name="Jamie"),
+                DirectoryPersonRecord(site_code="NYC1", username="casey", official_name="Casey"),
+            ],
+        )
+
+        query = runner.queries[0]
+        self.assertEqual(
+            [record["site_code"] for record in query.parameters["records"]],
+            ["BOS3", "NYC1"],
+        )
+        self.assertIn("WHERE record.site_code <> ''", query.query)
+        self.assertIn("CALL (d, site) {", query.query)
+        self.assertIn("DELETE old_home", query.query)
+        home_base_block = query.query.split("CALL (d, record) {", 1)[1].split(
+            "OPTIONAL MATCH (p:Person)", 1
+        )[0]
+        self.assertNotIn("RETURN", home_base_block)
+
+    def test_sync_directory_people_does_not_create_empty_site_place(self) -> None:
+        runner = RecordingQueryRunner()
+        service = DirectoryIdentityService(runner)
+
+        service.sync_directory_people(
+            "",
+            [DirectoryPersonRecord(username="jamie", official_name="Jamie")],
+        )
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["records"][0]["site_code"], "")
+        self.assertIn("WHERE record.site_code <> ''", query.query)
 
     def test_sync_directory_people_links_person_by_email_username_without_employee_email(self) -> None:
         runner = RecordingQueryRunner()

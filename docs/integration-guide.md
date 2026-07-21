@@ -162,7 +162,8 @@ Argos should:
   its existing memory/about/follow-up prompt fields
 - call `episodes_record` after a live transcript is complete, using
   `episode_type="conversation"`, stable caller-owned person and episode IDs,
-  and `source="live_chat"` on each applicable participant payload
+  `source="live_chat"` on each applicable participant payload, and a `robots`
+  entry for every robot participating in the episode
 - call `semantic_search` for explicit memory-search tools and preserve the
   separate `episodes` and `memory_items` response lists
 - use the people, identity, profile, biometric, and turn-owner routes when
@@ -170,10 +171,30 @@ Argos should:
 - treat Tailwag memory-item IDs as opaque
 - retry the same logical episode with the same episode ID
 
-Tailwag owns durable Neo4j memory, extraction, consolidation, retrieval, and
-Slack ingestion. Argos continues to own realtime turn behavior, robot identity,
-raw media and transcript production, upstream face/speaker embeddings,
-retention decisions, and final prompt assembly.
+Tailwag owns durable Neo4j memory, extraction, consolidation, retrieval, Slack
+ingestion, and the narrow stored robot identity/provenance described below.
+Argos continues to own robot identity decisions and all robot runtime behavior,
+capabilities, sensors, installed software, live state, maintenance, fleet
+management, raw media and transcript production, upstream face/speaker
+embeddings, retention decisions, and final prompt assembly.
+
+An episode robot payload has this strict shape:
+
+```json
+{
+  "id": "cody",
+  "display_name": "Cody",
+  "role": "host",
+  "source": "argos"
+}
+```
+
+`id` and `display_name` are required; `role` defaults to `"host"` and `source`
+defaults to `"argos"`. A later episode may update the robot's current display
+name without changing its stable ID. Tailwag preserves the display name from
+the first link to each episode as relationship-level `display_name_at_time`.
+Episode retrieval returns the current display name with that episode's role and
+source; consumers needing the historical name snapshot can query the graph.
 
 Before enabling a source poller in another caller, check the current deployment
 ownership in [AWS Deployment And Operations](aws-deployment.md) to avoid
@@ -262,7 +283,8 @@ See [Memory Endpoints Reference](memory-endpoints.md#runtime-setup) for schema i
 
 The consuming system should provide:
 
-- stable caller-owned `Person.id`, `Episode.id`, and `Event.id` values
+- stable caller-owned `Person.id`, `Robot.id`, `Episode.id`, and `Event.id` values
+- current robot display names and per-episode robot role/source provenance
 - person identity and re-enrollment decisions
 - consent status and retention policy
 - employee directory rows or Snowflake credentials when using Tailwag directory identity features
@@ -274,6 +296,7 @@ Tailwag provides:
 
 - schema initialization for the approved Neo4j graph model
 - episode, event, person, and memory item storage
+- narrow robot identity and episode participation provenance storage
 - OpenAI-backed episode and memory item embeddings
 - transcript-derived memory extraction and per-person memory consolidation
 - employee directory sync, fuzzy identity resolution, verified profile projection, and person encounter recording
@@ -291,7 +314,12 @@ from tailwag_memory import TailwagMemoryClient
 
 `TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, directory sync and identity resolution, biometric reference enrollment/search/update, turn-owner resolution, episode recording, memory extraction/backfill, memory consolidation, prompt-ready person context, and structured semantic search across a person's episodes and memory items. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
 
-Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, or direct memory item operations. Their constructor and method details also live in the endpoint reference.
+Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, direct memory item operations, or robot-filtered episode retrieval through `EpisodeRetrievalService.by_robot(...)` and `SearchQuery.robot_id`. Their constructor and method details also live in the endpoint reference.
+
+Robot filtering is not currently exposed by the high-level
+`person_context(...)` or `search_semantic_memory(...)` contracts. See the
+[architecture gap](architecture.md#future-gap-robot-scoped-person-memory)
+before adding or emulating that behavior.
 
 Slack adapter classes are imported from `tailwag_memory.slack_ingestion`, not from the top-level package. Package callers construct a `SlackPollStateStore` explicitly; use `SlackFilePollStateStore(Path(...))` for local JSON cursor state and `tailwag_memory.aws.SlackDynamoDBPollStateStore` for AWS DynamoDB-backed cursor state. See [Slack Ingestion Guide](slack-ingestion.md#package-api).
 
@@ -303,9 +331,11 @@ The optional FastAPI adapter mirrors the Argos-facing package operations for ser
 
 - Run schema initialization before ingestion or retrieval.
 - Use caller-owned IDs; do not use Neo4j internal `<id>` or `<elementId>` values as integration keys.
+- Directory rows with a nonblank site code link only from `EmployeeDirectoryRecord` to the canonical `Place(building_code=<site_code>, room_id="__site__")` through `HOME_BASED_AT`; do not treat this as a person's room-level location.
 - Do not pass raw face images or raw audio into Tailwag. Pass embeddings only.
 - Keep biometric vector usage tied to consent and retention policies in the calling system.
 - Use `enroll_face_reference()` / `enroll_voice_reference()` for first durable samples, and `observe_face_embedding()` / `observe_voice_embedding()` for cross-modal-safe adaptive updates. Tailwag owns sample counts, similarity thresholds, and completion.
 - Direct memory item writes are advanced. Prefer episode recording plus extraction for live systems.
 - `fact` memories must remain narrow person-prompt context, not broad ontology facts.
-- `SemanticFact`, persistent graph confidence fields, `org_id`, external vector stores, and secondary persistence are outside current scope.
+- Robot capabilities, sensors, installed software, live operational state, maintenance records, and fleet modeling are outside current scope; Tailwag stores only robot ID/current name and episode name/role/source provenance.
+- `ObjectConcept`, `Activity`, `Utterance`, `SemanticFact`, persistent graph confidence fields, `org_id`, external vector stores, and secondary persistence are outside current scope.

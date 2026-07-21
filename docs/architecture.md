@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Tailwag Memory is a compact Neo4j-only memory package. It accepts caller-owned people, places, episodes, and events; stores them as graph records; generates OpenAI-backed text embeddings in production; and returns deterministic/vector-derived person context for downstream agents.
+Tailwag Memory is a compact Neo4j-only memory package. It accepts caller-owned people, narrow robot identity/provenance, places, episodes, and events; stores them as graph records; generates OpenAI-backed text embeddings in production; and returns deterministic/vector-derived person context for downstream agents.
 
 This document is the source of truth for current architecture and scope boundaries. For package API details, see [Memory Endpoints Reference](memory-endpoints.md). For package-consumer and Argos HTTP workflows, see [Python Package Integration Guide](integration-guide.md). For the live AWS topology and operations, see [AWS Deployment And Operations](aws-deployment.md). For local inspection reports, see [Inspect Reference](inspect-reference.md).
 
@@ -11,6 +11,7 @@ This document is the source of truth for current architecture and scope boundari
 Runtime components:
 
 - `Person`
+- `Robot`
 - `Episode`
 - `Event`
 - `Place`
@@ -23,6 +24,7 @@ Runtime components:
 - `OCCURRED_AT`
 - `ATTENDED`
 - `HAS_DIRECTORY_RECORD`
+- `HOME_BASED_AT`
 - `HAS_FACE_REFERENCE`
 - `HAS_VOICE_REFERENCE`
 - `HAS_MEMORY`
@@ -48,7 +50,7 @@ Runtime components:
 
 Excluded from the runtime:
 
-- `Robot`
+- robot capabilities, sensors, installed software, live operational state, maintenance records, and fleet modeling
 - `ObjectConcept`
 - `Activity`
 - `Utterance`
@@ -63,8 +65,10 @@ Excluded from the runtime:
 ## Design Boundaries
 
 - Neo4j is the only persistence layer.
-- Caller-owned IDs are the stable integration keys for `Person`, `Episode`, and `Event`.
+- Caller-owned IDs are the stable integration keys for `Person`, `Robot`, `Episode`, and `Event`.
 - `Place` identity is `(building_code, room_id)`.
+- A directory row with a nonblank `site_code` has exactly one canonical home-base link to `Place(building_code=<site_code>, room_id="__site__")`; Tailwag does not infer room-level employee locations.
+- `Robot` is a narrow identity/provenance record. It does not expand Tailwag into robot runtime, telemetry, maintenance, or fleet storage.
 - Production text embeddings use the OpenAI-compatible provider; tests use deterministic mocks.
 - Face and voice embeddings are biometric identifiers supplied by the caller or an upstream recognition model. Tailwag stores vectors on `FaceReference` and `VoiceReference` nodes, not raw face images or raw audio.
 - `MemoryItem` is the approved narrow path for durable transcript-derived person memory. It is not a broad ontology, triple store, or open-ended semantic fact graph.
@@ -95,6 +99,29 @@ Excluded from the runtime:
 `Person.id` comes from the calling system. When email is present, Tailwag stores it as `lower(trim(email))`, resolves writes to an existing same-email person before creating a new node, and Neo4j enforces `email` as unique. If an incoming canonical `person_*` ID matches a Slack temporary person by email, Tailwag rekeys that Slack node in place when the canonical ID is available. `last_seen` is updated when the person participates in a newer episode, attends a newer event, or receives an explicit person-only identity upsert.
 
 Archived people keep historical graph data, and recognition/update paths exclude their biometric references. Re-enrollment should use the explicit biometric APIs after the caller decides the identity is active again.
+
+### Robot
+
+```cypher
+(:Robot {
+  id,
+  display_name,
+  created_at,
+  updated_at
+})
+```
+
+`Robot.id` is the caller-owned stable identity key. Each episode write updates
+`Robot.display_name` to the current caller-supplied name. The
+`PARTICIPATED_IN.display_name_at_time` property preserves the name supplied
+when that robot was first linked to that episode, while `role` and `source`
+record episode provenance. Retrieval results expose the robot node's current
+display name plus the relationship role and source; the historical
+`display_name_at_time` snapshot remains available in the graph for audit use.
+
+Robot participation never creates a `Person`, updates `Person.last_seen`, or
+uses face/voice references. Tailwag does not store robot capabilities, sensors,
+software, live state, maintenance, fleet membership, or other operational data.
 
 ### EmployeeDirectoryRecord
 
@@ -135,6 +162,10 @@ Current reconciliation links people to directory rows by the username portion of
 their email. Directory sync also links same-username people while loading rows.
 Biometric enrollment and explicit encounter recording can additionally link a
 specific directory row when metadata supplies both `username` and `site_code`.
+For every row with a nonblank site code, directory sync also merges the canonical
+site place `(site_code, "__site__")`, removes any prior `HOME_BASED_AT` link to
+a different target, and links only the `EmployeeDirectoryRecord` to that place.
+It does not create `Person-HOME_BASED_AT` or room-level home-base relationships.
 `<id>` is Neo4j Browser's internal node identifier; Tailwag does not store an
 application-level `id` property on `EmployeeDirectoryRecord`.
 
@@ -263,6 +294,12 @@ Related or redundant memories can be merged into one active memory. Superseded s
   source
 }]->(:Episode)
 
+(:Robot)-[:PARTICIPATED_IN {
+  display_name_at_time,
+  role,
+  source
+}]->(:Episode)
+
 (:Person)-[:MENTIONED_IN {
   source
 }]->(:Episode)
@@ -278,6 +315,8 @@ Related or redundant memories can be merged into one active memory. Superseded s
 }]->(:Event)
 
 (:Person)-[:HAS_DIRECTORY_RECORD]->(:EmployeeDirectoryRecord)
+
+(:EmployeeDirectoryRecord)-[:HOME_BASED_AT]->(:Place)
 
 (:Person)-[:HAS_FACE_REFERENCE]->(:FaceReference)
 
@@ -297,6 +336,11 @@ Related or redundant memories can be merged into one active memory. Superseded s
 
 `PARTICIPATED_IN.source` records how the calling system decided the person participated in the episode. Example values include `face_recognition`, `speaker_recognition`, `manual`, `caller`, `demo`, `example`, and `slack`. It is relationship provenance, not a confidence score.
 
+For robot participation, `role` and `source` have the same provenance purpose.
+`display_name_at_time` is an immutable per-episode snapshot set when the
+relationship is created; the `Robot.display_name` node property is the current
+name and may change on a later episode write.
+
 `MENTIONED_IN.source` records how the calling system decided the person was named or referenced in the episode. It does not imply the person was present, does not update `Person.last_seen`, and does not make the person a memory-extraction target.
 
 `ATTENDED.source` records how the calling system determined attendance. `response` and `response_time` preserve caller-supplied attendance state without adding a source-specific graph model.
@@ -305,6 +349,10 @@ Related or redundant memories can be merged into one active memory. Superseded s
 directory rows used for profile projection and identity resolution. The code
 reconciles generic person writes by email username; site-specific
 metadata is used only where the caller supplies a site.
+
+`HOME_BASED_AT` links an `EmployeeDirectoryRecord` with a nonblank `site_code`
+to its one canonical site-level `Place(site_code, "__site__")`. No other node
+type receives this relationship.
 
 `HAS_FACE_REFERENCE` and `HAS_VOICE_REFERENCE` link people to active or archived
 biometric reference nodes. Search and adaptive update paths only consider active,
@@ -327,6 +375,9 @@ FOR (p:Person) REQUIRE p.email IS UNIQUE;
 
 CREATE CONSTRAINT episode_id IF NOT EXISTS
 FOR (e:Episode) REQUIRE e.id IS UNIQUE;
+
+CREATE CONSTRAINT robot_id IF NOT EXISTS
+FOR (r:Robot) REQUIRE r.id IS UNIQUE;
 
 CREATE CONSTRAINT event_id IF NOT EXISTS
 FOR (e:Event) REQUIRE e.id IS UNIQUE;
@@ -359,7 +410,7 @@ Biometric reference dimensions are model-specific and stored on each reference.
 
 ## Write Paths
 
-Episode ingestion stores or updates the episode, upserts participants, updates participant `Person.last_seen`, creates the `PARTICIPATED_IN` relationships, upserts mentioned people without updating `last_seen`, creates `MENTIONED_IN` relationships, upserts the place, creates the `OCCURRED_AT` relationship, and generates episode text embeddings.
+Episode ingestion stores or updates the episode, upserts person participants, updates participant `Person.last_seen`, upserts narrow robot identities, reconciles person/robot `PARTICIPATED_IN` relationships, upserts mentioned people without updating `last_seen`, creates `MENTIONED_IN` relationships, upserts the place, creates the `OCCURRED_AT` relationship, and generates episode text embeddings. An omitted or empty `robots` list is valid and removes stale robot participation links when an existing episode is rewritten.
 
 High-level episode recording uses episode ingestion and, by default, runs transcript-derived memory extraction for linked participants. Extraction provider operations are `create`, `support`, `address`, and `noop`: `create` writes a new `MemoryItem`, `support` links the incoming episode to an existing open follow-up as evidence, and `address` marks an existing follow-up addressed.
 
@@ -383,12 +434,13 @@ that person's `PARTICIPATED_IN` and `MENTIONED_IN` relationships. `Event` and
 person deletion removes only the deleted person's `ATTENDED` and
 `HAS_DIRECTORY_RECORD` relationships.
 
-Episode deletion preserves linked people. Memory items supported only by the
+Episode deletion preserves linked people and Robot nodes. Memory items supported only by the
 deleted episode are deleted; memory items with other supporting episodes keep
 those supports and lose only the deleted episode's `SUPPORTED_BY` link.
 `ADDRESSED_BY` links to the deleted episode are removed. The linked `Place` is
-deleted only when no other `Episode` or `Event` still has an `OCCURRED_AT`
-relationship to it.
+deleted only when it has no remaining incoming `OCCURRED_AT` or
+`HOME_BASED_AT` relationship, so canonical employee home-base Places survive
+episode cleanup.
 
 Memory item deletion removes the selected `MemoryItem` and every replacement
 reachable through outgoing `SUPERSEDED_BY` relationships. It does not delete
@@ -397,9 +449,27 @@ places.
 
 ## Read Paths
 
-Tailwag provides graph lookups for episodes by person, episodes by place, events by place, and biometric person recognition. Vector retrieval supports episode transcript search, hybrid person/place-filtered episode search, and memory item summary search.
+Tailwag provides graph lookups for episodes by person, robot stable ID, and place; events by place; and biometric person recognition. Episode results include all participating robots, sorted by stable robot ID, with current display name and relationship role/source. Vector retrieval supports episode transcript search, hybrid person/robot/place-filtered episode search, and memory item summary search.
 
 `person_context()` returns one prompt-ready deterministic context surface containing active durable memory items and visible follow-ups. It excludes episode transcript text. When `current_text` or `semantic_scope` is supplied, memory item ranking can use vector similarity without rendering the matching episode transcripts.
+
+### Future Gap: Robot-Scoped Person Memory
+
+The lower-level episode search already supports combining `person_id`,
+`robot_id`, and place filters with AND semantics. The high-level
+`person_context()` and `search_semantic_memory()` contracts do not yet accept a
+robot filter, and durable `MemoryItem` search is currently scoped only by
+`Person.id`.
+
+Adding that filter is intentionally deferred until its semantics are decided.
+In particular, the design must specify whether a durable memory matches a robot
+when any `SUPPORTED_BY` episode includes that robot, how direct memories without
+episode support behave, how consolidated memories with evidence from multiple
+robots behave, and whether safety boundaries or pinned identity-wide memories
+remain visible across robots. The decision may differ between strict explicit
+search and prompt-ready person context. This gap requires a documented contract
+and compatibility tests before the high-level HTTP or Python APIs add
+`robot_id`.
 
 ## Source Adapters
 
@@ -450,7 +520,7 @@ Neo4j Browser shows internal identity fields such as `<id>` and `<elementId>` in
 
 - `<id>` is Neo4j's internal numeric node or relationship ID.
 - `<elementId>` is Neo4j's internal string identifier for a graph element.
-- `id` is the application-level identifier for `Person`, `Episode`, `Event`, `MemoryItem`, `FaceReference`, and `VoiceReference`.
+- `id` is the application-level identifier for `Person`, `Robot`, `Episode`, `Event`, `MemoryItem`, `FaceReference`, and `VoiceReference`.
 - `Place` uses `(building_code, room_id)`.
 - `EmployeeDirectoryRecord` uses `(site_code, username)` and does not store an application-level `id` property.
 
@@ -458,7 +528,10 @@ Application code should use application-level keys, not Neo4j internal IDs.
 
 ## Runtime Exclusions
 
-The graph contains no `Robot`, `ObjectConcept`, `Activity`, `Utterance`, or
-`SemanticFact` labels. It also contains no persistent confidence properties,
-`org_id`, external vector database, or secondary persistence layer. Durable
-person memory uses the `MemoryItem` model described above.
+`Robot` is limited to stable identity, current display name, and episode
+participation provenance. The graph contains no robot capabilities, sensors,
+installed software, live operational state, maintenance records, fleet model,
+`ObjectConcept`, `Activity`, `Utterance`, or `SemanticFact`. It also contains no
+persistent confidence properties, `org_id`, external vector database, or
+secondary persistence layer. Durable person memory uses the `MemoryItem` model
+described above.

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from .db import QueryRunner
+from .episode_result_projection import (
+    episode_place_projection_subquery,
+    robot_participation_projection_subquery,
+)
 
 
 def person_episode_rows(
@@ -17,7 +21,6 @@ def person_episode_rows(
     """Fetch read-only person/episode participation rows."""
     rendered_person_id = str(person_id or "").strip()
     with_memory = include_memory_count or include_memory_items
-    memory_match = "OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)" if with_memory else ""
     memory_with_parts = []
     memory_return_parts = []
     if with_memory:
@@ -36,7 +39,14 @@ def person_episode_rows(
                  } END) WHERE item IS NOT NULL] AS related_memory_items""".strip()
         )
         memory_return_parts.append("related_memory_items AS related_memory_items")
-    memory_with = ",\n                 " + ",\n                 ".join(memory_with_parts) if memory_with_parts else ""
+    memory_subquery = ""
+    if memory_with_parts:
+        memory_subquery = f"""
+            CALL (person, e) {{
+                OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)
+                RETURN {", ".join(memory_with_parts)}
+            }}
+            """
     memory_return = ",\n                   " + ",\n                   ".join(memory_return_parts) if memory_return_parts else ""
     context_return = (
         """
@@ -56,14 +66,17 @@ def person_episode_rows(
     query = f"""
             MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)
             {person_filter}
-            OPTIONAL MATCH (e)-[:OCCURRED_AT]->(place:Place)
-            OPTIONAL MATCH (speaker:Person)-[:PARTICIPATED_IN]->(e)
-            {memory_match}
-            WITH e, r, person, place,
-                 collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels{memory_with}
+            CALL (e) {{
+                OPTIONAL MATCH (speaker:Person)-[:PARTICIPATED_IN]->(e)
+                RETURN collect(DISTINCT speaker.id) + collect(DISTINCT speaker.display_name) AS speaker_labels
+            }}
+            {robot_participation_projection_subquery("e")}
+            {memory_subquery}
+            {episode_place_projection_subquery("e")}
             RETURN person.id AS person_id,
                    person.display_name AS display_name,{context_return}{event_return}{text_return}
                    speaker_labels AS speaker_labels,
+                   robots AS robots,
                    e.transcript AS transcript,
                    e.start_time AS start_time,
                    e.end_time AS end_time,

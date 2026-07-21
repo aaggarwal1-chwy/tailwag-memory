@@ -10,6 +10,7 @@ class ExamplePayloadTest(unittest.TestCase):
         existing_person_episode = json.loads((root / "examples/existing-person-episode.json").read_text())
         event = json.loads((root / "examples/event.json").read_text())
         person = episode["participants"][0]
+        robot = episode["robots"][0]
 
         self.assertFalse((root / "examples/face-embedding.json").exists())
         self.assertFalse((root / "examples/audio-embedding.json").exists())
@@ -18,6 +19,13 @@ class ExamplePayloadTest(unittest.TestCase):
         self.assertEqual(person["consent_status"], "consented")
         self.assertNotIn("face_embedding", person)
         self.assertNotIn("audio_embedding", person)
+        self.assertEqual(robot, {
+            "id": "cody",
+            "display_name": "Cody",
+            "role": "host",
+            "source": "argos",
+        })
+        self.assertNotIn("robots", existing_person_episode)
         self.assertEqual(existing_person_episode["participants"][0], {
             "id": "person_jamie",
             "role": "speaker",

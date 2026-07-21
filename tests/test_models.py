@@ -9,6 +9,7 @@ from tailwag_memory.models import (
     MemoryItemMergeResult,
     PersonMemoryExtractionResult,
     PersonMemoryConsolidationResult,
+    RobotInput,
 )
 
 
@@ -44,6 +45,38 @@ class EpisodeInputTest(unittest.TestCase):
         self.assertFalse(hasattr(episode.participants[0], "face_embedding"))
         self.assertFalse(hasattr(episode.participants[0], "audio_embedding"))
         self.assertEqual(episode.mentioned_people, [])
+        self.assertEqual(episode.robots, [])
+
+    def test_episode_input_from_dict_accepts_multiple_robots_with_defaults(self) -> None:
+        episode = EpisodeInput.from_dict(
+            {
+                "id": "episode_robot_1",
+                "episode_type": "conversation",
+                "start_time": "2026-06-15T10:00:00+00:00",
+                "transcript": "Jamie: Hello.",
+                "retention_class": "standard",
+                "place": {"building_code": "ARGOS", "room_id": "realtime"},
+                "robots": [
+                    {"id": "cody", "display_name": "Cody"},
+                    {
+                        "id": "puffle",
+                        "display_name": "Puffle",
+                        "role": "observer",
+                        "source": "fixture",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(
+            episode.robots,
+            [
+                RobotInput(id="cody", display_name="Cody"),
+                RobotInput(id="puffle", display_name="Puffle", role="observer", source="fixture"),
+            ],
+        )
+        self.assertEqual(episode.robots[0].role, "host")
+        self.assertEqual(episode.robots[0].source, "argos")
 
     def test_episode_input_from_dict_accepts_mentioned_people(self) -> None:
         episode = EpisodeInput.from_dict(

@@ -52,6 +52,8 @@ class NodeDeletionServiceTest(unittest.TestCase):
         self.assertIn("ATTENDED", query)
         self.assertIn("Event", query)
         self.assertIn("WHERE NOT kept_episode IN owned_episodes", query)
+        self.assertIn("NOT EXISTS { MATCH ()-[:OCCURRED_AT]->(place) }", query)
+        self.assertIn("NOT EXISTS { MATCH ()-[:HOME_BASED_AT]->(place) }", query)
         self.assertEqual(runner.queries[1].parameters, {"node_id": "person_jamie"})
 
     def test_delete_episode_preserves_people_and_removes_memory_evidence(self) -> None:
@@ -79,6 +81,8 @@ class NodeDeletionServiceTest(unittest.TestCase):
         self.assertIn("ADDRESSED_BY", query)
         self.assertIn("single_support_memories", query)
         self.assertIn("OCCURRED_AT", query)
+        self.assertIn("NOT EXISTS { MATCH ()-[:OCCURRED_AT]->(place) }", query)
+        self.assertIn("NOT EXISTS { MATCH ()-[:HOME_BASED_AT]->(place) }", query)
         self.assertNotIn("MATCH (person:Person", query)
         self.assertEqual(runner.queries[1].parameters, {"node_id": "episode_1"})
 
