@@ -9,12 +9,14 @@ from typing import Any, Callable, Protocol
 
 from . import slack_episode_conversion as _conversion
 from .models import EpisodeInput, EpisodeRecordResult
-from .slack_episode_conversion import build_episode_from_slack_thread
+from .slack_episode_conversion import (
+    PersonIdResolver,
+    SlackProfileClient,
+    build_episode_from_slack_thread,
+)
 
-PersonIdResolver = Callable[[str], str | None]
 
-
-class SlackConversationClient(Protocol):
+class SlackConversationClient(SlackProfileClient, Protocol):
     """Describe the Slack conversation methods used by polling."""
 
     def history(self, channel: str, oldest: str | None, limit: int) -> list[dict[str, Any]]:
@@ -24,11 +26,6 @@ class SlackConversationClient(Protocol):
     def replies(self, channel: str, thread_ts: str, limit: int) -> list[dict[str, Any]]:
         """Return replies for a Slack thread."""
         ...
-
-    def user_profile(self, user_id: str) -> "SlackUserProfile":
-        """Return profile data for a Slack user."""
-        ...
-
 
 class EpisodeRecorder(Protocol):
     """Describe the episode recording behavior needed by Slack polling."""

@@ -3,21 +3,34 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import html
 import re
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable, Protocol
 
 from .models import EpisodeInput, EpisodeMentionInput, PersonInput, PlaceInput
 
-if TYPE_CHECKING:
-    from .slack_ingestion import SlackConversationClient, SlackUserProfile
 
 PersonIdResolver = Callable[[str], str | None]
+
+
+class SlackProfile(Protocol):
+    """Describe Slack profile fields used during episode conversion."""
+
+    display_name: str | None
+    email: str | None
+
+
+class SlackProfileClient(Protocol):
+    """Describe the profile lookup needed during episode conversion."""
+
+    def user_profile(self, user_id: str) -> SlackProfile:
+        """Return profile data for a Slack user."""
+        ...
 
 
 def build_episode_from_slack_thread(
     *,
     channel: str,
     messages: list[dict[str, Any]],
-    client: SlackConversationClient,
+    client: SlackProfileClient,
     retention_class: str = "standard",
     person_id_resolver: PersonIdResolver | None = None,
 ) -> EpisodeInput:
@@ -30,7 +43,7 @@ def build_episode_from_slack_thread(
         raise ValueError("Cannot build an episode from empty Slack messages.")
 
     thread_timestamp = thread_ts(ordered[0])
-    user_profiles: dict[str, SlackUserProfile] = {}
+    user_profiles: dict[str, SlackProfile] = {}
     participants: list[PersonInput] = []
     seen_users: set[str] = set()
     mentioned_user_ids: list[str] = []
@@ -94,7 +107,7 @@ def build_episode_from_slack_thread(
 def slack_person_input(
     *,
     slack_user_id: str,
-    user_profile: SlackUserProfile,
+    user_profile: SlackProfile,
     role: str,
     person_id_resolver: PersonIdResolver | None,
 ) -> PersonInput:
@@ -158,8 +171,8 @@ def clean_text(text: str) -> str:
 def format_slack_text(
     text: str,
     *,
-    client: SlackConversationClient,
-    user_profiles: dict[str, SlackUserProfile],
+    client: SlackProfileClient,
+    user_profiles: dict[str, SlackProfile],
 ) -> tuple[str, list[str]]:
     """Format Slack mrkdwn into transcript text."""
     text = html.unescape(text)
@@ -174,8 +187,8 @@ def format_slack_text(
 def replace_user_mentions(
     text: str,
     *,
-    client: SlackConversationClient,
-    user_profiles: dict[str, SlackUserProfile],
+    client: SlackProfileClient,
+    user_profiles: dict[str, SlackProfile],
 ) -> tuple[str, list[str]]:
     """Replace Slack user mention tokens with display names."""
     mentioned_user_ids: list[str] = []

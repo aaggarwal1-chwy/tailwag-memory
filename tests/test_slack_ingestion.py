@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import tempfile
+import typing
 import unittest
 
 from tailwag_memory.slack_ingestion import (
@@ -132,6 +133,9 @@ class FakeStateStore:
 
 class SlackThreadConversionTest(unittest.TestCase):
     def test_thread_becomes_episode_with_slack_people_and_virtual_place(self) -> None:
+        type_hints = typing.get_type_hints(build_episode_from_slack_thread)
+        self.assertIn("client", type_hints)
+
         root_ts = _ts()
         reply_ts = _ts(3)
         client = FakeSlackClient(user_names={"U1": "Asha", "U2": "Ben"})
