@@ -4,7 +4,7 @@
 
 This runbook coordinates the Tailwag Robot schema release, the Argos live
 episode adapter release, canonical BOS3 site-place migration, directory
-home-base links, and the historical Cody episode backfill.
+home-base links, and the historical Cody Argos conversation episode backfill.
 
 The database mutation is manual. Run the exact preflight, mutation, and
 postflight below in one interactive cypher-shell transaction. Do not run the
@@ -49,7 +49,12 @@ git branch --show-current
 git status --short
 git log -1 --oneline
 source setup_shell.sh
-python3 -B -m pytest tests/argos_src/provider_api tests/argos_src/identity_memory
+python3 -B -m pytest \
+  tests/argos_src/provider_api \
+  tests/argos_src/identity_memory \
+  tests/argos_src/agent/test_agent_runtime.py \
+  tests/argos_src/test_argos_profile_config.py \
+  tests/scripts/labs/test_enrollment_collection_common.py
 ~~~
 
 Both branches must be schema-updates. Commit and review the exact release

@@ -163,8 +163,9 @@ their email. Directory sync also links same-username people while loading rows.
 Biometric enrollment and explicit encounter recording can additionally link a
 specific directory row when metadata supplies both `username` and `site_code`.
 For every row with a nonblank site code, directory sync also merges the canonical
-site place `(site_code, "__site__")`, removes any prior `HOME_BASED_AT` link to
-a different target, and links only the `EmployeeDirectoryRecord` to that place.
+site place `Place(building_code=<site_code>, room_id="__site__")`, removes any
+prior `HOME_BASED_AT` link to a different target, and links only the
+`EmployeeDirectoryRecord` to that place.
 It does not create `Person-HOME_BASED_AT` or room-level home-base relationships.
 `<id>` is Neo4j Browser's internal node identifier; Tailwag does not store an
 application-level `id` property on `EmployeeDirectoryRecord`.
@@ -351,8 +352,9 @@ reconciles generic person writes by email username; site-specific
 metadata is used only where the caller supplies a site.
 
 `HOME_BASED_AT` links an `EmployeeDirectoryRecord` with a nonblank `site_code`
-to its one canonical site-level `Place(site_code, "__site__")`. No other node
-type receives this relationship.
+to its one canonical site-level
+`Place(building_code=<site_code>, room_id="__site__")`. No other node type
+receives this relationship.
 
 `HAS_FACE_REFERENCE` and `HAS_VOICE_REFERENCE` link people to active or archived
 biometric reference nodes. Search and adaptive update paths only consider active,
