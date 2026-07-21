@@ -5,8 +5,7 @@ from datetime import datetime, timezone
 
 from ..db import QueryRunner
 from ..models import utc_now_iso
-from .models import InspectFollowupValidityItem
-from .reports import InspectReport
+from .models import InspectFollowupValidityItem, InspectReport
 
 _BUCKET_ORDER = [
     "invalid",

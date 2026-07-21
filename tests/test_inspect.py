@@ -25,6 +25,8 @@ from tailwag_memory.inspect import (
     recent_person_episode_rows,
 )
 from tailwag_memory.inspect.html_utils import INSPECT_CSS_FILENAME, INSPECT_JS_FILENAME, inspect_asset_text
+from tailwag_memory.inspect.models import InspectReport as ModelInspectReport
+from tailwag_memory.inspect.reports import InspectReport as ReportsInspectReport
 from tailwag_memory.models import PersonTimelineItem, PersonTimelineTranscriptSnippet
 
 
@@ -96,6 +98,10 @@ class InspectPackageImportTest(unittest.TestCase):
         self.assertIs(inspect_tools.PersonEpisodeTranscriptService, PersonEpisodeTranscriptService)
         self.assertIs(inspect_tools.MemoryItemInspectService, MemoryItemInspectService)
         self.assertIs(inspect_tools.person_timeline_report, person_timeline_report)
+
+    def test_inspect_report_preserves_legacy_and_model_import_paths(self) -> None:
+        self.assertIs(inspect_tools.InspectReport, ModelInspectReport)
+        self.assertIs(ReportsInspectReport, ModelInspectReport)
 
 
 class InspectTranscriptRowsTest(unittest.TestCase):

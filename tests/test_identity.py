@@ -1,11 +1,45 @@
+import os
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from tests.helpers import RecordingQueryRunner
 from tailwag_memory.identity import DirectoryIdentityService, load_directory_records_from_snowflake
+from tailwag_memory.identity.snowflake import load_env_file as load_snowflake_env_file
 from tailwag_memory.models import DirectoryPersonRecord
 
 
 class DirectoryIdentityServiceTest(unittest.TestCase):
+    def test_snowflake_env_loader_preserves_candidate_precedence_and_quote_handling(self) -> None:
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cwd_env = root / ".snowflake_env"
+            explicit_env = root / "explicit.env"
+            fallback_env = root / ".env"
+            cwd_env.write_text('SOURCE="cwd snowflake"\n', encoding="utf-8")
+            explicit_env.write_text("SOURCE='explicit path'\n", encoding="utf-8")
+            fallback_env.write_text("SOURCE=fallback env\n", encoding="utf-8")
+
+            os.chdir(root)
+            try:
+                with patch.dict(os.environ, {}, clear=True):
+                    load_snowflake_env_file(explicit_env)
+                    self.assertEqual(os.environ["SOURCE"], "cwd snowflake")
+
+                cwd_env.unlink()
+                with patch.dict(os.environ, {}, clear=True):
+                    load_snowflake_env_file(explicit_env)
+                    self.assertEqual(os.environ["SOURCE"], "explicit path")
+
+                explicit_env.unlink()
+                with patch.dict(os.environ, {}, clear=True):
+                    load_snowflake_env_file(explicit_env)
+                    self.assertEqual(os.environ["SOURCE"], "fallback env")
+            finally:
+                os.chdir(original_cwd)
+
     def test_sync_directory_people_writes_normalized_rows(self) -> None:
         runner = RecordingQueryRunner()
         service = DirectoryIdentityService(runner)

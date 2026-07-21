@@ -414,13 +414,24 @@ class SlackMemoryPollerTest(unittest.TestCase):
         self.assertEqual(explicit_calls, ["other@example.com"])
         self.assertEqual(recorder.canonical_lookup_calls, ["jamie@example.com"])
 
-    def test_enqueue_memory_extraction_true_is_omitted_and_false_is_forwarded(self) -> None:
+    def test_enqueue_memory_extraction_is_always_forwarded_when_supported(self) -> None:
         class KeywordRecordingEpisodeRecorder:
             def __init__(self) -> None:
                 self.calls: list[dict] = []
 
-            def record_episode(self, episode, *, extract_memory: bool = True, **kwargs):
-                self.calls.append({"extract_memory": extract_memory, **kwargs})
+            def record_episode(
+                self,
+                episode,
+                *,
+                extract_memory: bool = True,
+                enqueue_memory_extraction: bool = False,
+            ):
+                self.calls.append(
+                    {
+                        "extract_memory": extract_memory,
+                        "enqueue_memory_extraction": enqueue_memory_extraction,
+                    }
+                )
                 return EpisodeRecordResult(episode_id=episode.id)
 
         root_ts = _ts()
@@ -430,18 +441,50 @@ class SlackMemoryPollerTest(unittest.TestCase):
         )
         recorder = KeywordRecordingEpisodeRecorder()
 
-        SlackMemoryPoller(client, recorder, FakeStateStore()).poll_once("C123", backfill_hours=1)
+        SlackMemoryPoller(client, recorder, FakeStateStore()).poll_once(
+            "C123",
+            backfill_hours=1,
+            extract_memory=False,
+        )
         SlackMemoryPoller(client, recorder, FakeStateStore()).poll_once(
             "C456",
             backfill_hours=1,
+            extract_memory=False,
             enqueue_memory_extraction=False,
         )
 
         self.assertEqual(
             recorder.calls,
             [
-                {"extract_memory": True},
-                {"extract_memory": True, "enqueue_memory_extraction": False},
+                {"extract_memory": False, "enqueue_memory_extraction": True},
+                {"extract_memory": False, "enqueue_memory_extraction": False},
+            ],
+        )
+
+    def test_enqueue_memory_extraction_is_omitted_for_legacy_recorder(self) -> None:
+        root_ts = _ts()
+        client = FakeSlackClient(
+            history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
+            user_names={"U1": "Asha"},
+        )
+        recorder = FakeEpisodeRecorder()
+
+        SlackMemoryPoller(client, recorder, FakeStateStore()).poll_once(
+            "C123",
+            backfill_hours=1,
+        )
+        SlackMemoryPoller(client, recorder, FakeStateStore()).poll_once(
+            "C456",
+            backfill_hours=1,
+            extract_memory=False,
+            enqueue_memory_extraction=False,
+        )
+
+        self.assertEqual(
+            recorder.record_calls,
+            [
+                {"episode_id": f"slack:C123:{root_ts}", "extract_memory": True},
+                {"episode_id": f"slack:C456:{root_ts}", "extract_memory": False},
             ],
         )
 

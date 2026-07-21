@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import inspect
 import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -412,14 +413,10 @@ class SlackMemoryPoller:
                     person_id_resolver=self.person_id_resolver,
                 )
                 episode_records.append(
-                    self.episode_recorder.record_episode(
+                    self._record_episode(
                         episode,
                         extract_memory=extract_memory,
-                        **(
-                            {"enqueue_memory_extraction": False}
-                            if not enqueue_memory_extraction
-                            else {}
-                        ),
+                        enqueue_memory_extraction=enqueue_memory_extraction,
                     )
                 )
 
@@ -443,6 +440,38 @@ class SlackMemoryPoller:
             ingested_episode_ids=[record.episode_id for record in episode_records],
             episode_records=episode_records,
         )
+
+    def _record_episode(
+        self,
+        episode: EpisodeInput,
+        *,
+        extract_memory: bool,
+        enqueue_memory_extraction: bool,
+    ) -> EpisodeRecordResult:
+        """Record an episode while retaining legacy recorder compatibility."""
+        record_episode = self.episode_recorder.record_episode
+        keyword_arguments = {"extract_memory": extract_memory}
+        try:
+            parameters = inspect.signature(record_episode).parameters.values()
+        except (TypeError, ValueError):
+            supports_enqueue_keyword = True
+        else:
+            supports_enqueue_keyword = any(
+                (
+                    parameter.name == "enqueue_memory_extraction"
+                    and parameter.kind
+                    in (
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        inspect.Parameter.KEYWORD_ONLY,
+                    )
+                )
+                or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            )
+
+        if supports_enqueue_keyword:
+            keyword_arguments["enqueue_memory_extraction"] = enqueue_memory_extraction
+        return record_episode(episode, **keyword_arguments)
 
 
 def _datetime_to_slack_ts(value: datetime) -> str:

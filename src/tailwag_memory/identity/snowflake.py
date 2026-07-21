@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 from typing import Any, Callable
 
+from ..config import load_env_file as load_config_env_file
 from ..models import DirectoryPersonRecord
 
 
@@ -49,12 +50,7 @@ def load_env_file(path: Path = Path(".snowflake_env")) -> None:
     for candidate in candidates:
         if not candidate.is_file():
             continue
-        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip())
+        load_config_env_file(candidate)
         return
 
 
