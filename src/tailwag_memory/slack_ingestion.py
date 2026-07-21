@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-import html
 import json
 from pathlib import Path
-import re
 from tempfile import NamedTemporaryFile
 from typing import Any, Callable, Protocol
 
-from .models import EpisodeInput, EpisodeMentionInput, EpisodeRecordResult, PersonInput, PlaceInput
+from . import slack_episode_conversion as _conversion
+from .models import EpisodeInput, EpisodeRecordResult
+from .slack_episode_conversion import build_episode_from_slack_thread
 
 PersonIdResolver = Callable[[str], str | None]
 
@@ -114,7 +114,11 @@ class SlackWebApiClient:
 
     def replies(self, channel: str, thread_ts: str, limit: int) -> list[dict[str, Any]]:
         """Return paginated replies for a Slack thread."""
-        return self._paginated_messages(self._client.conversations_replies, {"channel": channel, "ts": thread_ts}, limit)
+        return self._paginated_messages(
+            self._client.conversations_replies,
+            {"channel": channel, "ts": thread_ts},
+            limit,
+        )
 
     def _paginated_messages(
         self,
@@ -151,7 +155,11 @@ class SlackWebApiClient:
                     or user.get("real_name")
                     or user.get("name")
                 ),
-                email=_normalize_email(profile.get("email")) if self.include_email else None,
+                email=(
+                    _conversion.normalize_email(profile.get("email"))
+                    if self.include_email
+                    else None
+                ),
             )
         return self._user_cache[user_id]
 
@@ -167,8 +175,7 @@ class SlackFilePollStateStore:
         """Load one channel's polling state from disk."""
         data = self._load()
         channels = data.get("channels", {})
-        raw_channel = channels.get(channel)
-        return self._channel_state(raw_channel, channel=channel)
+        return self._channel_state(channels.get(channel), channel=channel)
 
     def save_channel(self, channel: str, state: SlackChannelState, expected_version: object | None) -> None:
         """Atomically save one channel's polling state to disk."""
@@ -206,29 +213,13 @@ class SlackFilePollStateStore:
         """Return a validated SlackChannelState for a raw channel object."""
         if raw_channel is None:
             return SlackChannelState(version=None)
-        if not isinstance(raw_channel, dict):
-            raise ValueError(f"Slack poll state channel {channel} must be a JSON object: {self.path}")
-
-        latest_history_ts = raw_channel.get("latest_history_ts")
-        if latest_history_ts is not None and not isinstance(latest_history_ts, str):
-            raise ValueError(f"Slack poll state latest_history_ts for {channel} must be a string: {self.path}")
-
-        active_threads = raw_channel.get("active_threads", {})
-        if not isinstance(active_threads, dict):
-            raise ValueError(f"Slack poll state active_threads for {channel} must be a JSON object: {self.path}")
-
-        normalized_threads: dict[str, dict[str, str]] = {}
-        for thread_ts, thread_state in active_threads.items():
-            if not isinstance(thread_ts, str) or not isinstance(thread_state, dict):
-                raise ValueError(f"Slack poll state active_threads for {channel} must map strings to objects: {self.path}")
-            latest_ts = thread_state.get("latest_ts")
-            if latest_ts is not None and not isinstance(latest_ts, str):
-                raise ValueError(f"Slack poll state active thread latest_ts for {channel} must be a string: {self.path}")
-            normalized_threads[thread_ts] = dict(thread_state)
-
+        latest_history_ts, active_threads = self._validated_channel_values(
+            raw_channel,
+            channel=channel,
+        )
         return SlackChannelState(
             latest_history_ts=latest_history_ts,
-            active_threads=normalized_threads,
+            active_threads=active_threads,
             version=self._channel_version(raw_channel, channel=channel),
         )
 
@@ -236,41 +227,69 @@ class SlackFilePollStateStore:
         """Return an opaque version derived from the stored channel JSON."""
         if raw_channel is None:
             return None
-        channel_state = self._serialize_channel_state(self._channel_state_without_version(raw_channel, channel=channel))
+        channel_state = self._serialize_channel_state(
+            self._channel_state_without_version(raw_channel, channel=channel)
+        )
         return json.dumps(channel_state, sort_keys=True, separators=(",", ":"))
 
     def _channel_state_without_version(self, raw_channel: object, *, channel: str) -> SlackChannelState:
         """Validate raw channel state without recursively deriving a version."""
         if raw_channel is None:
             return SlackChannelState()
-        if not isinstance(raw_channel, dict):
-            raise ValueError(f"Slack poll state channel {channel} must be a JSON object: {self.path}")
-        latest_history_ts = raw_channel.get("latest_history_ts")
-        if latest_history_ts is not None and not isinstance(latest_history_ts, str):
-            raise ValueError(f"Slack poll state latest_history_ts for {channel} must be a string: {self.path}")
-        active_threads = raw_channel.get("active_threads", {})
-        if not isinstance(active_threads, dict):
-            raise ValueError(f"Slack poll state active_threads for {channel} must be a JSON object: {self.path}")
-        normalized_threads: dict[str, dict[str, str]] = {}
-        for thread_ts, thread_state in active_threads.items():
-            if not isinstance(thread_ts, str) or not isinstance(thread_state, dict):
-                raise ValueError(f"Slack poll state active_threads for {channel} must map strings to objects: {self.path}")
-            latest_ts = thread_state.get("latest_ts")
-            if latest_ts is not None and not isinstance(latest_ts, str):
-                raise ValueError(f"Slack poll state active thread latest_ts for {channel} must be a string: {self.path}")
-            normalized_threads[thread_ts] = dict(thread_state)
-        return SlackChannelState(latest_history_ts=latest_history_ts, active_threads=normalized_threads)
+        latest_history_ts, active_threads = self._validated_channel_values(
+            raw_channel,
+            channel=channel,
+        )
+        return SlackChannelState(
+            latest_history_ts=latest_history_ts,
+            active_threads=active_threads,
+        )
 
     def _serialize_channel_state(self, state: SlackChannelState) -> dict[str, Any]:
         """Return the JSON-compatible channel state without the opaque version."""
         serialized: dict[str, Any] = {}
         if state.latest_history_ts is not None:
             serialized["latest_history_ts"] = state.latest_history_ts
-        if state.active_threads:
-            serialized["active_threads"] = state.active_threads
-        else:
-            serialized["active_threads"] = {}
+        serialized["active_threads"] = state.active_threads if state.active_threads else {}
         return serialized
+
+    def _validated_channel_values(
+        self,
+        raw_channel: object,
+        *,
+        channel: str,
+    ) -> tuple[str | None, dict[str, dict[str, str]]]:
+        """Validate and normalize the persisted values for one channel."""
+        if not isinstance(raw_channel, dict):
+            raise ValueError(
+                f"Slack poll state channel {channel} must be a JSON object: {self.path}"
+            )
+
+        latest_history_ts = raw_channel.get("latest_history_ts")
+        if latest_history_ts is not None and not isinstance(latest_history_ts, str):
+            raise ValueError(
+                f"Slack poll state latest_history_ts for {channel} must be a string: {self.path}"
+            )
+
+        active_threads = raw_channel.get("active_threads", {})
+        if not isinstance(active_threads, dict):
+            raise ValueError(
+                f"Slack poll state active_threads for {channel} must be a JSON object: {self.path}"
+            )
+
+        normalized_threads: dict[str, dict[str, str]] = {}
+        for thread_ts, thread_state in active_threads.items():
+            if not isinstance(thread_ts, str) or not isinstance(thread_state, dict):
+                raise ValueError(
+                    f"Slack poll state active_threads for {channel} must map strings to objects: {self.path}"
+                )
+            latest_ts = thread_state.get("latest_ts")
+            if latest_ts is not None and not isinstance(latest_ts, str):
+                raise ValueError(
+                    f"Slack poll state active thread latest_ts for {channel} must be a string: {self.path}"
+                )
+            normalized_threads[thread_ts] = dict(thread_state)
+        return latest_history_ts, normalized_threads
 
 
 class SlackMemoryPoller:
@@ -292,7 +311,14 @@ class SlackMemoryPoller:
         self.state_store = state_store
         self.retention_class = retention_class
         self.active_thread_hours = active_thread_hours
-        self.person_id_resolver = person_id_resolver or _recorder_person_id_resolver(episode_recorder)
+        recorder_resolver = getattr(
+            episode_recorder,
+            "canonical_person_id_by_email",
+            None,
+        )
+        self.person_id_resolver = person_id_resolver or (
+            recorder_resolver if callable(recorder_resolver) else None
+        )
 
     def poll_once(
         self,
@@ -315,7 +341,9 @@ class SlackMemoryPoller:
         oldest = state.latest_history_ts
 
         if force_backfill:
-            oldest = _datetime_to_slack_ts(datetime.now(timezone.utc) - timedelta(hours=backfill_hours or 0))
+            oldest = _datetime_to_slack_ts(
+                datetime.now(timezone.utc) - timedelta(hours=backfill_hours or 0)
+            )
         elif oldest is None and backfill_hours is None:
             now_ts = _now_slack_ts()
             state.latest_history_ts = now_ts
@@ -330,21 +358,23 @@ class SlackMemoryPoller:
             )
 
         if oldest is None and backfill_hours is not None:
-            oldest = _datetime_to_slack_ts(datetime.now(timezone.utc) - timedelta(hours=backfill_hours))
+            oldest = _datetime_to_slack_ts(
+                datetime.now(timezone.utc) - timedelta(hours=backfill_hours)
+            )
 
         history = self.client.history(channel=channel, oldest=oldest, limit=history_limit)
         history_messages: dict[str, list[dict[str, Any]]] = {}
         threaded_history: set[str] = set()
         for message in history:
-            if not _is_memory_message(message):
+            if not _conversion.is_memory_message(message):
                 continue
 
-            thread_ts = _thread_ts(message)
+            thread_ts = _conversion.thread_ts(message)
             if thread_ts is None:
                 continue
 
             history_messages.setdefault(thread_ts, []).append(message)
-            if _has_thread_replies(message):
+            if int(message.get("reply_count") or 0) > 0:
                 threaded_history.add(thread_ts)
 
         active_threads = state.active_threads
@@ -356,17 +386,27 @@ class SlackMemoryPoller:
             should_fetch_replies = thread_ts in active_threads or thread_ts in threaded_history
             if should_fetch_replies:
                 replies = self.client.replies(channel=channel, thread_ts=thread_ts, limit=reply_limit)
-                messages = [message for message in replies if _is_memory_message(message)]
+                messages = [
+                    message for message in replies if _conversion.is_memory_message(message)
+                ]
             else:
-                messages = [message for message in history_messages.get(thread_ts, []) if _is_memory_message(message)]
+                messages = [
+                    message
+                    for message in history_messages.get(thread_ts, [])
+                    if _conversion.is_memory_message(message)
+                ]
 
             if not messages:
                 active_threads.pop(thread_ts, None)
                 continue
 
-            latest_thread_ts = _max_ts(messages)
+            latest_thread_ts = _conversion.max_ts(messages)
             prior_thread_ts = active_threads.get(thread_ts, {}).get("latest_ts")
-            if force_backfill or prior_thread_ts is None or _ts_greater(latest_thread_ts, prior_thread_ts):
+            if (
+                force_backfill
+                or prior_thread_ts is None
+                or float(latest_thread_ts) > float(prior_thread_ts)
+            ):
                 episode = build_episode_from_slack_thread(
                     channel=channel,
                     messages=messages,
@@ -386,13 +426,13 @@ class SlackMemoryPoller:
                     )
                 )
 
-            latest_thread_time = _slack_ts_to_datetime(latest_thread_ts)
+            latest_thread_time = _conversion.slack_ts_to_datetime(latest_thread_ts)
             if latest_thread_time >= thread_cutoff:
                 active_threads[thread_ts] = {"latest_ts": latest_thread_ts}
             else:
                 active_threads.pop(thread_ts, None)
 
-        latest_history_ts = _max_ts(history) if history else poll_started_ts
+        latest_history_ts = _conversion.max_ts(history) if history else poll_started_ts
         if latest_history_ts is not None:
             state.latest_history_ts = latest_history_ts
         self.state_store.save_channel(channel, state, expected_version)
@@ -406,234 +446,6 @@ class SlackMemoryPoller:
             ingested_episode_ids=[record.episode_id for record in episode_records],
             episode_records=episode_records,
         )
-
-
-def build_episode_from_slack_thread(
-    *,
-    channel: str,
-    messages: list[dict[str, Any]],
-    client: SlackConversationClient,
-    retention_class: str = "standard",
-    person_id_resolver: PersonIdResolver | None = None,
-) -> EpisodeInput:
-    """Convert Slack root-message or thread messages into an episode input."""
-    ordered = sorted([message for message in messages if _is_memory_message(message)], key=lambda item: float(item["ts"]))
-    if not ordered:
-        raise ValueError("Cannot build an episode from empty Slack messages.")
-
-    thread_ts = _thread_ts(ordered[0])
-    user_profiles: dict[str, SlackUserProfile] = {}
-    participants: list[PersonInput] = []
-    seen_users: set[str] = set()
-    mentioned_user_ids: list[str] = []
-    transcript_lines: list[str] = []
-
-    for message in ordered:
-        user_id = str(message["user"])
-        if user_id not in user_profiles:
-            user_profiles[user_id] = client.user_profile(user_id)
-        user_profile = user_profiles[user_id]
-        display_name = user_profile.display_name or f"slack:{user_id}"
-
-        if user_id not in seen_users:
-            participants.append(
-                _slack_person_input(
-                    slack_user_id=user_id,
-                    user_profile=user_profile,
-                    role="speaker",
-                    person_id_resolver=person_id_resolver,
-                )
-            )
-            seen_users.add(user_id)
-
-        message_time = _slack_ts_to_datetime(str(message["ts"])).isoformat()
-        text, message_mentions = _format_slack_text(
-            str(message.get("text") or ""),
-            client=client,
-            user_profiles=user_profiles,
-        )
-        for mentioned_user_id in message_mentions:
-            if mentioned_user_id not in mentioned_user_ids:
-                mentioned_user_ids.append(mentioned_user_id)
-        transcript_lines.append(f"[{message_time}] {display_name}: {text}")
-
-    mentioned_people = [
-        EpisodeMentionInput(
-            person=_slack_person_input(
-                slack_user_id=user_id,
-                user_profile=user_profiles[user_id],
-                role="mentioned",
-                person_id_resolver=person_id_resolver,
-            ),
-            source="slack",
-        )
-        for user_id in mentioned_user_ids
-    ]
-
-    return EpisodeInput(
-        id=f"slack:{channel}:{thread_ts}",
-        episode_type="conversation",
-        start_time=_slack_ts_to_datetime(str(ordered[0]["ts"])).isoformat(),
-        end_time=_slack_ts_to_datetime(_max_ts(ordered)).isoformat(),
-        transcript="\n".join(transcript_lines),
-        retention_class=retention_class,
-        place=PlaceInput(building_code="SLACK", room_id=channel),
-        participants=participants,
-        mentioned_people=mentioned_people,
-    )
-
-
-def _slack_person_input(
-    *,
-    slack_user_id: str,
-    user_profile: SlackUserProfile,
-    role: str,
-    person_id_resolver: PersonIdResolver | None,
-) -> PersonInput:
-    """Return Tailwag person input for one Slack user."""
-    display_name = user_profile.display_name or f"slack:{slack_user_id}"
-    email = _normalize_email(user_profile.email)
-    person_id, resolved_to_canonical = _resolve_slack_person_id(
-        slack_user_id=slack_user_id,
-        email=email,
-        person_id_resolver=person_id_resolver,
-    )
-    return PersonInput(
-        id=person_id,
-        display_name=None if resolved_to_canonical else display_name,
-        email=None if resolved_to_canonical else email,
-        role=role,
-        source="slack",
-    )
-
-
-def _recorder_person_id_resolver(episode_recorder: EpisodeRecorder) -> PersonIdResolver | None:
-    """Return a canonical email resolver exposed by the recorder, when present."""
-    resolver = getattr(episode_recorder, "canonical_person_id_by_email", None)
-    return resolver if callable(resolver) else None
-
-
-def _resolve_slack_person_id(
-    *,
-    slack_user_id: str,
-    email: str | None,
-    person_id_resolver: PersonIdResolver | None,
-) -> tuple[str, bool]:
-    """Resolve a Slack participant to a caller-owned canonical person id when possible."""
-    fallback_person_id = f"slack:{slack_user_id}"
-    if email and person_id_resolver is not None:
-        resolved = str(person_id_resolver(email) or "").strip()
-        if resolved:
-            return resolved, resolved != fallback_person_id
-    return fallback_person_id, False
-
-
-def _is_memory_message(message: dict[str, Any]) -> bool:
-    """Return whether a Slack message should be ingested."""
-    subtype = message.get("subtype")
-    if subtype in {"message_deleted", "channel_join", "channel_leave", "bot_message"} or message.get("bot_id"):
-        return False
-    return bool(message.get("user")) and bool(_clean_text(str(message.get("text") or ""))) and bool(message.get("ts"))
-
-
-def _thread_ts(message: dict[str, Any]) -> str | None:
-    """Return the thread timestamp for a Slack message."""
-    ts = message.get("thread_ts") or message.get("ts")
-    return str(ts) if ts is not None else None
-
-
-def _has_thread_replies(message: dict[str, Any]) -> bool:
-    """Return whether a Slack root reports replies."""
-    return int(message.get("reply_count") or 0) > 0
-
-
-def _clean_text(text: str) -> str:
-    """Collapse whitespace in Slack text."""
-    return " ".join(text.split())
-
-
-def _format_slack_text(
-    text: str,
-    *,
-    client: SlackConversationClient,
-    user_profiles: dict[str, SlackUserProfile],
-) -> tuple[str, list[str]]:
-    """Format Slack mrkdwn into transcript text."""
-    text = html.unescape(text)
-    text, mentioned_user_ids = _replace_user_mentions(
-        text,
-        client=client,
-        user_profiles=user_profiles,
-    )
-    return _clean_text(_replace_slack_entities(text)), mentioned_user_ids
-
-
-def _replace_user_mentions(
-    text: str,
-    *,
-    client: SlackConversationClient,
-    user_profiles: dict[str, SlackUserProfile],
-) -> tuple[str, list[str]]:
-    """Replace Slack user mention tokens with display names."""
-    mentioned_user_ids: list[str] = []
-
-    def replace(match: re.Match[str]) -> str:
-        """Return a formatted display name for one mention."""
-        user_id = match.group("user_id")
-        label = match.group("label")
-        if user_id not in mentioned_user_ids:
-            mentioned_user_ids.append(user_id)
-        if user_id not in user_profiles:
-            user_profiles[user_id] = client.user_profile(user_id)
-        display_name = user_profiles[user_id].display_name or label or f"slack:{user_id}"
-        return f"@{display_name}"
-
-    return re.sub(r"<@(?P<user_id>[A-Z0-9]+)(?:\|(?P<label>[^>]+))?>", replace, text), mentioned_user_ids
-
-
-def _replace_slack_entities(text: str) -> str:
-    """Replace Slack entity tokens with readable labels."""
-    def replace(match: re.Match[str]) -> str:
-        """Return readable text for one Slack entity token."""
-        body = match.group("body")
-        if body.startswith("#"):
-            channel_id, _, label = body[1:].partition("|")
-            return f"#{label or channel_id}"
-        if body.startswith("!"):
-            mention, _, label = body[1:].partition("|")
-            return f"@{label or mention}"
-
-        target, _, label = body.partition("|")
-        if target.startswith("mailto:"):
-            return label or target.removeprefix("mailto:")
-        if "://" in target or target.startswith("www."):
-            return label or target
-        return match.group(0)
-
-    return re.sub(r"<(?P<body>[^<>]+)>", replace, text)
-
-
-def _normalize_email(email: Any) -> str | None:
-    """Normalize a Slack profile email value."""
-    if not isinstance(email, str):
-        return None
-    normalized = email.strip().lower()
-    return normalized or None
-
-
-def _max_ts(messages: list[dict[str, Any]]) -> str:
-    """Return the maximum Slack timestamp in a message list."""
-    return max((str(message["ts"]) for message in messages if message.get("ts") is not None), key=float)
-
-
-def _ts_greater(left: str, right: str) -> bool:
-    """Return whether one Slack timestamp is greater than another."""
-    return float(left) > float(right)
-
-
-def _slack_ts_to_datetime(ts: str) -> datetime:
-    """Convert a Slack timestamp to a UTC datetime."""
-    return datetime.fromtimestamp(float(ts), tz=timezone.utc)
 
 
 def _datetime_to_slack_ts(value: datetime) -> str:

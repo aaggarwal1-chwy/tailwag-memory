@@ -384,6 +384,63 @@ class SlackWebApiClientTest(unittest.TestCase):
 
 
 class SlackMemoryPollerTest(unittest.TestCase):
+    def test_poller_uses_recorder_canonical_resolver_unless_explicitly_overridden(self) -> None:
+        recorder = FakeEpisodeRecorder(
+            canonical_ids_by_email={"jamie@example.com": "person_jamie"},
+        )
+        state_store = SlackFilePollStateStore(Path("unused.json"))
+        automatic = SlackMemoryPoller(FakeSlackClient(), recorder, state_store)
+
+        self.assertEqual(automatic.person_id_resolver("jamie@example.com"), "person_jamie")
+        self.assertEqual(recorder.canonical_lookup_calls, ["jamie@example.com"])
+
+        explicit_calls: list[str] = []
+
+        def explicit_resolver(email: str) -> str:
+            explicit_calls.append(email)
+            return "person_explicit"
+
+        explicit = SlackMemoryPoller(
+            FakeSlackClient(),
+            recorder,
+            state_store,
+            person_id_resolver=explicit_resolver,
+        )
+        self.assertEqual(explicit.person_id_resolver("other@example.com"), "person_explicit")
+        self.assertEqual(explicit_calls, ["other@example.com"])
+        self.assertEqual(recorder.canonical_lookup_calls, ["jamie@example.com"])
+
+    def test_enqueue_memory_extraction_true_is_omitted_and_false_is_forwarded(self) -> None:
+        class KeywordRecordingEpisodeRecorder:
+            def __init__(self) -> None:
+                self.calls: list[dict] = []
+
+            def record_episode(self, episode, *, extract_memory: bool = True, **kwargs):
+                self.calls.append({"extract_memory": extract_memory, **kwargs})
+                return EpisodeRecordResult(episode_id=episode.id)
+
+        root_ts = _ts()
+        client = FakeSlackClient(
+            history_messages=[{"ts": root_ts, "user": "U1", "text": "Start thread"}],
+            user_names={"U1": "Asha"},
+        )
+        recorder = KeywordRecordingEpisodeRecorder()
+
+        SlackMemoryPoller(client, recorder, FakeStateStore()).poll_once("C123", backfill_hours=1)
+        SlackMemoryPoller(client, recorder, FakeStateStore()).poll_once(
+            "C456",
+            backfill_hours=1,
+            enqueue_memory_extraction=False,
+        )
+
+        self.assertEqual(
+            recorder.calls,
+            [
+                {"extract_memory": True},
+                {"extract_memory": True, "enqueue_memory_extraction": False},
+            ],
+        )
+
     def test_corrupt_state_file_fails_before_slack_or_ingest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
@@ -773,6 +830,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
     def test_stale_state_handles_preserve_other_channel_cursor_updates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state_path = Path(tmp) / "slack-state.json"
+            state_path.write_text(json.dumps({"metadata": {"owner": "tailwag"}}))
             store = SlackFilePollStateStore(state_path)
             first = store.load_channel("C123")
             second = store.load_channel("C999")
@@ -785,6 +843,7 @@ class SlackMemoryPollerTest(unittest.TestCase):
             state = json.loads(state_path.read_text())
             self.assertEqual(state["channels"]["C123"]["latest_history_ts"], "100.000000")
             self.assertEqual(state["channels"]["C999"]["latest_history_ts"], "200.000000")
+            self.assertEqual(state["metadata"], {"owner": "tailwag"})
 
     def test_stale_same_channel_file_state_raises_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

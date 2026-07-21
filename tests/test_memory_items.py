@@ -449,12 +449,23 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertEqual(len(runner.queries), 1)
         self.assertFalse(any("MERGE (m:MemoryItem" in query.query for query in runner.queries))
 
-    def test_get_and_list_items_exclude_superseded_audit_memories(self) -> None:
-        runner = RecordingQueryRunner()
+    def test_get_and_list_items_map_rows_and_exclude_superseded_audit_memories(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [_memory_row(memory_id="mem_get", summary="Fetched memory.")],
+                [_memory_row(memory_id="mem_list", summary="Listed memory.")],
+            ]
+        )
         service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
 
-        self.assertIsNone(service.get_item("mem_old"))
-        self.assertEqual(service.list_items(person_id="person_jamie", statuses=("superseded",), limit=5), [])
+        fetched = service.get_item("mem_get")
+        listed = service.list_items(person_id="person_jamie", statuses=("active",), limit=5)
+
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched.memory_id, "mem_get")
+        self.assertEqual(fetched.summary, "Fetched memory.")
+        self.assertEqual([item.memory_id for item in listed], ["mem_list"])
+        self.assertEqual(listed[0].summary, "Listed memory.")
 
         self.assertIn("coalesce(m.status, 'active') <> 'superseded'", runner.queries[0].query)
         self.assertIn("SUPERSEDED_BY", runner.queries[0].query)
