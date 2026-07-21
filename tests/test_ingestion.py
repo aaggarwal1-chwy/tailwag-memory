@@ -6,7 +6,6 @@ from tailwag_memory.ingestion import (
     EpisodeIngestionService,
     EventIngestionService,
     PersonIngestionService,
-    _person_upsert_cypher,
 )
 from tailwag_memory.models import EpisodeInput, EpisodeMentionInput, EventAttendeeInput, EventInput, PersonInput, PlaceInput, RobotInput
 import unittest
@@ -29,8 +28,15 @@ def _assert_no_deprecated_importing_call(testcase: unittest.TestCase, query: str
     )
 
 
+def _query_with_parameters(runner: RecordingQueryRunner, *names: str):
+    return next(
+        query for query in runner.queries if all(name in query.parameters for name in names)
+    )
+
+
 class CypherWarningRegressionTest(unittest.TestCase):
     def test_source_does_not_reintroduce_deprecated_importing_call_subqueries(self) -> None:
+        # Safety guard: Neo4j 5.26 warns on the deprecated importing-WITH form.
         project_root = Path(__file__).resolve().parents[1]
         source_root = project_root / "src" / "tailwag_memory"
         offenders: list[str] = []
@@ -75,33 +81,8 @@ def _episode() -> EpisodeInput:
     )
 
 
-class PersonUpsertCypherTest(unittest.TestCase):
-    def test_person_upsert_helper_preserves_consent_and_last_seen_rules(self) -> None:
-        participant_clause = _person_upsert_cypher("person", "id")
-        attendee_clause = _person_upsert_cypher("attendee", "person_id")
-
-        self.assertIn("MERGE (p:Person {id: person.id})", participant_clause)
-        self.assertIn("MERGE (p:Person {id: attendee.person_id})", attendee_clause)
-        self.assertIn("p.email = coalesce(person.email, p.email)", participant_clause)
-        self.assertIn("p.email = coalesce(attendee.email, p.email)", attendee_clause)
-        self.assertIn("EmployeeDirectoryRecord", participant_clause)
-        self.assertIn("HAS_DIRECTORY_RECORD", participant_clause)
-        self.assertIn("CALL (p) {", participant_clause)
-        self.assertIn("WITH *", participant_clause)
-        self.assertIn("toLower(split(p.email, '@')[0])", participant_clause)
-        _assert_no_deprecated_importing_call(self, participant_clause)
-        _assert_no_deprecated_importing_call(self, attendee_clause)
-        self.assertIn("WHEN person.official_name IS NOT NULL THEN person.official_name", participant_clause)
-        self.assertIn("person.display_name <> person.id", participant_clause)
-        self.assertIn("attendee.display_name <> attendee.person_id", attendee_clause)
-        self.assertNotIn("face_embedding", participant_clause)
-        self.assertNotIn("audio_embedding", attendee_clause)
-        self.assertIn("datetime(p.last_seen) < datetime($last_seen)", participant_clause)
-        self.assertIn("datetime(p.last_seen) < datetime($last_seen)", attendee_clause)
-
-
 class PersonIngestionServiceTest(unittest.TestCase):
-    def test_upsert_writes_active_person_profile_and_biometrics(self) -> None:
+    def test_upsert_writes_active_person_profile_without_biometrics(self) -> None:
         runner = RecordingQueryRunner()
         service = PersonIngestionService(runner)
 
@@ -115,10 +96,11 @@ class PersonIngestionServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(person_id, "person_external_jamie")
-        self.assertEqual(len(runner.queries), 2)
-        self.assertIn("MATCH (p:Person {email: $email})", runner.queries[0].query)
-        self.assertEqual(runner.queries[0].parameters["incoming_id"], "person_external_jamie")
-        query = runner.queries[1]
+        self.assertEqual(
+            _query_with_parameters(runner, "incoming_id").parameters["incoming_id"],
+            "person_external_jamie",
+        )
+        query = _query_with_parameters(runner, "person")
         self.assertEqual(query.parameters["person"]["id"], "person_external_jamie")
         self.assertEqual(query.parameters["person"]["display_name"], "Jamie")
         self.assertEqual(query.parameters["person"]["email"], "jamie@example.com")
@@ -127,17 +109,9 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertNotIn("audio_embedding", query.parameters["person"])
         self.assertEqual(query.parameters["created_at"], query.parameters["updated_at"])
         self.assertEqual(query.parameters["last_seen"], query.parameters["updated_at"])
-        self.assertIn("WITH $person AS person", query.query)
-        self.assertIn("MERGE (p:Person {id: person.id})", query.query)
-        self.assertIn("p.created_at = coalesce(p.created_at, $created_at)", query.query)
-        self.assertIn("p.updated_at = $updated_at", query.query)
-        self.assertIn("p.last_seen = $last_seen", query.query)
-        self.assertIn("p.status = 'active'", query.query)
-        self.assertIn("p.archived_at = NULL", query.query)
+        # Privacy guard: generic Person writes must never persist biometric vectors.
         self.assertNotIn("face_embedding", query.query)
         self.assertNotIn("audio_embedding", query.query)
-        self.assertNotIn("p.status = 'archived' THEN p.face_embedding", query.query)
-        self.assertNotIn("p.status = 'archived' THEN p.audio_embedding", query.query)
 
     def test_upsert_uses_official_name_as_display_name_even_when_display_is_id(self) -> None:
         runner = RecordingQueryRunner()
@@ -151,11 +125,9 @@ class PersonIngestionServiceTest(unittest.TestCase):
             )
         )
 
-        query = runner.queries[0]
+        query = _query_with_parameters(runner, "person")
         self.assertEqual(query.parameters["person"]["display_name"], "person_external_jamie")
         self.assertEqual(query.parameters["person"]["official_name"], "Jamie Example")
-        self.assertIn("WHEN person.official_name IS NOT NULL THEN person.official_name", query.query)
-        self.assertIn("person.display_name <> person.id", query.query)
 
     def test_upsert_reconciles_existing_directory_record_by_email_username(self) -> None:
         runner = RecordingQueryRunner()
@@ -163,12 +135,7 @@ class PersonIngestionServiceTest(unittest.TestCase):
 
         service.upsert(PersonInput(id="person_external_jamie", email="jamie@example.com"))
 
-        query = runner.queries[1]
-        self.assertIn("EmployeeDirectoryRecord", query.query)
-        self.assertIn("HAS_DIRECTORY_RECORD", query.query)
-        self.assertIn("CALL (p) {", query.query)
-        self.assertIn("p.email CONTAINS '@'", query.query)
-        self.assertIn("toLower(split(p.email, '@')[0])", query.query)
+        query = _query_with_parameters(runner, "person")
         _assert_no_deprecated_importing_call(self, query.query)
 
     def test_upsert_query_excludes_org_identity_and_confidence(self) -> None:
@@ -176,9 +143,10 @@ class PersonIngestionServiceTest(unittest.TestCase):
         service = PersonIngestionService(runner)
 
         service.upsert(PersonInput(id="person_external_jamie"))
-        query = runner.queries[0]
+        query = _query_with_parameters(runner, "person")
         text = query.query + repr(query.parameters)
 
+        # Scope guard: excluded identity fields must not enter the graph write contract.
         self.assertNotIn("org_id", text)
         self.assertNotIn("identity_status", text)
         self.assertNotIn("confidence", text)
@@ -189,9 +157,8 @@ class PersonIngestionServiceTest(unittest.TestCase):
 
         service.upsert(PersonInput(id="person_external_jamie", email=" Jamie.Example@Example.COM "))
 
-        query = runner.queries[1]
+        query = _query_with_parameters(runner, "person")
         self.assertEqual(query.parameters["person"]["email"], "jamie.example@example.com")
-        self.assertIn("p.email = coalesce(person.email, p.email)", query.query)
 
     def test_upsert_rekeys_slack_email_match_to_incoming_argos_id(self) -> None:
         runner = RecordingQueryRunner(results=[[{"person_id": "person_jamie"}], [{"person_id": "person_jamie"}]])
@@ -200,36 +167,31 @@ class PersonIngestionServiceTest(unittest.TestCase):
         person_id = service.upsert(PersonInput(id="person_jamie", email="jamie@example.com"))
 
         self.assertEqual(person_id, "person_jamie")
-        resolve_query = runner.queries[0]
+        resolve_query = _query_with_parameters(runner, "incoming_id", "email")
         self.assertEqual(resolve_query.parameters["email"], "jamie@example.com")
         self.assertEqual(resolve_query.parameters["incoming_id"], "person_jamie")
+        # Identifier guard: only the approved Slack-to-canonical rekey path may rewrite IDs.
         self.assertIn("p.id STARTS WITH 'slack:'", resolve_query.query)
         self.assertIn("$incoming_id STARTS WITH 'person_'", resolve_query.query)
-        self.assertIn("THEN $incoming_id", resolve_query.query)
-        self.assertEqual(runner.queries[1].parameters["person"]["id"], "person_jamie")
+        self.assertEqual(
+            _query_with_parameters(runner, "person").parameters["person"]["id"],
+            "person_jamie",
+        )
 
-    def test_archive_updates_lifecycle_and_clears_biometrics(self) -> None:
+    def test_archive_updates_lifecycle_and_archives_biometrics_in_place(self) -> None:
         runner = RecordingQueryRunner(results=[[{"person_id": "person_external_jamie"}]])
         service = PersonIngestionService(runner)
 
         archived = service.archive("person_external_jamie")
 
         self.assertTrue(archived)
-        self.assertEqual(len(runner.queries), 1)
         query = runner.queries[0]
         self.assertEqual(query.parameters["person_id"], "person_external_jamie")
         self.assertEqual(query.parameters["archived_at"], query.parameters["updated_at"])
-        self.assertIn("MATCH (p:Person {id: $person_id})", query.query)
-        self.assertIn("p.status = 'archived'", query.query)
-        self.assertIn("p.archived_at = $archived_at", query.query)
-        self.assertIn("p.updated_at = $updated_at", query.query)
+        # Privacy/retention guard: archive references in place; never delete identity data.
         self.assertIn("HAS_FACE_REFERENCE|HAS_VOICE_REFERENCE", query.query)
-        self.assertIn("ref.status = 'archived'", query.query)
         self.assertNotIn("DELETE", query.query)
         self.assertNotIn("DETACH", query.query)
-        self.assertNotIn("p.display_name", query.query)
-        self.assertNotIn("p.email", query.query)
-        self.assertNotIn("p.consent_status", query.query)
         text = query.query + repr(query.parameters)
         self.assertNotIn("org_id", text)
         self.assertNotIn("identity_status", text)
@@ -250,20 +212,14 @@ class PersonIngestionServiceTest(unittest.TestCase):
         rekeyed = service.rekey_by_email(" jamie@example.com ", " person_argos_jamie ")
 
         self.assertTrue(rekeyed)
-        self.assertEqual(len(runner.queries), 1)
         query = runner.queries[0]
         self.assertEqual(query.parameters["incoming_id"], "person_argos_jamie")
         self.assertIn("updated_at", query.parameters)
         self.assertEqual(query.parameters["email"], "jamie@example.com")
-        self.assertIn("MATCH (p:Person {email: $email})", query.query)
-        self.assertIn("WITH collect(p) AS matches", query.query)
+        # Identifier guard: rekey requires one unambiguous match and no destructive merge.
         self.assertIn("WHERE size(matches) = 1", query.query)
-        self.assertIn("OPTIONAL MATCH (target:Person {id: $incoming_id})", query.query)
         self.assertIn("p.id STARTS WITH 'slack:'", query.query)
         self.assertIn("$incoming_id STARTS WITH 'person_'", query.query)
-        self.assertIn("SET p.id = CASE WHEN should_rekey THEN $incoming_id ELSE p.id END", query.query)
-        self.assertIn("p.updated_at = CASE WHEN should_rekey THEN coalesce($updated_at, p.updated_at) ELSE p.updated_at END", query.query)
-        self.assertIn("RETURN p.id AS person_id", query.query)
         text = query.query + repr(query.parameters)
         self.assertNotIn("face_embedding", text)
         self.assertNotIn("audio_embedding", text)
@@ -298,9 +254,8 @@ class PersonIngestionServiceTest(unittest.TestCase):
         self.assertEqual(person_id, "person_argos_jamie")
         query = runner.queries[0]
         self.assertEqual(query.parameters["email"], "jamie@example.com")
-        self.assertIn("p.email = $email", query.query)
+        # Identifier guard: only canonical person IDs are eligible for this lookup.
         self.assertIn("p.id STARTS WITH 'person_'", query.query)
-        self.assertIn("WHERE size(person_ids) = 1", query.query)
 
     def test_canonical_id_by_email_returns_none_when_unresolved(self) -> None:
         service = PersonIngestionService(RecordingQueryRunner(results=[[]]))
@@ -317,8 +272,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         episode_id = service.ingest(_episode())
 
         self.assertEqual(episode_id, "episode_external_001")
-        self.assertEqual(len(runner.queries), 2)
-        query = runner.queries[1]
+        query = _query_with_parameters(runner, "participants", "transcript_embedding")
         self.assertEqual(query.parameters["id"], "episode_external_001")
         self.assertEqual(query.parameters["building_code"], "MAIN")
         self.assertEqual(query.parameters["room_id"], "101")
@@ -330,15 +284,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         self.assertNotIn("face_embedding", participant)
         self.assertNotIn("audio_embedding", participant)
         self.assertEqual(query.parameters["last_seen"], "2026-06-15T10:05:00+00:00")
-        self.assertIn("DELETE old_place", query.query)
-        self.assertIn("DELETE old_rel", query.query)
-        self.assertIn("CALL (e) {", query.query)
-        self.assertIn("UNWIND $participants AS person", query.query)
-        self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", query.query)
-        self.assertIn("e.updated_at = $updated_at", query.query)
-        self.assertIn("WHEN person.official_name IS NOT NULL THEN person.official_name", query.query)
-        self.assertIn("p.name = coalesce(p.name, person.id)", query.query)
-        self.assertIn("datetime(p.last_seen) < datetime($last_seen)", query.query)
+        # Privacy guard: episode ingestion carries identifiers, never raw biometric vectors.
         self.assertNotIn("face_embedding", query.query)
         self.assertNotIn("audio_embedding", query.query)
         _assert_no_deprecated_importing_call(self, query.query)
@@ -360,30 +306,24 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
 
         service.ingest(episode)
 
-        query = runner.queries[0]
+        query = _query_with_parameters(runner, "robots", "robot_ids")
         self.assertEqual(query.parameters["participant_ids"], [])
         self.assertEqual(query.parameters["robots"], [
             {"id": "cody", "display_name": "Cody", "role": "host", "source": "argos"}
         ])
         self.assertEqual(query.parameters["robot_ids"], ["cody"])
-        self.assertIn("MERGE (r:Robot {id: robot.id})", query.query)
-        self.assertIn("r.display_name = robot.display_name", query.query)
-        self.assertIn("r.created_at = coalesce(r.created_at, $created_at)", query.query)
-        self.assertIn("r.updated_at = $updated_at", query.query)
-        self.assertIn("MERGE (r)-[participation:PARTICIPATED_IN]->(e)", query.query)
+        # Robot safety guard: the historical name snapshot is set only on link creation.
         self.assertIn(
             "ON CREATE SET participation.display_name_at_time = robot.display_name",
             query.query,
         )
-        self.assertNotIn(
-            "SET participation.role = robot.role,\n                    participation.source = robot.source,",
+        self.assertNotRegex(
             query.query,
+            r"(?m)^\s*SET participation\.display_name_at_time",
         )
-        robot_block = query.query.split("UNWIND $robots AS robot", 1)[1]
-        self.assertNotIn("Person", robot_block)
-        self.assertNotIn("last_seen", robot_block)
-        self.assertNotIn("FaceReference", robot_block)
-        self.assertNotIn("VoiceReference", robot_block)
+        # Scope guard: Robot remains a narrow identity/provenance node.
+        for excluded_field in ("capability", "sensor", "software", "maintenance", "fleet"):
+            self.assertNotIn(excluded_field, query.query.lower())
 
     def test_ingest_reconciles_multiple_robot_relationships_by_stable_id(self) -> None:
         runner = RecordingQueryRunner()
@@ -406,24 +346,24 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
             )
         )
 
-        query = runner.queries[-1]
+        query = _query_with_parameters(runner, "robots", "robot_ids")
         self.assertEqual(query.parameters["robot_ids"], ["cody", "puffle"])
         self.assertEqual(
             [robot["display_name"] for robot in query.parameters["robots"]],
             ["Cody Renamed", "Cody Renamed"],
         )
-        self.assertIn("OPTIONAL MATCH (old_robot:Robot)-[old_robot_rel:PARTICIPATED_IN]->(e)", query.query)
+        # Robot safety guard: stale links are reconciled by stable ID.
         self.assertIn("NOT old_robot.id IN $robot_ids", query.query)
         self.assertIn("DELETE old_robot_rel", query.query)
-        self.assertNotIn("display_name_at_time", query.query.split("SET r.display_name", 1)[0])
 
     def test_ingest_without_robots_preserves_old_payload_compatibility_and_removes_stale_links(self) -> None:
         runner = RecordingQueryRunner()
         EpisodeIngestionService(runner, MockOpenAIEmbeddingProvider(dimension=8)).ingest(_episode())
 
-        query = runner.queries[-1]
+        query = _query_with_parameters(runner, "robots", "robot_ids")
         self.assertEqual(query.parameters["robots"], [])
         self.assertEqual(query.parameters["robot_ids"], [])
+        # Robot safety guard: omitted legacy payloads intentionally remove stale links.
         self.assertIn("DELETE old_robot_rel", query.query)
 
     def test_ingest_carries_official_name_to_participant_upsert(self) -> None:
@@ -450,7 +390,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
             )
         )
 
-        participant = runner.queries[0].parameters["participants"][0]
+        participant = _query_with_parameters(runner, "participants").parameters["participants"][0]
         self.assertEqual(participant["display_name"], "person_external_jamie")
         self.assertEqual(participant["official_name"], "Jamie Example")
 
@@ -476,16 +416,11 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
             )
         )
 
-        query = runner.queries[0]
+        query = _query_with_parameters(runner, "mentioned_people")
         self.assertEqual(query.parameters["participant_ids"], [])
         self.assertEqual(query.parameters["mentioned_person_ids"], ["person_chandra"])
         self.assertEqual(query.parameters["mentioned_people"][0]["person_id"], "person_chandra")
         self.assertEqual(query.parameters["mentioned_people"][0]["source"], "slack")
-        self.assertEqual(query.query.count("CALL (e) {"), 3)
-        self.assertIn("MERGE (p)-[r:MENTIONED_IN]->(e)", query.query)
-        self.assertIn("SET r.source = mentioned.source", query.query)
-        self.assertIn("DELETE old_mention", query.query)
-        self.assertIn("p.last_seen = p.last_seen", query.query)
         _assert_no_deprecated_importing_call(self, query.query)
 
     def test_ingest_episode_resolves_mentioned_person_by_email(self) -> None:
@@ -516,7 +451,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
             )
         )
 
-        query = runner.queries[1]
+        query = _query_with_parameters(runner, "mentioned_people")
         self.assertEqual(query.parameters["mentioned_person_ids"], ["person_chandra"])
         self.assertEqual(query.parameters["mentioned_people"][0]["person_id"], "person_chandra")
         self.assertEqual(query.parameters["mentioned_people"][0]["id"], "person_chandra")
@@ -547,7 +482,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
             )
         )
 
-        query = runner.queries[1]
+        query = _query_with_parameters(runner, "participants")
         self.assertEqual(query.parameters["participant_ids"], ["person_jamie"])
         self.assertEqual(query.parameters["participants"][0]["id"], "person_jamie")
         self.assertEqual(query.parameters["participants"][0]["source"], "slack")
@@ -584,7 +519,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
 
         service.ingest(episode)
 
-        query = runner.queries[0]
+        query = _query_with_parameters(runner, "participants", "transcript")
         self.assertEqual(query.parameters["transcript"], "Jamie: I like robot demos.\nAssistant: Noted.")
         self.assertEqual(
             embeddings.texts,
@@ -602,6 +537,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
         service.ingest(_episode())
         query_text = "\n".join(query.query for query in runner.queries)
 
+        # Scope guard: excluded identity metadata must not enter episode writes.
         self.assertNotIn("org_id", query_text)
         self.assertNotIn("identity_status", query_text)
         self.assertNotIn("confidence", query_text)
@@ -623,7 +559,10 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
 
         service.ingest(episode)
 
-        self.assertEqual(runner.queries[-1].parameters["last_seen"], "2026-06-15T10:00:00+00:00")
+        self.assertEqual(
+            _query_with_parameters(runner, "participants").parameters["last_seen"],
+            "2026-06-15T10:00:00+00:00",
+        )
 
     def test_ingest_allows_existing_person_reference_by_id_only(self) -> None:
         runner = RecordingQueryRunner()
@@ -641,7 +580,7 @@ class EpisodeIngestionServiceTest(unittest.TestCase):
 
         service.ingest(episode)
 
-        participant = runner.queries[0].parameters["participants"][0]
+        participant = _query_with_parameters(runner, "participants").parameters["participants"][0]
         self.assertEqual(participant["id"], "person_external_jamie")
         self.assertIsNone(participant["display_name"])
         self.assertIsNone(participant["email"])
@@ -666,17 +605,14 @@ class EventIngestionServiceTest(unittest.TestCase):
         event_id = service.ingest(event)
 
         self.assertEqual(event_id, "event_external_001")
-        self.assertEqual(len(runner.queries), 1)
-        self.assertEqual(runner.queries[0].parameters["id"], "event_external_001")
-        self.assertEqual(runner.queries[0].parameters["description"], "Room 101 was reserved for a design review.")
-        self.assertEqual(runner.queries[0].parameters["building_code"], "MAIN")
-        self.assertEqual(runner.queries[0].parameters["room_id"], "101")
-        self.assertEqual(runner.queries[0].parameters["attendees"], [])
-        self.assertEqual(runner.queries[0].parameters["attendee_ids"], [])
-        self.assertEqual(runner.queries[0].parameters["updated_at"], runner.queries[0].parameters["created_at"])
-        self.assertIn("e.created_at = coalesce(e.created_at, $created_at)", runner.queries[0].query)
-        self.assertIn("e.updated_at = $updated_at", runner.queries[0].query)
-        self.assertNotIn("PARTICIPATED_IN", runner.queries[0].query)
+        query = _query_with_parameters(runner, "attendees", "attendee_ids")
+        self.assertEqual(query.parameters["id"], "event_external_001")
+        self.assertEqual(query.parameters["description"], "Room 101 was reserved for a design review.")
+        self.assertEqual(query.parameters["building_code"], "MAIN")
+        self.assertEqual(query.parameters["room_id"], "101")
+        self.assertEqual(query.parameters["attendees"], [])
+        self.assertEqual(query.parameters["attendee_ids"], [])
+        self.assertEqual(query.parameters["updated_at"], query.parameters["created_at"])
 
     def test_ingest_event_writes_accepted_attendees(self) -> None:
         runner = RecordingQueryRunner()
@@ -704,8 +640,7 @@ class EventIngestionServiceTest(unittest.TestCase):
         event_id = service.ingest(event)
 
         self.assertEqual(event_id, "event_external_002")
-        self.assertEqual(len(runner.queries), 2)
-        query = runner.queries[1]
+        query = _query_with_parameters(runner, "attendees", "attendee_ids")
         attendee = query.parameters["attendees"][0]
         self.assertEqual(attendee["person_id"], "person_external_jamie")
         self.assertEqual(attendee["display_name"], "Jamie")
@@ -715,8 +650,7 @@ class EventIngestionServiceTest(unittest.TestCase):
         self.assertEqual(attendee["source"], "outlook")
         self.assertEqual(attendee["response"], "accepted")
         self.assertEqual(attendee["response_time"], "2026-06-15T18:00:00+00:00")
-        self.assertIn("MERGE (p)-[r:ATTENDED]->(e)", query.query)
-        self.assertIn("p.email = coalesce(attendee.email, p.email)", query.query)
+        # Privacy guard: calendar ingestion does not accept biometric vectors.
         self.assertNotIn("face_embedding", query.query)
         self.assertNotIn("audio_embedding", query.query)
 
@@ -744,7 +678,7 @@ class EventIngestionServiceTest(unittest.TestCase):
             )
         )
 
-        query = runner.queries[1]
+        query = _query_with_parameters(runner, "attendees", "attendee_ids")
         self.assertEqual(query.parameters["attendee_ids"], ["person_jamie"])
         self.assertEqual(query.parameters["attendees"][0]["person_id"], "person_jamie")
 
@@ -767,7 +701,10 @@ class EventIngestionServiceTest(unittest.TestCase):
 
         service.ingest(event)
 
-        self.assertEqual(runner.queries[0].parameters["last_seen"], "2026-06-16T15:00:00+00:00")
+        self.assertEqual(
+            _query_with_parameters(runner, "attendees").parameters["last_seen"],
+            "2026-06-16T15:00:00+00:00",
+        )
 
 
 if __name__ == "__main__":

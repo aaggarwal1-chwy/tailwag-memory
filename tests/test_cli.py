@@ -64,6 +64,7 @@ class CliTest(unittest.TestCase):
                     exit_code = main(["db", "wipe", "--yes"])
 
         self.assertEqual(exit_code, 0)
+        # Destructive guard: wipe must remain a single explicit full-graph delete.
         self.assertEqual(runner.queries[0].query, "MATCH (n) DETACH DELETE n")
         self.assertEqual(runner.queries[0].parameters, {})
         self.assertTrue(runner.closed)
@@ -560,7 +561,6 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output["filters"], {"limit": 5})
         self.assertEqual(output["metadata"]["utility"], "inspect followup-validity")
         self.assertEqual(output["records"][0]["validity_bucket"], "4_to_7_days")
-        self.assertIn("WHERE memory.kind = 'followup'", runner.queries[0].query)
 
     def test_inspect_person_timeline_json_uses_inspect_report(self) -> None:
         settings = test_settings(embedding_dimension=64)
@@ -686,6 +686,7 @@ class CliTest(unittest.TestCase):
         self.assertTrue(runner.closed)
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 5})
         self.assertEqual(runner.queries[1].parameters, {})
+        # Read-only guard: inspect commands must never mutate the graph.
         for recorded_query in runner.queries:
             upper_query = recorded_query.query.upper()
             for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:

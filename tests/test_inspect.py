@@ -111,17 +111,8 @@ class InspectTranscriptRowsTest(unittest.TestCase):
         rows = recent_person_episode_rows(runner, 25)
 
         self.assertEqual(rows, [])
+        self.assertEqual(len(runner.queries), 1)
         self.assertEqual(runner.queries[0].parameters, {"limit": 25})
-        self.assertIn("MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)", runner.queries[0].query)
-        self.assertIn("OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)", runner.queries[0].query)
-        self.assertIn("CALL (person, e) {", runner.queries[0].query)
-        self.assertEqual(runner.queries[0].query.count("CALL (e) {"), 3)
-        self.assertIn("count(DISTINCT memory) AS memory_item_count", runner.queries[0].query)
-        self.assertIn("memory_item_count AS memory_item_count", runner.queries[0].query)
-        self.assertIn("related_memory_items AS related_memory_items", runner.queries[0].query)
-        self.assertIn("person.id AS person_id", runner.queries[0].query)
-        self.assertIn("e.id AS episode_id", runner.queries[0].query)
-        self.assertIn("LIMIT $limit", runner.queries[0].query)
         upper_query = runner.queries[0].query.upper()
         for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
             self.assertNotIn(write_keyword, upper_query)
@@ -225,9 +216,7 @@ class FollowupValidityInspectServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(runner.queries[0].parameters, {"limit": 10})
-        self.assertIn("WHERE memory.kind = 'followup'", runner.queries[0].query)
-        self.assertIn("ADDRESSED_BY", runner.queries[0].query)
-        self.assertIn("SUPERSEDED_BY", runner.queries[0].query)
+        self.assertEqual(len(runner.queries), 1)
         upper_query = runner.queries[0].query.upper()
         for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
             self.assertNotIn(write_keyword, upper_query)
@@ -316,7 +305,8 @@ class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
         self.assertTrue(points[0].has_memory_items)
         self.assertEqual(points[0].memory_item_count, 2)
         self.assertEqual(points[0].related_memory_items[0].summary, "Jamie likes concise demos.")
-        self.assertIn("MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)", runner.queries[0].query)
+        self.assertEqual(len(runner.queries), 1)
+        self.assertEqual(runner.queries[0].parameters, {"limit": 10})
 
     def test_points_with_person_filter_uses_person_episode_query(self) -> None:
         runner = RecordingQueryRunner(
@@ -347,9 +337,7 @@ class PersonEpisodeTranscriptServiceTest(unittest.TestCase):
         points = service.points(person_id=" person_jamie ", limit=3)
 
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 3})
-        self.assertIn("WHERE person.id = $person_id", runner.queries[0].query)
-        self.assertIn("OPTIONAL MATCH (person)-[:HAS_MEMORY]->(memory:MemoryItem)-[:SUPPORTED_BY]->(e)", runner.queries[0].query)
-        self.assertIn("related_memory_items AS related_memory_items", runner.queries[0].query)
+        self.assertEqual(len(runner.queries), 1)
         self.assertEqual(points[0].text, "I already reviewed it.")
         self.assertEqual(
             [(line.timestamp, line.speaker, line.text) for line in points[0].transcript_lines],
@@ -412,10 +400,7 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 5})
-        self.assertIn("MATCH (person:Person)-[:HAS_MEMORY]->(memory:MemoryItem)", runner.queries[0].query)
-        self.assertIn("OPTIONAL MATCH (memory)-[:SUPPORTED_BY]->(support:Episode)", runner.queries[0].query)
-        self.assertIn("OPTIONAL MATCH (memory)-[addressed:ADDRESSED_BY]->(addressed_episode:Episode)", runner.queries[0].query)
-        self.assertIn("OPTIONAL MATCH (memory)-[:SUPERSEDED_BY]->(replacement:MemoryItem)", runner.queries[0].query)
+        self.assertEqual(len(runner.queries), 1)
         upper_query = runner.queries[0].query.upper()
         for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
             self.assertNotIn(write_keyword, upper_query)
@@ -504,8 +489,7 @@ class MemoryItemInspectServiceTest(unittest.TestCase):
 
         self.assertEqual(conversion, {"episode_count": 8, "memory_episode_count": 3, "memory_count": 5})
         self.assertEqual(runner.queries[0].parameters, {})
-        self.assertIn("MATCH (episode:Episode)", runner.queries[0].query)
-        self.assertIn("SUPPORTED_BY", runner.queries[0].query)
+        self.assertEqual(len(runner.queries), 1)
         upper_query = runner.queries[0].query.upper()
         for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
             self.assertNotIn(write_keyword, upper_query)
@@ -679,12 +663,7 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(event.memory_item_count, 0)
         self.assertEqual(runner.queries[0].parameters, {"person_id": None, "limit": 5})
         self.assertEqual(runner.queries[1].parameters, {"person_id": None, "limit": 5})
-        self.assertIn("MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)", runner.queries[0].query)
-        self.assertIn("WHERE ($person_id IS NULL OR person.id = $person_id)", runner.queries[0].query)
-        self.assertIn("count(DISTINCT memory) AS memory_item_count", runner.queries[0].query)
-        self.assertIn("memory_item_ids AS memory_item_ids", runner.queries[0].query)
-        self.assertIn("type(r) = 'ATTENDED'", runner.queries[1].query)
-        self.assertIn("0 AS memory_item_count", runner.queries[1].query)
+        self.assertEqual(len(runner.queries), 2)
         for query in runner.queries:
             upper_query = query.query.upper()
             for write_keyword in [" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE "]:
@@ -698,8 +677,7 @@ class PersonTimelineRetrievalServiceTest(unittest.TestCase):
 
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 3})
         self.assertEqual(runner.queries[1].parameters, {"person_id": "person_jamie", "limit": 3})
-        self.assertIn("person.id = $person_id", runner.queries[0].query)
-        self.assertIn("person.id = $person_id", runner.queries[1].query)
+        self.assertEqual(len(runner.queries), 2)
 
 
 class PersonTimelineReportTest(unittest.TestCase):

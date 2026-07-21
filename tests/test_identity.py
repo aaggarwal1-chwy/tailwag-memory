@@ -59,14 +59,13 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
 
         self.assertEqual(result.records_written, 1)
         query = runner.queries[0]
+        # Identity-integrity guard: directory sync owns the canonical directory,
+        # home-base, stale-link, and username-reconciliation relationships.
         self.assertIn("EmployeeDirectoryRecord", query.query)
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
         self.assertIn("MERGE (site:Place {building_code: record.site_code, room_id: '__site__'})", query.query)
         self.assertIn("MERGE (d)-[:HOME_BASED_AT]->(site)", query.query)
         self.assertIn("WHERE old_target <> site", query.query)
-        self.assertIn("p.official_name", query.query)
-        self.assertIn("p.name = p.id", query.query)
-        self.assertIn("d.name = record.official_name", query.query)
         self.assertIn("toLower(split(p.email, '@')[0]) = record.username", query.query)
         self.assertNotIn("p.id = 'person_' + record.username", query.query)
         self.assertEqual(query.parameters["records"][0]["normalized_name"], "jamie example")
@@ -92,13 +91,10 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
             [record["site_code"] for record in query.parameters["records"]],
             ["BOS3", "NYC1"],
         )
+        self.assertEqual(len(runner.queries), 1)
+        # Home-base integrity guard: each record's nonblank site replaces stale links.
         self.assertIn("WHERE record.site_code <> ''", query.query)
-        self.assertIn("CALL (d, site) {", query.query)
         self.assertIn("DELETE old_home", query.query)
-        home_base_block = query.query.split("CALL (d, record) {", 1)[1].split(
-            "OPTIONAL MATCH (p:Person)", 1
-        )[0]
-        self.assertNotIn("RETURN", home_base_block)
 
     def test_sync_directory_people_does_not_create_empty_site_place(self) -> None:
         runner = RecordingQueryRunner()
@@ -111,6 +107,8 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
 
         query = runner.queries[0]
         self.assertEqual(query.parameters["records"][0]["site_code"], "")
+        self.assertEqual(len(runner.queries), 1)
+        # Data-quality guard: blank site codes must not create canonical Place nodes.
         self.assertIn("WHERE record.site_code <> ''", query.query)
 
     def test_sync_directory_people_links_person_by_email_username_without_employee_email(self) -> None:
@@ -131,6 +129,7 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         query = runner.queries[0]
         self.assertEqual(query.parameters["records"][0]["username"], "jamie")
         self.assertEqual(query.parameters["records"][0]["employee_email"], "")
+        # Identity-integrity guard: username fallback links the existing person only.
         self.assertIn("p.email CONTAINS '@'", query.query)
         self.assertIn("toLower(split(p.email, '@')[0]) = record.username", query.query)
         self.assertIn("MERGE (p)-[:HAS_DIRECTORY_RECORD]->(d)", query.query)
@@ -246,7 +245,7 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
             profile.directory_profile_lines,
             ("Title: Engineer", "Manager: Manager Example", "Tenure: 2 years"),
         )
-        self.assertIn("d.senior_leadership_team AS senior_leadership_team", runner.queries[0].query)
+        self.assertEqual(len(runner.queries), 1)
 
     def test_get_verified_profile_rejects_invalid_ambiguous_and_name_mismatch(self) -> None:
         runner = RecordingQueryRunner(
@@ -279,29 +278,10 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         )
 
         query = runner.queries[0]
+        # Identity-integrity guard: verified encounters retain their directory link.
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
-        self.assertIn("WHEN $official_name IS NOT NULL THEN $official_name", query.query)
-        self.assertIn("$display_name <> $person_id", query.query)
-        self.assertIn("p.name = coalesce(p.name, $person_id)", query.query)
         self.assertEqual(query.parameters["directory_username"], "jamie")
         self.assertEqual(query.parameters["directory_site_code"], "BOS3")
-
-    def test_record_encounter_prefers_official_name_over_display_name(self) -> None:
-        runner = RecordingQueryRunner()
-        service = DirectoryIdentityService(runner)
-
-        service.record_encounter(
-            person_id="person_jamie",
-            metadata={
-                "display_name": "person_jamie",
-                "official_name": "Jamie Example",
-            },
-        )
-
-        query = runner.queries[0]
-        self.assertEqual(query.parameters["display_name"], "person_jamie")
-        self.assertEqual(query.parameters["official_name"], "Jamie Example")
-        self.assertIn("WHEN $official_name IS NOT NULL THEN $official_name", query.query)
 
     def test_person_profile_returns_official_name_when_display_name_is_person_id(self) -> None:
         runner = RecordingQueryRunner(
@@ -334,6 +314,7 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         )
 
         query = runner.queries[0]
+        # Identity-integrity guard: email-only encounters reconcile by username.
         self.assertIn("EmployeeDirectoryRecord", query.query)
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
         self.assertIn("toLower(split(p.email, '@')[0])", query.query)

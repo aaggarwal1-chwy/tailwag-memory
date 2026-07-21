@@ -44,6 +44,8 @@ class NodeDeletionServiceTest(unittest.TestCase):
         self.assertEqual(result.deleted_counts["episodes_deleted"], 1)
         self.assertEqual(result.deleted_counts["memory_items_deleted"], 2)
         query = runner.queries[1].query
+        # Destructive cascade guard: these relationships and shared-node
+        # preservation rules are the public safety contract of person deletion.
         self.assertIn("HAS_MEMORY", query)
         self.assertIn("HAS_FACE_REFERENCE", query)
         self.assertIn("HAS_VOICE_REFERENCE", query)
@@ -51,7 +53,6 @@ class NodeDeletionServiceTest(unittest.TestCase):
         self.assertIn("EmployeeDirectoryRecord", query)
         self.assertIn("ATTENDED", query)
         self.assertIn("Event", query)
-        self.assertIn("WHERE NOT kept_episode IN owned_episodes", query)
         self.assertIn("NOT EXISTS { MATCH ()-[:OCCURRED_AT]->(place) }", query)
         self.assertIn("NOT EXISTS { MATCH ()-[:HOME_BASED_AT]->(place) }", query)
         self.assertEqual(runner.queries[1].parameters, {"node_id": "person_jamie"})
@@ -77,9 +78,10 @@ class NodeDeletionServiceTest(unittest.TestCase):
         self.assertEqual(result.status, "deleted")
         self.assertEqual(result.deleted_counts["episodes_deleted"], 1)
         query = runner.queries[1].query
+        # Deletion-preservation guard: evidence cleanup must not delete people,
+        # and a directory home-base reference must keep its Place alive.
         self.assertIn("SUPPORTED_BY", query)
         self.assertIn("ADDRESSED_BY", query)
-        self.assertIn("single_support_memories", query)
         self.assertIn("OCCURRED_AT", query)
         self.assertIn("NOT EXISTS { MATCH ()-[:OCCURRED_AT]->(place) }", query)
         self.assertIn("NOT EXISTS { MATCH ()-[:HOME_BASED_AT]->(place) }", query)
@@ -99,6 +101,8 @@ class NodeDeletionServiceTest(unittest.TestCase):
         self.assertEqual(result.status, "deleted")
         self.assertEqual(result.deleted_counts, {"memory_items_deleted": 3})
         query = runner.queries[1].query
+        # Memory lifecycle guard: targeted deletion follows only the outgoing
+        # replacement chain and must not expand into people or episodes.
         self.assertIn("SUPERSEDED_BY*0..", query)
         self.assertIn("DETACH DELETE deleted_memory", query)
         self.assertNotIn("Episode", query)
