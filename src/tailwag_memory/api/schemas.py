@@ -285,6 +285,12 @@ class VoiceReferenceExistsRequest(StrictRequest):
     person_id: str = Field(..., min_length=1)
 
 
+class FaceReferenceExistsRequest(StrictRequest):
+    """Request body for checking whether a person has a face reference."""
+
+    person_id: str = Field(..., min_length=1)
+
+
 class BiometricCandidatePayload(StrictRequest):
     """Reduced biometric candidate shape for turn ownership policy."""
 

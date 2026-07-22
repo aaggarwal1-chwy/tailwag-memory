@@ -220,6 +220,10 @@ class TailwagMemoryClient:
         """Return whether a person has at least one active voice reference."""
         return self._biometrics().has_voice_reference(person_id)
 
+    def has_face_reference(self, person_id: str) -> bool:
+        """Return whether a person has at least one active face reference."""
+        return self._biometrics().has_face_reference(person_id)
+
     def observe_face_embedding(
         self,
         *,

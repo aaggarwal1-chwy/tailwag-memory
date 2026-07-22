@@ -13,6 +13,7 @@ from tailwag_memory.api.schemas import (
     BiometricObservationRequest,
     BiometricSearchRequest,
     EpisodeRecordRequest,
+    FaceReferenceExistsRequest,
     IdentityResolveRequest,
     PersonArchiveRequest,
     PersonContextRequest,
@@ -294,6 +295,13 @@ def _memory_router() -> APIRouter:
         client: TailwagMemoryClient = Depends(get_client),
     ) -> dict[str, bool]:
         return {"has_voice_reference": client.has_voice_reference(payload.person_id)}
+
+    @router.post("/biometrics_face_references_exists")
+    def has_face_reference(
+        payload: FaceReferenceExistsRequest,
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, bool]:
+        return {"has_face_reference": client.has_face_reference(payload.person_id)}
 
     @router.post("/turn_owner_resolve")
     def resolve_turn_owner(

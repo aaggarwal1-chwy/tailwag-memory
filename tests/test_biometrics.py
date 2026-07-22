@@ -70,6 +70,25 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertTrue(exists)
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie"})
 
+    def test_has_face_reference_handles_blank_and_active_reference(self) -> None:
+        runner = RecordingQueryRunner()
+        service = BiometricReferenceService(runner)
+
+        self.assertFalse(service.has_face_reference("  "))
+        self.assertEqual(runner.queries, [])
+
+        runner = RecordingQueryRunner(results=[[{"reference_id": "face:1"}]])
+
+        exists = BiometricReferenceService(runner).has_face_reference(" person_jamie ")
+
+        self.assertTrue(exists)
+        self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie"})
+
+        query = runner.queries[0].query
+        self.assertIn("HAS_FACE_REFERENCE", query)
+        self.assertIn("FaceReference", query)
+        self.assertIn("coalesce(r.status, 'active') = 'active'", query)
+
     def test_observation_missing_reference_result_is_stable(self) -> None:
         runner = RecordingQueryRunner(results=[[]])
         service = BiometricReferenceService(runner)

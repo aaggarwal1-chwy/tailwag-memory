@@ -284,6 +284,7 @@ send embeddings with the configured modality dimension, such as
 | `POST /argos/providers/memory/resources/memory/request/biometrics_face_observations` | `observe_face_embedding(...)` |
 | `POST /argos/providers/memory/resources/memory/request/biometrics_voice_observations` | `observe_voice_embedding(...)` |
 | `POST /argos/providers/memory/resources/memory/request/biometrics_voice_references_exists` | `has_voice_reference(...)` |
+| `POST /argos/providers/memory/resources/memory/request/biometrics_face_references_exists` | `has_face_reference(...)` |
 
 Search request:
 
@@ -318,6 +319,9 @@ Voice reference existence request:
 ```json
 {"person_id": "person_jamie"}
 ```
+
+Face reference existence uses the same request body and returns
+`{"has_face_reference": true}` when an active reference is linked to the person.
 
 Search responses return the `BiometricSearchResult` shape with narrowed
 candidate dictionaries containing `person_id`, `display_name`, `score`, and
@@ -557,6 +561,7 @@ Returns: `PersonProfile`.
 | `enroll_voice_reference(...)` | `person_id`, voice vector, metadata, consent | `BiometricEnrollmentResult` |
 | `search_voice(...)` | voice vector, optional site, limit | `BiometricSearchResult` |
 | `has_voice_reference(person_id)` | person ID | `bool` |
+| `has_face_reference(person_id)` | person ID | `bool` |
 | `observe_face_embedding(...)` | `person_id`, face vector, evidence, metadata | `BiometricUpdateResult` |
 | `observe_voice_embedding(...)` | `person_id`, voice vector, evidence, metadata | `BiometricUpdateResult` |
 
@@ -991,8 +996,14 @@ Imported from `tailwag_memory.biometrics`.
 | `search_face(...)` | face vector, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `FaceReference` nodes. |
 | `enroll_voice_reference(...)` | `person_id`, voice vector, metadata, consent | `BiometricEnrollmentResult` | Store the first or explicit voice reference sample using the configured voice model. |
 | `search_voice(...)` | voice vector, optional site, limit | `BiometricSearchResult` | Thresholded search over active consented `VoiceReference` nodes. |
+| `has_face_reference(person_id)` | person ID | `bool` | Whether an active face-reference node is linked to the person. |
+| `has_voice_reference(person_id)` | person ID | `bool` | Whether an active voice-reference node is linked to the person. |
 | `observe_face_embedding(...)` | `person_id`, face vector, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe face observation for adaptive aggregation using the configured face model. |
 | `observe_voice_embedding(...)` | `person_id`, voice vector, evidence, metadata | `BiometricUpdateResult` | Offer one cross-modal-safe voice observation for adaptive aggregation using the configured voice model. |
+
+Existence checks inspect reference status only; they do not independently filter
+person archival or consent state. Callers must validate whether the person is
+eligible for enrollment.
 
 Only active consented references for non-archived people are searched or updated.
 Enrollment initializes `sample_count=1`, `accepted_update_count=0`,

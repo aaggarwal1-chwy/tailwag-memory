@@ -530,7 +530,7 @@ class TailwagApiAppTest(unittest.TestCase):
             ],
         )
 
-    def test_voice_reference_and_turn_owner_routes_delegate(self) -> None:
+    def test_biometric_reference_exists_and_turn_owner_routes_delegate(self) -> None:
         from tailwag_memory.api.app import create_app
         from tailwag_memory.api.dependencies import get_client
 
@@ -541,6 +541,11 @@ class TailwagApiAppTest(unittest.TestCase):
 
         exists = client.post(
             f"{API_BASE}/biometrics_voice_references_exists",
+            headers=_auth_header(),
+            json={"person_id": "person_jamie"},
+        )
+        face_exists = client.post(
+            f"{API_BASE}/biometrics_face_references_exists",
             headers=_auth_header(),
             json={"person_id": "person_jamie"},
         )
@@ -566,12 +571,14 @@ class TailwagApiAppTest(unittest.TestCase):
         )
 
         self.assertEqual(exists.json(), {"has_voice_reference": True})
+        self.assertEqual(face_exists.json(), {"has_face_reference": True})
         self.assertEqual(owner.json()["owner_id"], "person_jamie")
         self.assertEqual(owner.json()["owner_source"], "audio_face_agree")
         self.assertEqual(
             fake.calls,
             [
                 ("has_voice_reference", "person_jamie"),
+                ("has_face_reference", "person_jamie"),
                 (
                     "resolve_turn_owner",
                     {
@@ -648,6 +655,7 @@ class TailwagApiAppTest(unittest.TestCase):
         document = response.json()
         paths = set(document["paths"])
         self.assertIn(f"{API_BASE}/biometrics_face_search", paths)
+        self.assertIn(f"{API_BASE}/biometrics_face_references_exists", paths)
         self.assertIn(f"{API_BASE}/person_context", paths)
         self.assertIn(f"{API_BASE}/turn_owner_resolve", paths)
         rendered = str(document)
@@ -840,6 +848,10 @@ class _FakeClient:
 
     def has_voice_reference(self, person_id: str) -> bool:
         self.calls.append(("has_voice_reference", person_id))
+        return True
+
+    def has_face_reference(self, person_id: str) -> bool:
+        self.calls.append(("has_face_reference", person_id))
         return True
 
     def resolve_turn_owner(self, **kwargs) -> OwnerResolutionResult:

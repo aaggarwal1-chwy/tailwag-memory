@@ -129,6 +129,21 @@ class BiometricReferenceService:
         )
         return bool(rows)
 
+    def has_face_reference(self, person_id: str) -> bool:
+        rendered = str(person_id or "").strip()
+        if not rendered:
+            return False
+        rows = self.runner.run(
+            """
+            MATCH (:Person {id: $person_id})-[:HAS_FACE_REFERENCE]->(r:FaceReference)
+            WHERE coalesce(r.status, 'active') = 'active'
+            RETURN r.id AS reference_id
+            LIMIT 1
+            """,
+            {"person_id": rendered},
+        )
+        return bool(rows)
+
     def observe_face_embedding(
         self,
         *,
