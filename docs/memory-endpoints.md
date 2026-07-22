@@ -129,6 +129,7 @@ Request:
 ```json
 {
   "person_id": "person_jamie",
+  "robot_id": "cody",
   "limit": 10,
   "semantic_scope": "workplace help",
   "current_text": "robot demo later today",
@@ -177,7 +178,7 @@ Returns the `EpisodeRecordResult` dictionary shape.
 Request:
 
 ```json
-{"text": "robot demos", "person_id": "person_jamie", "building_code": "MAIN", "limit": 5}
+{"text": "robot demos", "person_id": "person_jamie", "robot_id": "cody", "building_code": "MAIN", "limit": 5}
 ```
 
 Returns the existing semantic search shape:
@@ -610,7 +611,7 @@ Notes:
 - Recording a robot updates its current `Robot.display_name`; the newly created episode relationship snapshots that name as `display_name_at_time`. Rewriting an existing relationship does not replace its original name snapshot.
 - Robot participation does not create a person, update `Person.last_seen`, or write biometric or operational robot state.
 
-### `person_context(person_id, limit=10, semantic_scope=None, *, current_text=None, now=None, memory_limit=12)`
+### `person_context(person_id, limit=10, semantic_scope=None, *, robot_id=None, current_text=None, now=None, memory_limit=12)`
 
 Returns prompt-ready context for a person. The output combines deterministic durable memory markdown and visible follow-ups while excluding episode transcript text.
 
@@ -619,6 +620,7 @@ Parameters:
 | Name | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `person_id` | `str` | yes | Caller-owned `Person.id`. |
+| `robot_id` | `str \| None` | no | Stable Robot ID used to include robot-free episodes/memories plus evidence involving that robot. Blank or omitted preserves person-wide retrieval. |
 | `limit` | `int` | no | Reserved retrieval limit for lower-level person context evidence. |
 | `semantic_scope` | `str \| None` | no | Topic reused for durable memory ranking when `current_text` is omitted, and for a scoped episode no-match check. |
 | `current_text` | `str \| None` | no | Current utterance/task used to vector-rank durable memory items. When omitted, `semantic_scope` is reused for durable memory ranking. |
@@ -630,6 +632,7 @@ Returns: `str`.
 Notes:
 
 - If no person exists, person context returns `the database does not have a record of this person`.
+- With `robot_id`, direct memories without episode evidence remain visible. A memory with multiple supporting episodes is visible when any support is robot-free or includes that robot.
 - If `semantic_scope` is supplied, an embedding provider is required. Matching episodes can affect the no-match sentinel but their transcript text is not rendered.
 - The returned string is suitable for prompts, not a structured API contract.
 
@@ -654,7 +657,7 @@ Potential Follow-Ups:
 - Cape Cod trip with their parents planned for the weekend of 2026-06-20.
 ```
 
-### `search_semantic_memory(*, text, person_id, building_code=None, limit=5, now=None)`
+### `search_semantic_memory(*, text, person_id, robot_id=None, building_code=None, limit=5, now=None)`
 
 Returns structured semantic search results for one person without requiring callers to instantiate lower-level retrieval services.
 
@@ -664,7 +667,8 @@ Parameters:
 | --- | --- | --- | --- |
 | `text` | `str` | yes | Query text to embed and match against episode transcripts and memory item summaries. |
 | `person_id` | `str` | yes | Caller-owned `Person.id` used to scope both episode and memory item results. |
-| `building_code` | `str \| None` | no | Optional episode place filter. Memory item results are person-scoped only. |
+| `robot_id` | `str \| None` | no | Stable Robot ID used to include robot-free episodes/memories plus evidence involving that robot. Blank or omitted preserves person-wide retrieval. |
+| `building_code` | `str \| None` | no | Optional episode place filter. |
 | `limit` | `int` | no | Maximum episode results and maximum memory item results. |
 | `now` | `datetime \| None` | no | Reference time for filtering expired memory items. |
 
@@ -677,10 +681,8 @@ Notes:
 - Episode results include transcript, time/place metadata, and optional score.
 - Episode result dictionaries also include `robots`, sorted by stable robot ID. Each entry contains `robot_id`, the robot's current `display_name`, and the episode relationship's `role` and `source`.
 - Memory item results return only active, unexpired memories; addressed and superseded memories are excluded.
+- With `robot_id`, episodes attached only to other robots and memories supported only by those episodes are excluded. Direct and robot-free-source memories remain visible.
 - Blank `text` or `person_id` returns empty `episodes` and `memory_items` lists without initializing embeddings.
-- Future gap: this endpoint and `person_context(...)` do not yet accept
-  `robot_id`. The unresolved durable-memory semantics are documented in
-  [Architecture](architecture.md#future-gap-robot-scoped-person-memory).
 
 ### `extract_memory_for_episode(episode_id, person_id=None)`
 
@@ -953,7 +955,9 @@ Follow-up support and addressing are handled internally by transcript extraction
 
 `SearchQuery` fields: `text`, optional `person_id`, optional `robot_id`, optional
 `building_code`, optional `room_id`, and `limit=10`. `robot_id` matches stable
-`Robot.id`, not a display name. All episode retrieval methods return every
+`Robot.id`, not a display name, and selects robot-free episodes plus episodes
+involving that robot. `by_robot(...)` remains the strict provenance lookup for
+episodes actually linked to a robot. All episode retrieval methods return every
 participating robot in `EpisodeMemoryResult.robots`, sorted by `robot_id`.
 
 ### `EventRetrievalService(runner)`

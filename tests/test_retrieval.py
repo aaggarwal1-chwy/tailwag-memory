@@ -37,6 +37,22 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(len(runner.queries), 1)
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 3})
 
+    def test_recent_episode_rows_for_person_robot_scope_includes_global_and_self(self) -> None:
+        runner = RecordingQueryRunner()
+
+        recent_episode_rows_for_person(runner, "person_jamie", 3, robot_id="cody")
+
+        query = runner.queries[0]
+        self.assertEqual(
+            query.parameters,
+            {"person_id": "person_jamie", "robot_id": "cody", "limit": 3},
+        )
+        self.assertIn("NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(e) }", query.query)
+        self.assertIn(
+            "EXISTS { MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(e) }",
+            query.query,
+        )
+
     def test_by_person_uses_recent_episode_helper_rows(self) -> None:
         runner = RecordingQueryRunner(
             results=[
@@ -218,6 +234,14 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(params["room_id"], "101")
         self.assertEqual(params["limit"], 5)
         self.assertEqual(params["candidate_limit"], 25)
+        self.assertIn(
+            "NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(node) }",
+            runner.queries[0].query,
+        )
+        self.assertIn(
+            "EXISTS { MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(node) }",
+            runner.queries[0].query,
+        )
         self.assertEqual(results[0].start_time, "2026-06-16T14:00:00+00:00")
         self.assertEqual(results[0].end_time, "2026-06-16T14:05:00+00:00")
         self.assertEqual(results[0].building_code, "MAIN")
@@ -446,7 +470,12 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         )
         service = PersonContextRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
 
-        source = service.source_for_person("person_jamie", limit=10, semantic_scope="chargers")
+        source = service.source_for_person(
+            "person_jamie",
+            limit=10,
+            semantic_scope="chargers",
+            robot_id="cody",
+        )
 
         self.assertIsNotNone(source)
         assert source is not None
@@ -454,6 +483,11 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         self.assertEqual([item.score for item in source.items], [0.88, 0.72])
         self.assertEqual(len(runner.queries[1].parameters["embedding"]), 8)
         self.assertEqual(runner.queries[1].parameters["person_id"], "person_jamie")
+        self.assertEqual(runner.queries[1].parameters["robot_id"], "cody")
+        self.assertIn(
+            "NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(node) }",
+            runner.queries[1].query,
+        )
         self.assertEqual(runner.queries[1].parameters["limit"], 10)
         self.assertEqual(runner.queries[1].parameters["candidate_limit"], 50)
         self.assertEqual(len(runner.queries), 2)

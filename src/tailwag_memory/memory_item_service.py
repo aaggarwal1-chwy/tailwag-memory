@@ -205,6 +205,7 @@ class MemoryItemService:
         self,
         *,
         person_id: str,
+        robot_id: str | None = None,
         kinds: tuple[str, ...] = (),
         statuses: tuple[str, ...] = (),
         source: str = "",
@@ -219,6 +220,17 @@ class MemoryItemService:
               AND ($source = '' OR m.source = $source)
               AND coalesce(m.status, 'active') <> 'superseded'
               AND NOT EXISTS { MATCH (m)-[:SUPERSEDED_BY]->(:MemoryItem) }
+              AND (
+                $robot_id IS NULL
+                OR NOT EXISTS { MATCH (m)-[:SUPPORTED_BY]->(:Episode) }
+                OR EXISTS {
+                    MATCH (m)-[:SUPPORTED_BY]->(visible_episode:Episode)
+                    WHERE NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(visible_episode) }
+                       OR EXISTS {
+                           MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(visible_episode)
+                       }
+                }
+              )
             RETURN $person_id AS person_id,
                    m.id AS memory_id,
                    m.kind AS kind,
@@ -238,6 +250,7 @@ class MemoryItemService:
             """,
             {
                 "person_id": str(person_id or "").strip(),
+                "robot_id": str(robot_id or "").strip() or None,
                 "kinds": list(kinds),
                 "statuses": list(statuses),
                 "source": str(source or "").strip(),
@@ -250,6 +263,7 @@ class MemoryItemService:
         self,
         *,
         person_id: str,
+        robot_id: str | None = None,
         kinds: tuple[str, ...] = (),
         source: str = "",
         now: datetime | None = None,
@@ -259,6 +273,7 @@ class MemoryItemService:
         requested_limit = max(1, int(limit or 100))
         items = self.list_items(
             person_id=person_id,
+            robot_id=robot_id,
             kinds=kinds,
             statuses=("active",),
             source=source,
@@ -270,6 +285,7 @@ class MemoryItemService:
         self,
         *,
         person_id: str,
+        robot_id: str | None = None,
         text: str,
         limit: int = 10,
         now: datetime | None = None,
@@ -277,6 +293,7 @@ class MemoryItemService:
         """Return active memory items ranked by summary similarity."""
         return self.vector_search_by_embedding(
             person_id=person_id,
+            robot_id=robot_id,
             embedding=self.embeddings.embed(text),
             limit=limit,
             now=now,
@@ -286,6 +303,7 @@ class MemoryItemService:
         self,
         *,
         person_id: str,
+        robot_id: str | None = None,
         embedding: list[float],
         limit: int = 10,
         now: datetime | None = None,
@@ -299,6 +317,17 @@ class MemoryItemService:
             MATCH (:Person {id: $person_id})-[:HAS_MEMORY]->(node)
             WHERE node.status = 'active'
               AND NOT EXISTS { MATCH (node)-[:SUPERSEDED_BY]->(:MemoryItem) }
+              AND (
+                $robot_id IS NULL
+                OR NOT EXISTS { MATCH (node)-[:SUPPORTED_BY]->(:Episode) }
+                OR EXISTS {
+                    MATCH (node)-[:SUPPORTED_BY]->(visible_episode:Episode)
+                    WHERE NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(visible_episode) }
+                       OR EXISTS {
+                           MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(visible_episode)
+                       }
+                }
+              )
             RETURN $person_id AS person_id,
                    node.id AS memory_id,
                    node.kind AS kind,
@@ -320,6 +349,7 @@ class MemoryItemService:
             {
                 "embedding": embedding,
                 "person_id": str(person_id or "").strip(),
+                "robot_id": str(robot_id or "").strip() or None,
                 "candidate_limit": candidate_limit,
             },
         )

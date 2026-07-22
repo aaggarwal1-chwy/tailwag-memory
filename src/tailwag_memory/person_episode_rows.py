@@ -11,6 +11,7 @@ def person_episode_rows(
     runner: QueryRunner,
     *,
     person_id: str | None = None,
+    robot_id: str | None = None,
     limit: int,
     include_memory_count: bool = False,
     include_memory_items: bool = False,
@@ -20,6 +21,7 @@ def person_episode_rows(
 ) -> list[dict[str, object]]:
     """Fetch read-only person/episode participation rows."""
     rendered_person_id = str(person_id or "").strip()
+    rendered_robot_id = str(robot_id or "").strip()
     with_memory = include_memory_count or include_memory_items
     memory_with_parts = []
     memory_return_parts = []
@@ -59,9 +61,21 @@ def person_episode_rows(
     )
     event_return = "\n                   null AS event_id," if include_event_placeholder else ""
     text_return = "\n                   coalesce(e.transcript, '') AS text," if include_context_fields else ""
-    person_filter = "WHERE ($person_id IS NULL OR person.id = $person_id)" if always_include_person_filter else ""
+    filters = []
+    if always_include_person_filter:
+        filters.append("($person_id IS NULL OR person.id = $person_id)")
     if rendered_person_id and not always_include_person_filter:
-        person_filter = "WHERE person.id = $person_id"
+        filters.append("person.id = $person_id")
+    if rendered_robot_id:
+        filters.append(
+            """
+            (
+                NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(e) }
+                OR EXISTS { MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(e) }
+            )
+            """.strip()
+        )
+    person_filter = f"WHERE {' AND '.join(filters)}" if filters else ""
     order_by = "ORDER BY e.start_time DESC, person.id ASC" if not rendered_person_id else "ORDER BY e.start_time DESC"
     query = f"""
             MATCH (person:Person)-[r:PARTICIPATED_IN]->(e:Episode)
@@ -87,6 +101,11 @@ def person_episode_rows(
             {order_by}
             LIMIT $limit
             """
+    parameters: dict[str, object] = {"limit": limit}
     if always_include_person_filter:
-        return runner.run(query, {"person_id": rendered_person_id or None, "limit": limit})
-    return runner.run(query, {"person_id": rendered_person_id, "limit": limit} if rendered_person_id else {"limit": limit})
+        parameters["person_id"] = rendered_person_id or None
+    elif rendered_person_id:
+        parameters["person_id"] = rendered_person_id
+    if rendered_robot_id:
+        parameters["robot_id"] = rendered_robot_id
+    return runner.run(query, parameters)

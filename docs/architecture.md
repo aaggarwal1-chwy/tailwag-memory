@@ -455,23 +455,20 @@ Tailwag provides graph lookups for episodes by person, robot stable ID, and plac
 
 `person_context()` returns one prompt-ready deterministic context surface containing active durable memory items and visible follow-ups. It excludes episode transcript text. When `current_text` or `semantic_scope` is supplied, memory item ranking can use vector similarity without rendering the matching episode transcripts.
 
-### Future Gap: Robot-Scoped Person Memory
+### Robot-Scoped Person Memory
 
-The lower-level episode search already supports combining `person_id`,
-`robot_id`, and place filters with AND semantics. The high-level
-`person_context()` and `search_semantic_memory()` contracts do not yet accept a
-robot filter, and durable `MemoryItem` search is currently scoped only by
-`Person.id`.
+The high-level `person_context()` and `search_semantic_memory()` contracts
+accept an optional stable `robot_id`. When supplied, episode retrieval includes
+episodes with no participating Robot and episodes in which that robot
+participated. It excludes episodes attached only to other robots.
 
-Adding that filter is intentionally deferred until its semantics are decided.
-In particular, the design must specify whether a durable memory matches a robot
-when any `SUPPORTED_BY` episode includes that robot, how direct memories without
-episode support behave, how consolidated memories with evidence from multiple
-robots behave, and whether safety boundaries or pinned identity-wide memories
-remain visible across robots. The decision may differ between strict explicit
-search and prompt-ready person context. This gap requires a documented contract
-and compatibility tests before the high-level HTTP or Python APIs add
-`robot_id`.
+Durable memory uses the same evidence visibility rule. A memory is visible when
+it has no `SUPPORTED_BY` episode or when at least one supporting episode is
+robot-free or includes the requested robot. This any-visible-evidence rule means
+a consolidated memory supported by both Cody and Puffle is visible to either,
+while a memory supported only by Puffle is not visible to Cody. Omitting or
+passing a blank `robot_id` preserves person-wide retrieval for non-robot and
+legacy callers.
 
 ## Source Adapters
 

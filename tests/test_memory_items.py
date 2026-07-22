@@ -511,6 +511,40 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertIn("coalesce(m.status, 'active') <> 'superseded'", runner.queries[1].query)
         self.assertIn("SUPERSEDED_BY", runner.queries[1].query)
 
+    def test_list_items_robot_scope_accepts_direct_global_or_self_supported_memory(self) -> None:
+        runner = RecordingQueryRunner()
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        service.list_items(person_id="person_jamie", robot_id="cody")
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["robot_id"], "cody")
+        self.assertIn("NOT EXISTS { MATCH (m)-[:SUPPORTED_BY]->(:Episode) }", query.query)
+        self.assertIn("MATCH (m)-[:SUPPORTED_BY]->(visible_episode:Episode)", query.query)
+        self.assertIn(
+            "NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(visible_episode) }",
+            query.query,
+        )
+        self.assertIn(
+            "MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(visible_episode)",
+            query.query,
+        )
+
+    def test_vector_search_robot_scope_uses_same_memory_visibility_policy(self) -> None:
+        runner = RecordingQueryRunner()
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        service.vector_search_by_embedding(
+            person_id="person_jamie",
+            robot_id="puffle",
+            embedding=[0.1] * 8,
+        )
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["robot_id"], "puffle")
+        self.assertIn("NOT EXISTS { MATCH (node)-[:SUPPORTED_BY]->(:Episode) }", query.query)
+        self.assertIn("MATCH (node)-[:SUPPORTED_BY]->(visible_episode:Episode)", query.query)
+
     def test_rejects_invalid_observed_at(self) -> None:
         service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
 
@@ -1022,6 +1056,7 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
 
         markdown = service.markdown_for_person(
             "person_jamie",
+            robot_id="cody",
             now=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
             memory_limit=12,
         )
@@ -1036,6 +1071,7 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Preferences:"))
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Facts:"))
         self.assertEqual(runner.queries[0].parameters["person_id"], "person_jamie")
+        self.assertEqual(runner.queries[0].parameters["robot_id"], "cody")
         self.assertEqual(runner.queries[0].parameters["statuses"], ["active"])
         self.assertEqual(len(runner.queries), 1)
 

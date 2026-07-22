@@ -29,11 +29,18 @@ NO_SCOPED_PERSON_EVIDENCE_MESSAGE_PREFIX = "no episodes matched the semantic sco
 _MAX_CONTEXT_LINE_CHARS = 500
 
 
-def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: int) -> list[dict[str, object]]:
+def recent_episode_rows_for_person(
+    runner: QueryRunner,
+    person_id: str,
+    limit: int,
+    *,
+    robot_id: str | None = None,
+) -> list[dict[str, object]]:
     """Fetch recent episode rows linked to a person."""
     return person_episode_rows(
         runner,
         person_id=person_id,
+        robot_id=robot_id,
         limit=limit,
         include_context_fields=True,
     )
@@ -161,9 +168,11 @@ class EpisodeRetrievalService:
             WHERE ($person_id IS NULL OR EXISTS {
                 MATCH (:Person {id: $person_id})-[:PARTICIPATED_IN]->(node)
             })
-              AND ($robot_id IS NULL OR EXISTS {
-                MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(node)
-              })
+              AND (
+                $robot_id IS NULL
+                OR NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(node) }
+                OR EXISTS { MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(node) }
+              )
               AND (
                 ($building_code IS NULL AND $room_id IS NULL)
                 OR EXISTS {
@@ -266,6 +275,7 @@ class PersonContextRetrievalService:
         person_id: str,
         limit: int = 10,
         semantic_scope: str | None = None,
+        robot_id: str | None = None,
     ) -> PersonContextSource | None:
         """Return context source data for a person when present."""
         person_source = self._person_source(person_id)
@@ -274,14 +284,14 @@ class PersonContextRetrievalService:
 
         scope = self._normalize_semantic_scope(semantic_scope)
         if scope is not None:
-            items = self._scoped_items_for_person(person_id, scope, limit)
+            items = self._scoped_items_for_person(person_id, scope, limit, robot_id=robot_id)
             return PersonContextSource(
                 person_id=person_source.person_id,
                 display_name=person_source.display_name,
                 items=items,
             )
 
-        episode_rows = recent_episode_rows_for_person(self.runner, person_id, limit)
+        episode_rows = recent_episode_rows_for_person(self.runner, person_id, limit, robot_id=robot_id)
         event_rows = self.runner.run(
             """
             MATCH (:Person {id: $person_id})-[r]->(e:Event)
@@ -316,12 +326,18 @@ class PersonContextRetrievalService:
         person_id: str,
         limit: int = 10,
         semantic_scope: str | None = None,
+        robot_id: str | None = None,
     ) -> str:
         """Return sentinel markdown for missing or no-match person evidence."""
         bounded_limit = _bounded_limit(limit)
         scope = self._normalize_semantic_scope(semantic_scope)
         if scope is not None:
-            source = self.source_for_person(person_id, limit=bounded_limit, semantic_scope=scope)
+            source = self.source_for_person(
+                person_id,
+                limit=bounded_limit,
+                semantic_scope=scope,
+                robot_id=robot_id,
+            )
         else:
             source = self._person_source(person_id)
         return format_person_context_evidence_markdown(
@@ -356,13 +372,20 @@ class PersonContextRetrievalService:
         scope = semantic_scope.strip()
         return scope or None
 
-    def _scoped_items_for_person(self, person_id: str, semantic_scope: str, limit: int) -> list[PersonContextItem]:
+    def _scoped_items_for_person(
+        self,
+        person_id: str,
+        semantic_scope: str,
+        limit: int,
+        *,
+        robot_id: str | None = None,
+    ) -> list[PersonContextItem]:
         """Return semantically scoped context items for a person."""
         if self.embeddings is None:
             raise ValueError("semantic_scope requires an embedding provider")
 
         embedding = self.embeddings.embed(semantic_scope)
-        rows = self._scoped_episode_rows(person_id, embedding, limit)
+        rows = self._scoped_episode_rows(person_id, embedding, limit, robot_id=robot_id)
 
         best_rows: dict[str, dict[str, object]] = {}
         for row in rows:
@@ -383,6 +406,8 @@ class PersonContextRetrievalService:
         person_id: str,
         embedding: list[float],
         limit: int,
+        *,
+        robot_id: str | None = None,
     ) -> list[dict[str, object]]:
         """Fetch scoped episode rows from one vector index."""
         candidate_limit = max(limit * 5, 25)
@@ -390,6 +415,11 @@ class PersonContextRetrievalService:
             _vector_search_clause("episode_transcript_embedding", "node", "candidate_limit")
             + """
             MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(node)
+            WHERE (
+                $robot_id IS NULL
+                OR NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(node) }
+                OR EXISTS { MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(node) }
+            )
             OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
             RETURN node.id AS item_id,
                    'episode' AS item_type,
@@ -408,6 +438,7 @@ class PersonContextRetrievalService:
                 "candidate_limit": candidate_limit,
                 "embedding": embedding,
                 "person_id": person_id,
+                "robot_id": str(robot_id or "").strip() or None,
                 "limit": limit,
             },
         )

@@ -94,6 +94,7 @@ class PersonContextRequest(StrictRequest):
     """Request body for prompt-ready person context."""
 
     person_id: str
+    robot_id: str | None = None
     limit: int = 10
     semantic_scope: str | None = None
     current_text: str | None = None
@@ -122,6 +123,7 @@ class SemanticSearchRequest(StrictRequest):
 
     text: str
     person_id: str
+    robot_id: str | None = None
     building_code: str | None = None
     limit: int = 5
     now: datetime | None = None

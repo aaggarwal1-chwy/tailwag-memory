@@ -122,10 +122,16 @@ class TailwagHttpMemoryProvider:
         response.raise_for_status()
         return response.json()
 
-    def person_context(self, person_id: str, *, current_text: str = "") -> str:
+    def person_context(
+        self,
+        person_id: str,
+        *,
+        robot_id: str | None = None,
+        current_text: str = "",
+    ) -> str:
         result = self._post(
             "person_context",
-            {"person_id": person_id, "current_text": current_text},
+            {"person_id": person_id, "robot_id": robot_id, "current_text": current_text},
         )
         return str(result["context_markdown"])
 
@@ -145,10 +151,17 @@ class TailwagHttpMemoryProvider:
             },
         )
 
-    def semantic_search(self, text: str, person_id: str, *, limit: int = 5) -> dict[str, Any]:
+    def semantic_search(
+        self,
+        text: str,
+        person_id: str,
+        *,
+        robot_id: str | None = None,
+        limit: int = 5,
+    ) -> dict[str, Any]:
         return self._post(
             "semantic_search",
-            {"text": text, "person_id": person_id, "limit": limit},
+            {"text": text, "person_id": person_id, "robot_id": robot_id, "limit": limit},
         )
 ```
 
@@ -160,14 +173,16 @@ An asynchronous caller can implement the same contract with
 
 Argos should:
 
-- call `person_context` before prompt assembly and map `context_markdown` into
-  its existing memory/about/follow-up prompt fields
+- call `person_context` before prompt assembly, pass the active manifest
+  robot's stable ID as `robot_id`, and map `context_markdown` into its existing
+  memory/about/follow-up prompt fields
 - call `episodes_record` after a live transcript is complete, using
   `episode_type="conversation"`, stable caller-owned person and episode IDs,
   `source="live_chat"` on each applicable participant payload, and a `robots`
   entry for every robot participating in the episode
-- call `semantic_search` for explicit memory-search tools and preserve the
-  separate `episodes` and `memory_items` response lists
+- call `semantic_search` with the same stable `robot_id` for explicit
+  memory-search tools and preserve the separate `episodes` and `memory_items`
+  response lists
 - use the people, identity, profile, biometric, and turn-owner routes when
   those existing Argos workflows require them
 - treat Tailwag memory-item IDs as opaque
@@ -318,10 +333,11 @@ from tailwag_memory import TailwagMemoryClient
 
 Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, direct memory item operations, or robot-filtered episode retrieval through `EpisodeRetrievalService.by_robot(...)` and `SearchQuery.robot_id`. Their constructor and method details also live in the endpoint reference.
 
-Robot filtering is not currently exposed by the high-level
-`person_context(...)` or `search_semantic_memory(...)` contracts. See the
-[architecture gap](architecture.md#future-gap-robot-scoped-person-memory)
-before adding or emulating that behavior.
+Robot callers should pass `robot_id` to both `person_context(...)` and
+`search_semantic_memory(...)`. Tailwag then returns robot-free Slack/direct
+memory plus evidence involving that robot, while excluding evidence attached
+only to other robots. Omitted or blank `robot_id` remains an unfiltered
+compatibility mode for non-robot callers.
 
 Slack adapter classes are imported from `tailwag_memory.slack_ingestion`, not from the top-level package. Package callers construct a `SlackPollStateStore` explicitly; use `SlackFilePollStateStore(Path(...))` for local JSON cursor state and `tailwag_memory.aws.SlackDynamoDBPollStateStore` for AWS DynamoDB-backed cursor state. See [Slack Ingestion Guide](slack-ingestion.md#package-api).
 

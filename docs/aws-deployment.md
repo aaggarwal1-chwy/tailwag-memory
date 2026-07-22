@@ -475,6 +475,7 @@ curl -fsS \
   -H "Content-Type: application/json" \
   -d '{
     "person_id": "person_jamie",
+    "robot_id": "cody",
     "current_text": "robot demo later today",
     "memory_limit": 12
   }' \
@@ -533,9 +534,9 @@ In an Argos-style memory provider:
 
 | Argos responsibility | Tailwag operation |
 | --- | --- |
-| Build prompt context | `POST .../request/person_context`; use `context_markdown` |
+| Build prompt context | `POST .../request/person_context` with the active stable `robot_id`; use `context_markdown` |
 | Persist a completed live transcript | `POST .../request/episodes_record` |
-| Run a user-directed memory search | `POST .../request/semantic_search` |
+| Run a user-directed memory search | `POST .../request/semantic_search` with the active stable `robot_id` |
 | Create or update a known person | `POST .../request/people_upsert` |
 | Archive a person | `POST .../request/people_archive` |
 | Resolve identity/profile data | identity and profile routes in the endpoint reference |

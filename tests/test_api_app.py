@@ -146,6 +146,7 @@ class TailwagApiAppTest(unittest.TestCase):
             headers=_auth_header(),
             json={
                 "person_id": "person_jamie",
+                "robot_id": "cody",
                 "limit": 3,
                 "semantic_scope": "chargers",
                 "current_text": "robot demo",
@@ -165,6 +166,7 @@ class TailwagApiAppTest(unittest.TestCase):
                     "person_context",
                     "person_jamie",
                     {
+                        "robot_id": "cody",
                         "limit": 3,
                         "semantic_scope": "chargers",
                         "current_text": "robot demo",
@@ -358,6 +360,7 @@ class TailwagApiAppTest(unittest.TestCase):
                     {
                         "text": "demos",
                         "person_id": "person_jamie",
+                        "robot_id": None,
                         "building_code": "MAIN",
                         "limit": 2,
                         "now": None,
