@@ -1,0 +1,14 @@
+{
+  "Name": "aaggarwal1-tailwag-dev-daily-memory-consolidation",
+  "Description": "Send one daily Tailwag memory consolidation job to SQS.",
+  "ScheduleExpression": "cron(0 9 * * ? *)",
+  "ScheduleExpressionTimezone": "UTC",
+  "FlexibleTimeWindow": {
+    "Mode": "OFF"
+  },
+  "Target": {
+    "Arn": "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-memory-jobs",
+    "RoleArn": "arn:aws:iam::<account-id>:role/aaggarwal1-tailwag-dev-scheduler-role",
+    "Input": "{\"job_type\":\"memory_consolidate_all\",\"job_id\":\"daily-memory-consolidation-<aws.scheduler.execution-id>\",\"person_limit\":100}"
+  }
+}

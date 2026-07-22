@@ -11,11 +11,13 @@ workflow are documented in
 - `cloudformation/tailwag-memory-edge.yaml`: public HTTPS API Gateway and private VPC Link to the Tailwag ALB.
 - `cloudformation/tailwag-memory-observability.yaml`: CloudWatch alarms, SNS email routing, and AWS Backup failure routing.
 - `deployment.env.example`: shell environment values used by the helper script and AWS CLI examples.
-- `iam/tailwag-api-task-policy.example.json`: ECS task policy example for the Tailwag API container, including send-only access to the memory extraction queue.
+- `iam/tailwag-api-execution-role-policy.example.json`: ECS execution-role policy example for resolving the task-definition Secrets Manager values.
+- `iam/tailwag-api-task-policy.example.json`: ECS application task-role policy example for send-only access to the memory extraction queue.
 - `iam/tailwag-scheduler-policy.example.json`: EventBridge Scheduler role policy example for sending jobs to SQS.
 - `iam/tailwag-worker-policy.example.json`: Lambda worker policy example for queue, state, and report access.
 - `scheduler/slack-poll-schedule.example.json`: EventBridge Scheduler payload for recurring Slack poll jobs.
 - `scheduler/report-generate-schedule.example.json`: EventBridge Scheduler payload for daily report jobs.
+- `scheduler/memory-consolidate-all-schedule.example.json`: EventBridge Scheduler payload for daily bounded memory consolidation.
 - `scripts/build-push-api-image.sh`: builds the Tailwag API container and pushes it to ECR.
 - `scripts/package-worker-zip.sh`: packages the Tailwag worker Lambda zip locally.
 - `../ecs-task-definition.example.json`: ECS task definition example for the FastAPI container.
@@ -55,7 +57,7 @@ Worker Lambdas are disabled by default because the stack needs a packaged Lambda
 artifact in S3 before those functions can be created. To package locally:
 
 ```bash
-deploy/aws/scripts/package-worker-zip.sh
+WORKER_RUNTIME=python3.12 WORKER_ARCHITECTURE=x86_64 deploy/aws/scripts/package-worker-zip.sh
 ```
 
 Upload the printed zip path to S3, then pass the code location plus concrete
@@ -93,6 +95,8 @@ by Tailwag settings: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`,
 `OPENAI_API_KEY`, `SLACK_BOT_TOKEN`, and `TAILWAG_API_BEARER_TOKEN`.
 CloudFormation populates those runtime variables through Secrets Manager dynamic
 references.
+
+The packaging helper requires Docker and builds inside the selected Lambda runtime and Linux architecture; set `WORKER_RUNTIME` and `WORKER_ARCHITECTURE` to match the CloudFormation worker parameters.
 
 When Neo4j runs on a private EC2 address, pass `WorkerSubnetIds` and
 `WorkerSecurityGroupIds` so worker Lambdas can reach Bolt. The selected worker
@@ -245,10 +249,11 @@ workers. Worker entrypoints should use:
 - S3 for generated report HTML and static assets
 - Secrets Manager for Neo4j, OpenAI, Slack, and API tokens
 
+Attach `iam/tailwag-api-execution-role-policy.example.json` to the `executionRoleArn` role and `iam/tailwag-api-task-policy.example.json` to the `taskRoleArn` role in the ECS task definition.
+
 EventBridge Scheduler uses the application schedule group for Slack polling,
-daily report generation, and daily memory consolidation. The JSON examples in
-`scheduler/` cover the Slack and report job payloads; the live memory schedule
-enqueues `memory_consolidate_all` for the memory worker. Replace channel IDs,
+daily report generation, and daily memory consolidation. The examples cover all three job types, including `memory_consolidate_all` for the memory worker. The JSON examples in
+`scheduler/` cover Slack, report, and bounded memory-consolidation payloads. Replace channel IDs,
 ARNs, schedule expressions, and job payload fields before creating schedules.
 
 ## Updating The Deployed Application

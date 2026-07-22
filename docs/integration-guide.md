@@ -70,6 +70,8 @@ Manager mapping.
 
 ## HTTP Service Integration For Argos Or Another Caller
 
+> **Breaking change:** `recent_episode_limit` is no longer accepted by the person-context HTTP request or Python client. Remove it from callers before upgrading.
+
 Use a deployed Tailwag HTTP service instead of connecting directly to Neo4j or
 importing Tailwag's worker internals. Store the deployment-specific URL and
 token in the caller's runtime configuration or secret store:

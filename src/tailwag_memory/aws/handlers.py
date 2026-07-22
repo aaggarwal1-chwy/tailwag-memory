@@ -8,7 +8,7 @@ from tailwag_memory.client import TailwagMemoryClient
 from tailwag_memory.config import load_settings
 from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
 
-from .idempotency import DynamoDBJobIdempotencyStore
+from .idempotency import DynamoDBJobIdempotencyStore, IdempotencyClaimLost
 from .jobs import (
     MemoryConsolidateAllJob,
     MemoryConsolidatePersonJob,
@@ -49,13 +49,21 @@ def _handle_sqs_jobs(
         started = store.start_job(job.job_id, job_type=job.job_type)
         if not started.started:
             continue
+        if not started.claim_token:
+            raise RuntimeError(f"idempotency store claimed {job.job_id} without a claim token")
         try:
             result = processor(job)
         except Exception as exc:
-            store.mark_failed(job.job_id, error=str(exc))
+            try:
+                store.mark_failed(job.job_id, claim_token=started.claim_token, error=str(exc))
+            except IdempotencyClaimLost:
+                pass
             failures.append({"itemIdentifier": message_id})
         else:
-            store.mark_succeeded(job.job_id, result=result)
+            try:
+                store.mark_succeeded(job.job_id, claim_token=started.claim_token, result=result)
+            except IdempotencyClaimLost:
+                pass
     return {"batchItemFailures": failures}
 
 
@@ -172,7 +180,11 @@ def _job_idempotency_store() -> DynamoDBJobIdempotencyStore:
     table_name = os.getenv("TAILWAG_JOB_IDEMPOTENCY_TABLE")
     if not table_name:
         raise RuntimeError("TAILWAG_JOB_IDEMPOTENCY_TABLE is required for AWS workers")
-    return DynamoDBJobIdempotencyStore(_boto3_resource("dynamodb").Table(table_name))
+    lease_seconds = int(os.getenv("TAILWAG_JOB_LEASE_SECONDS", "900"))
+    return DynamoDBJobIdempotencyStore(
+        _boto3_resource("dynamodb").Table(table_name),
+        lease_seconds=lease_seconds,
+    )
 
 
 def _boto3_client(service_name: str) -> Any:
