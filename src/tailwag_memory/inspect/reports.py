@@ -1,22 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 import json
 
 from ..models import PersonTimelineItem, utc_now_iso
-from .models import PersonEpisodeAffectPoint
-
-
-@dataclass(frozen=True)
-class InspectReport:
-    """Common report envelope for Tailwag inspect utilities."""
-
-    title: str
-    generated_at: str
-    filters: dict[str, object] = field(default_factory=dict)
-    records: list[dict[str, object]] = field(default_factory=list)
-    metadata: dict[str, object] = field(default_factory=dict)
-    warnings: list[str] = field(default_factory=list)
+from .affect_report import affect_report_html as _render_affect_report_html
+from .followup_report import followup_validity_report_html as _render_followup_validity_report_html
+from .memory_report import memory_items_report_html as _render_memory_items_report_html
+from .models import InspectReport, PersonEpisodeAffectPoint
+from .timeline_report import person_timeline_report_html as _render_person_timeline_report_html
 
 
 def affect_report(
@@ -62,27 +54,19 @@ def report_json(report: InspectReport) -> str:
 
 def affect_report_html(report: InspectReport) -> str:
     """Render a self-contained affect scatter HTML report."""
-    from .affect_report import affect_report_html as render
-
-    return render(report)
+    return _render_affect_report_html(report)
 
 
 def followup_validity_report_html(report: InspectReport) -> str:
     """Render a self-contained follow-up validity HTML report."""
-    from .followup_report import followup_validity_report_html as render
-
-    return render(report)
+    return _render_followup_validity_report_html(report)
 
 
 def memory_items_report_html(report: InspectReport) -> str:
     """Render a self-contained memory item inspection HTML report."""
-    from .memory_report import memory_items_report_html as render
-
-    return render(report)
+    return _render_memory_items_report_html(report)
 
 
 def person_timeline_report_html(report: InspectReport) -> str:
     """Render a self-contained person timeline HTML report."""
-    from .timeline_report import person_timeline_report_html as render
-
-    return render(report)
+    return _render_person_timeline_report_html(report)

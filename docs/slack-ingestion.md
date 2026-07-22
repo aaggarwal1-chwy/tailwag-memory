@@ -15,7 +15,7 @@ The adapter does not add Slack-specific Neo4j labels or relationships. It maps S
 
 Slack ingestion does not create face or voice biometric reference nodes. When Slack resolves to an existing caller-owned canonical person, Slack uses the canonical ID for participation but does not send Slack display name or email into the person upsert, so caller-owned profile fields remain authoritative. When no canonical email match exists, the Slack-owned temporary person keeps the normalized email as identity evidence; Tailwag uses it to attach later same-email writes and rekeys the temporary Slack ID when a matching canonical `person_*` write arrives.
 
-Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. The adapter also preserves those mention targets in `EpisodeInput.mentioned_people`, resolving them through the same canonical-email path as speakers. Episode transcripts remain available through episode retrieval and inspection paths, but rendered `person_context` excludes transcript text.
+Slack transcripts resolve user mention tokens such as `<@U0123456789>` to display names and prefix each line with the message timestamp and speaker name. The adapter also preserves those mention targets in `EpisodeInput.mentioned_people`, resolving them through the same canonical-email path as speakers. Episode transcripts remain available through episode retrieval and inspection paths, but rendered `person_context` excludes transcript text. Mention-only people are not treated as speakers or memory-extraction targets.
 
 ## Slack App Setup
 
@@ -112,7 +112,7 @@ Slack ingestion is also available from Python. Import Slack adapter classes from
 from pathlib import Path
 
 from tailwag_memory import TailwagMemoryClient, load_settings
-from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+from tailwag_memory.slack_ingestion import SlackFilePollStateStore, SlackMemoryPoller, SlackWebApiClient
 
 settings = load_settings()
 
@@ -121,12 +121,13 @@ with TailwagMemoryClient.from_env() as memory:
     poller = SlackMemoryPoller(
         client=slack,
         episode_recorder=memory,
-        state_path=Path(".tailwag/slack-state.json"),
+        state_store=SlackFilePollStateStore(Path(".tailwag/slack-state.json")),
     )
     result = poller.poll_once(
         "C0123456789",
         backfill_hours=2,
         extract_memory=True,
+        enqueue_memory_extraction=True,
     )
 
 print(result.ingested_episode_ids)
@@ -139,7 +140,7 @@ import time
 from pathlib import Path
 
 from tailwag_memory import TailwagMemoryClient, load_settings
-from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+from tailwag_memory.slack_ingestion import SlackFilePollStateStore, SlackMemoryPoller, SlackWebApiClient
 
 settings = load_settings()
 
@@ -148,7 +149,7 @@ with TailwagMemoryClient.from_env() as memory:
     poller = SlackMemoryPoller(
         client=slack,
         episode_recorder=memory,
-        state_path=Path(".tailwag/slack-state.json"),
+        state_store=SlackFilePollStateStore(Path(".tailwag/slack-state.json")),
         active_thread_hours=24.0,
     )
 
@@ -163,11 +164,43 @@ with TailwagMemoryClient.from_env() as memory:
         time.sleep(60)
 ```
 
-`TailwagMemoryClient` satisfies the poller's episode recorder contract, so package-level polling records the same episode and memory extraction result shapes as the CLI. `include_email=True` mirrors `--include-email`; `extract_memory=False` mirrors `--skip-memory-extraction`; `force_backfill=True` requires `backfill_hours`.
+`TailwagMemoryClient` satisfies the poller's `EpisodeRecorder` contract:
+
+```python
+def record_episode(
+    episode: EpisodeInput,
+    *,
+    extract_memory: bool = True,
+    enqueue_memory_extraction: bool = True,
+) -> EpisodeRecordResult: ...
+```
+
+`poll_once()` passes `extract_memory` to every episode recording call. When the
+recorder accepts `enqueue_memory_extraction` or arbitrary keyword arguments, the
+poller also passes the exact `True` or `False` enqueue value selected by the
+caller. For compatibility with older recorders that do not accept the enqueue
+keyword, the poller omits only that unsupported argument. Custom recorders
+should accept both keywords when they need to distinguish deferred extraction
+from recording without extraction.
+
+| `extract_memory` | `enqueue_memory_extraction` | `TailwagMemoryClient` behavior |
+| --- | --- | --- |
+| `True` | either value | Record the episode and extract memory inline. |
+| `False` | `True` | Require `TAILWAG_MEMORY_JOBS_QUEUE_URL`, record the episode, and enqueue a `memory_extract_episode` job. |
+| `False` | `False` | Record the episode without inline or deferred memory extraction. |
+
+`SlackPollResult.memory_extraction_enabled` mirrors `extract_memory`; it does not
+indicate whether deferred extraction was queued or completed. Inspect each
+`EpisodeRecordResult.memory_extraction_job_id` in `episode_records` for the
+queued job ID. Inline extraction results and per-person errors remain available
+in each record's `memory_results` and `memory_errors`.
+
+`include_email=True` mirrors `--include-email`, and `force_backfill=True`
+requires `backfill_hours`.
 
 The same runtime requirements still apply: the Slack token must have the needed scopes, episode recording needs Neo4j configuration, and production episode embeddings need OpenAI configuration. A first package poll without `backfill_hours` only arms the cursor, just like the CLI. Use `force_backfill=True` only for one-shot package backfills; continuous loops should rely on the saved state cursor so they do not replay the same backfill window.
 
-Advanced callers can pass a fake Slack client that implements `history(channel, oldest, limit)`, `replies(channel, thread_ts, limit)`, and `user_profile(user_id)` for tests, or a custom `person_id_resolver` to map normalized Slack email addresses to caller-owned person IDs. `build_episode_from_slack_thread(channel=..., messages=..., client=...)` is available when a caller wants to convert Slack messages into an `EpisodeInput` without writing it. See [Memory Endpoints Reference](memory-endpoints.md#slack-endpoints) for constructor parameters and return fields.
+Advanced callers can pass a fake Slack client that implements `history(channel, oldest, limit)`, `replies(channel, thread_ts, limit)`, and `user_profile(user_id)` for tests, or a custom `SlackPollStateStore` implementation when polling state should live outside the local JSON file. `SlackFilePollStateStore(Path(...))` preserves the CLI's file-backed behavior. `tailwag_memory.aws.SlackDynamoDBPollStateStore` provides DynamoDB-backed cursor state for AWS workers. Callers can also pass a custom `person_id_resolver` to map normalized Slack email addresses to caller-owned person IDs. `build_episode_from_slack_thread(channel=..., messages=..., client=...)` is available when a caller wants to convert Slack messages into an `EpisodeInput` without writing it. See [Memory Endpoints Reference](memory-endpoints.md#slack-endpoints) for constructor parameters and return fields.
 
 ## Inspect Generated Memories
 
@@ -195,6 +228,8 @@ LIMIT 20;
 - Deleted, bot, join, leave, file-only/empty-text, and messages missing `user` or `ts` are skipped.
 - After a successful history poll, the state cursor advances to the latest returned history timestamp, or to the poll start timestamp when history is empty. This can advance even when all returned messages were skipped.
 
-## Mention Backfill
+## Mention Semantics
 
-No Neo4j schema migration is required for `MENTIONED_IN`; new relationship types can be written by episode ingestion. Existing Slack episodes remain valid but do not gain mention edges automatically. To add mention edges for historical Slack messages, re-ingest or backfill those Slack threads from source messages with memory extraction disabled so old conversations are not reprocessed for durable memories.
+Slack messages with user mention tokens populate `EpisodeInput.mentioned_people`.
+Episode ingestion writes `MENTIONED_IN` relationships for those people without
+changing participation or `last_seen`.

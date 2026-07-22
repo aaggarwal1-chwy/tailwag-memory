@@ -27,7 +27,7 @@ from .retrieval import (
     EventRetrievalService,
 )
 from .schema import initialize_schema
-from .slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+from .slack_ingestion import SlackFilePollStateStore, SlackMemoryPoller, SlackWebApiClient
 
 
 def _embedding_provider(settings: Settings) -> OpenAIEmbeddingProvider:
@@ -103,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     create_parser.add_argument(
         "--skip-memory-extraction",
         action="store_true",
-        help="store the episode without OpenAI-backed memory extraction",
+        help="store the episode and defer memory extraction to SQS",
     )
 
     event_parser = subparsers.add_parser("event")
@@ -164,7 +164,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     slack_poll_parser.add_argument("--active-thread-hours", type=float, default=24.0, help="hours to keep checking recent roots")
     slack_poll_parser.add_argument("--history-limit", type=int, default=200, help="Slack history page size")
     slack_poll_parser.add_argument("--reply-limit", type=int, default=200, help="Slack replies page size")
-    slack_poll_parser.add_argument("--skip-memory-extraction", action="store_true", help="store episodes without memory extraction")
+    slack_poll_parser.add_argument("--skip-memory-extraction", action="store_true", help="store episodes and defer memory extraction to SQS")
     slack_poll_parser.add_argument("--include-email", action="store_true", help="store Slack profile email when available")
 
     memory_parser = subparsers.add_parser("memory")
@@ -386,10 +386,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "slack":
             memory_client = TailwagMemoryClient(runner, settings)
             client = SlackWebApiClient(settings.slack_bot_token, include_email=args.include_email)
+            state_store = SlackFilePollStateStore(Path(args.state_file))
             poller = SlackMemoryPoller(
                 client,
                 memory_client,
-                Path(args.state_file),
+                state_store,
                 active_thread_hours=args.active_thread_hours,
             )
 

@@ -1,0 +1,548 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Core AWS resources for Tailwag memory deployment.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: tailwag-memory
+    Description: Name prefix for Tailwag resources.
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment suffix for Tailwag resources.
+  ReportsBucketName:
+    Type: String
+    Default: ""
+    Description: Optional globally unique S3 bucket name for generated reports.
+  QueueMaxReceiveCount:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    Description: Failed receives before SQS moves a message to the DLQ.
+  PollVisibilityTimeout:
+    Type: Number
+    Default: 5400
+    MinValue: 30
+    Description: Visibility timeout, in seconds, for poll jobs. Must remain at least six times WorkerTimeout.
+  MemoryVisibilityTimeout:
+    Type: Number
+    Default: 5400
+    MinValue: 30
+    Description: Visibility timeout, in seconds, for memory jobs. Must remain at least six times WorkerTimeout.
+  ReportVisibilityTimeout:
+    Type: Number
+    Default: 5400
+    MinValue: 30
+    Description: Visibility timeout, in seconds, for report jobs. Must remain at least six times WorkerTimeout.
+  MessageRetentionPeriod:
+    Type: Number
+    Default: 1209600
+    MinValue: 60
+    MaxValue: 1209600
+    Description: SQS message retention period, in seconds.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    Description: CloudWatch log retention, in days.
+  CreateWorkerLambdas:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Set to true to create Lambda workers and SQS event source mappings.
+  WorkerCodeS3Bucket:
+    Type: String
+    Default: tailwag-worker-code-placeholder
+    Description: S3 bucket containing the packaged worker Lambda zip. Replace this placeholder when CreateWorkerLambdas is true.
+  WorkerCodeS3Key:
+    Type: String
+    Default: lambda/tailwag-memory-worker-placeholder.zip
+    Description: S3 key for the packaged worker Lambda zip. Replace this placeholder when CreateWorkerLambdas is true.
+  WorkerRuntime:
+    Type: String
+    Default: python3.12
+    AllowedValues: [python3.10, python3.11, python3.12]
+    Description: Lambda Python runtime for worker zip packages.
+  WorkerArchitecture:
+    Type: String
+    Default: x86_64
+    AllowedValues: [x86_64, arm64]
+    Description: Lambda worker CPU architecture.
+  WorkerTimeout:
+    Type: Number
+    Default: 900
+    MinValue: 30
+    MaxValue: 900
+    Description: Lambda worker timeout, in seconds.
+  WorkerMemorySize:
+    Type: Number
+    Default: 1024
+    MinValue: 128
+    MaxValue: 10240
+    Description: Lambda worker memory size, in MB.
+  WorkerBatchSize:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: SQS messages delivered per Lambda invocation.
+  WorkerSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional private subnet ids for worker Lambda VPC access to private Neo4j. Leave empty to create workers without VPC config.
+  WorkerSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional security group ids for worker Lambda VPC access to private Neo4j. Leave empty to create workers without VPC config.
+  PollWorkerHandler:
+    Type: String
+    Default: tailwag_memory.aws.handlers.slack_poll_handler
+    Description: Python handler for poll worker SQS messages.
+  MemoryWorkerHandler:
+    Type: String
+    Default: tailwag_memory.aws.handlers.memory_worker_handler
+    Description: Python handler for memory worker SQS messages.
+  ReportWorkerHandler:
+    Type: String
+    Default: tailwag_memory.aws.handlers.report_worker_handler
+    Description: Python handler for report worker SQS messages.
+  LogLevel:
+    Type: String
+    Default: INFO
+    Description: Worker log level.
+  Neo4jUriSecretId:
+    Type: String
+    Default: aaggarwal1-tailwag/neo4j-uri
+    Description: Secrets Manager secret id or ARN whose SecretString is NEO4J_URI.
+  Neo4jUserSecretId:
+    Type: String
+    Default: aaggarwal1-tailwag/neo4j-user
+    Description: Secrets Manager secret id or ARN whose SecretString is NEO4J_USER.
+  Neo4jPasswordSecretId:
+    Type: String
+    Default: aaggarwal1-tailwag/neo4j-password
+    Description: Secrets Manager secret id or ARN whose SecretString is NEO4J_PASSWORD.
+  OpenAIApiKeySecretId:
+    Type: String
+    Default: aaggarwal1-tailwag/openai-api-key
+    Description: Secrets Manager secret id or ARN whose SecretString is OPENAI_API_KEY.
+  SlackBotTokenSecretId:
+    Type: String
+    Default: aaggarwal1-tailwag/slack-bot-token
+    Description: Secrets Manager secret id or ARN whose SecretString is SLACK_BOT_TOKEN.
+  TailwagApiBearerTokenSecretId:
+    Type: String
+    Default: aaggarwal1-tailwag/api-bearer-token
+    Description: Secrets Manager secret id or ARN whose SecretString is TAILWAG_API_BEARER_TOKEN.
+
+Rules:
+  WorkerCodeRequiredWhenWorkersEnabled:
+    RuleCondition: !Equals [!Ref CreateWorkerLambdas, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref WorkerCodeS3Bucket, tailwag-worker-code-placeholder]]
+        AssertDescription: WorkerCodeS3Bucket must be set to the uploaded worker zip bucket when CreateWorkerLambdas is true.
+      - Assert: !Not [!Equals [!Ref WorkerCodeS3Key, lambda/tailwag-memory-worker-placeholder.zip]]
+        AssertDescription: WorkerCodeS3Key must be set to the uploaded worker zip key when CreateWorkerLambdas is true.
+
+Conditions:
+  HasReportsBucketName: !Not [!Equals [!Ref ReportsBucketName, ""]]
+  ShouldCreateWorkerLambdas: !Equals [!Ref CreateWorkerLambdas, "true"]
+  HasWorkerSubnetIds: !Not [!Equals [!Join ["", !Ref WorkerSubnetIds], ""]]
+  HasWorkerSecurityGroupIds: !Not [!Equals [!Join ["", !Ref WorkerSecurityGroupIds], ""]]
+  HasWorkerVpcConfig: !And [!Condition HasWorkerSubnetIds, !Condition HasWorkerSecurityGroupIds]
+
+Resources:
+  ApiRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${ProjectName}-${EnvironmentName}-api"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+
+  PollJobsDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-${EnvironmentName}-poll-jobs-dlq"
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+      SqsManagedSseEnabled: true
+
+  PollJobsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-${EnvironmentName}-poll-jobs"
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+      VisibilityTimeout: !Ref PollVisibilityTimeout
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PollJobsDlq.Arn
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+
+  MemoryJobsDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-${EnvironmentName}-memory-jobs-dlq"
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+      SqsManagedSseEnabled: true
+
+  MemoryJobsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-${EnvironmentName}-memory-jobs"
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+      VisibilityTimeout: !Ref MemoryVisibilityTimeout
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt MemoryJobsDlq.Arn
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+
+  ReportJobsDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-${EnvironmentName}-report-jobs-dlq"
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+      SqsManagedSseEnabled: true
+
+  ReportJobsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-${EnvironmentName}-report-jobs"
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+      VisibilityTimeout: !Ref ReportVisibilityTimeout
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ReportJobsDlq.Arn
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+
+  SlackPollStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${EnvironmentName}-slack-poll-state"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: channel_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: channel_id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  JobIdempotencyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${EnvironmentName}-job-idempotency"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If [HasReportsBucketName, !Ref ReportsBucketName, !Ref "AWS::NoValue"]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  PollWorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${EnvironmentName}-poll-worker"
+      RetentionInDays: !Ref LogRetentionDays
+
+  MemoryWorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${EnvironmentName}-memory-worker"
+      RetentionInDays: !Ref LogRetentionDays
+
+  ReportWorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${EnvironmentName}-report-worker"
+      RetentionInDays: !Ref LogRetentionDays
+
+  WorkerExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldCreateWorkerLambdas
+    Properties:
+      RoleName: !Sub "${ProjectName}-${EnvironmentName}-worker-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If
+          - HasWorkerVpcConfig
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - !Ref "AWS::NoValue"
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-${EnvironmentName}-worker-runtime"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ProcessTailwagQueues
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:SendMessage
+                Resource:
+                  - !GetAtt PollJobsQueue.Arn
+                  - !GetAtt MemoryJobsQueue.Arn
+                  - !GetAtt ReportJobsQueue.Arn
+              - Sid: UseTailwagWorkerTables
+                Effect: Allow
+                Action:
+                  - dynamodb:DescribeTable
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !GetAtt SlackPollStateTable.Arn
+                  - !GetAtt JobIdempotencyTable.Arn
+              - Sid: WriteTailwagReports
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt ReportsBucket.Arn
+                  - !Sub "${ReportsBucket.Arn}/*"
+  PollWorkerFunction:
+    Type: AWS::Lambda::Function
+    Condition: ShouldCreateWorkerLambdas
+    DependsOn: PollWorkerLogGroup
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${EnvironmentName}-poll-worker"
+      Description: Tailwag poll worker for scheduled source polling jobs.
+      Runtime: !Ref WorkerRuntime
+      Handler: !Ref PollWorkerHandler
+      Architectures:
+        - !Ref WorkerArchitecture
+      Role: !GetAtt WorkerExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref WorkerCodeS3Bucket
+        S3Key: !Ref WorkerCodeS3Key
+      Timeout: !Ref WorkerTimeout
+      MemorySize: !Ref WorkerMemorySize
+      VpcConfig: !If
+        - HasWorkerVpcConfig
+        - SubnetIds: !Ref WorkerSubnetIds
+          SecurityGroupIds: !Ref WorkerSecurityGroupIds
+        - !Ref "AWS::NoValue"
+      Environment:
+        Variables:
+          PROJECT_NAME: !Ref ProjectName
+          ENVIRONMENT_NAME: !Ref EnvironmentName
+          TAILWAG_WORKER_KIND: poll
+          TAILWAG_POLL_JOBS_QUEUE_URL: !Ref PollJobsQueue
+          TAILWAG_MEMORY_JOBS_QUEUE_URL: !Ref MemoryJobsQueue
+          TAILWAG_REPORT_JOBS_QUEUE_URL: !Ref ReportJobsQueue
+          TAILWAG_SLACK_POLL_STATE_TABLE: !Ref SlackPollStateTable
+          TAILWAG_JOB_IDEMPOTENCY_TABLE: !Ref JobIdempotencyTable
+          TAILWAG_JOB_LEASE_SECONDS: !Ref WorkerTimeout
+          TAILWAG_REPORTS_BUCKET: !Ref ReportsBucket
+          LOG_LEVEL: !Ref LogLevel
+          NEO4J_URI: !Sub "{{resolve:secretsmanager:${Neo4jUriSecretId}:SecretString}}"
+          NEO4J_USER: !Sub "{{resolve:secretsmanager:${Neo4jUserSecretId}:SecretString}}"
+          NEO4J_PASSWORD: !Sub "{{resolve:secretsmanager:${Neo4jPasswordSecretId}:SecretString}}"
+          OPENAI_API_KEY: !Sub "{{resolve:secretsmanager:${OpenAIApiKeySecretId}:SecretString}}"
+          SLACK_BOT_TOKEN: !Sub "{{resolve:secretsmanager:${SlackBotTokenSecretId}:SecretString}}"
+          TAILWAG_API_BEARER_TOKEN: !Sub "{{resolve:secretsmanager:${TailwagApiBearerTokenSecretId}:SecretString}}"
+
+  MemoryWorkerFunction:
+    Type: AWS::Lambda::Function
+    Condition: ShouldCreateWorkerLambdas
+    DependsOn: MemoryWorkerLogGroup
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${EnvironmentName}-memory-worker"
+      Description: Tailwag memory worker for extraction and consolidation jobs.
+      Runtime: !Ref WorkerRuntime
+      Handler: !Ref MemoryWorkerHandler
+      Architectures:
+        - !Ref WorkerArchitecture
+      Role: !GetAtt WorkerExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref WorkerCodeS3Bucket
+        S3Key: !Ref WorkerCodeS3Key
+      Timeout: !Ref WorkerTimeout
+      MemorySize: !Ref WorkerMemorySize
+      VpcConfig: !If
+        - HasWorkerVpcConfig
+        - SubnetIds: !Ref WorkerSubnetIds
+          SecurityGroupIds: !Ref WorkerSecurityGroupIds
+        - !Ref "AWS::NoValue"
+      Environment:
+        Variables:
+          PROJECT_NAME: !Ref ProjectName
+          ENVIRONMENT_NAME: !Ref EnvironmentName
+          TAILWAG_WORKER_KIND: memory
+          TAILWAG_POLL_JOBS_QUEUE_URL: !Ref PollJobsQueue
+          TAILWAG_MEMORY_JOBS_QUEUE_URL: !Ref MemoryJobsQueue
+          TAILWAG_REPORT_JOBS_QUEUE_URL: !Ref ReportJobsQueue
+          TAILWAG_SLACK_POLL_STATE_TABLE: !Ref SlackPollStateTable
+          TAILWAG_JOB_IDEMPOTENCY_TABLE: !Ref JobIdempotencyTable
+          TAILWAG_JOB_LEASE_SECONDS: !Ref WorkerTimeout
+          TAILWAG_REPORTS_BUCKET: !Ref ReportsBucket
+          LOG_LEVEL: !Ref LogLevel
+          NEO4J_URI: !Sub "{{resolve:secretsmanager:${Neo4jUriSecretId}:SecretString}}"
+          NEO4J_USER: !Sub "{{resolve:secretsmanager:${Neo4jUserSecretId}:SecretString}}"
+          NEO4J_PASSWORD: !Sub "{{resolve:secretsmanager:${Neo4jPasswordSecretId}:SecretString}}"
+          OPENAI_API_KEY: !Sub "{{resolve:secretsmanager:${OpenAIApiKeySecretId}:SecretString}}"
+          SLACK_BOT_TOKEN: !Sub "{{resolve:secretsmanager:${SlackBotTokenSecretId}:SecretString}}"
+          TAILWAG_API_BEARER_TOKEN: !Sub "{{resolve:secretsmanager:${TailwagApiBearerTokenSecretId}:SecretString}}"
+
+  ReportWorkerFunction:
+    Type: AWS::Lambda::Function
+    Condition: ShouldCreateWorkerLambdas
+    DependsOn: ReportWorkerLogGroup
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${EnvironmentName}-report-worker"
+      Description: Tailwag report worker for scheduled report generation jobs.
+      Runtime: !Ref WorkerRuntime
+      Handler: !Ref ReportWorkerHandler
+      Architectures:
+        - !Ref WorkerArchitecture
+      Role: !GetAtt WorkerExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref WorkerCodeS3Bucket
+        S3Key: !Ref WorkerCodeS3Key
+      Timeout: !Ref WorkerTimeout
+      MemorySize: !Ref WorkerMemorySize
+      VpcConfig: !If
+        - HasWorkerVpcConfig
+        - SubnetIds: !Ref WorkerSubnetIds
+          SecurityGroupIds: !Ref WorkerSecurityGroupIds
+        - !Ref "AWS::NoValue"
+      Environment:
+        Variables:
+          PROJECT_NAME: !Ref ProjectName
+          ENVIRONMENT_NAME: !Ref EnvironmentName
+          TAILWAG_WORKER_KIND: report
+          TAILWAG_POLL_JOBS_QUEUE_URL: !Ref PollJobsQueue
+          TAILWAG_MEMORY_JOBS_QUEUE_URL: !Ref MemoryJobsQueue
+          TAILWAG_REPORT_JOBS_QUEUE_URL: !Ref ReportJobsQueue
+          TAILWAG_SLACK_POLL_STATE_TABLE: !Ref SlackPollStateTable
+          TAILWAG_JOB_IDEMPOTENCY_TABLE: !Ref JobIdempotencyTable
+          TAILWAG_JOB_LEASE_SECONDS: !Ref WorkerTimeout
+          TAILWAG_REPORTS_BUCKET: !Ref ReportsBucket
+          LOG_LEVEL: !Ref LogLevel
+          NEO4J_URI: !Sub "{{resolve:secretsmanager:${Neo4jUriSecretId}:SecretString}}"
+          NEO4J_USER: !Sub "{{resolve:secretsmanager:${Neo4jUserSecretId}:SecretString}}"
+          NEO4J_PASSWORD: !Sub "{{resolve:secretsmanager:${Neo4jPasswordSecretId}:SecretString}}"
+          OPENAI_API_KEY: !Sub "{{resolve:secretsmanager:${OpenAIApiKeySecretId}:SecretString}}"
+          SLACK_BOT_TOKEN: !Sub "{{resolve:secretsmanager:${SlackBotTokenSecretId}:SecretString}}"
+          TAILWAG_API_BEARER_TOKEN: !Sub "{{resolve:secretsmanager:${TailwagApiBearerTokenSecretId}:SecretString}}"
+
+  PollWorkerEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Condition: ShouldCreateWorkerLambdas
+    Properties:
+      EventSourceArn: !GetAtt PollJobsQueue.Arn
+      FunctionName: !Ref PollWorkerFunction
+      BatchSize: !Ref WorkerBatchSize
+      Enabled: true
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+
+  MemoryWorkerEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Condition: ShouldCreateWorkerLambdas
+    Properties:
+      EventSourceArn: !GetAtt MemoryJobsQueue.Arn
+      FunctionName: !Ref MemoryWorkerFunction
+      BatchSize: !Ref WorkerBatchSize
+      Enabled: true
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+
+  ReportWorkerEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Condition: ShouldCreateWorkerLambdas
+    Properties:
+      EventSourceArn: !GetAtt ReportJobsQueue.Arn
+      FunctionName: !Ref ReportWorkerFunction
+      BatchSize: !Ref WorkerBatchSize
+      Enabled: true
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+
+Outputs:
+  ApiRepositoryUri:
+    Description: ECR repository URI for the Tailwag API image.
+    Value: !GetAtt ApiRepository.RepositoryUri
+  PollJobsQueueUrl:
+    Description: URL for the poll job queue.
+    Value: !Ref PollJobsQueue
+  PollJobsQueueArn:
+    Description: ARN for the poll job queue.
+    Value: !GetAtt PollJobsQueue.Arn
+  MemoryJobsQueueUrl:
+    Description: URL for the memory job queue.
+    Value: !Ref MemoryJobsQueue
+  MemoryJobsQueueArn:
+    Description: ARN for the memory job queue.
+    Value: !GetAtt MemoryJobsQueue.Arn
+  ReportJobsQueueUrl:
+    Description: URL for the report job queue.
+    Value: !Ref ReportJobsQueue
+  ReportJobsQueueArn:
+    Description: ARN for the report job queue.
+    Value: !GetAtt ReportJobsQueue.Arn
+  SlackPollStateTableName:
+    Description: DynamoDB table name for Slack poll state.
+    Value: !Ref SlackPollStateTable
+  JobIdempotencyTableName:
+    Description: DynamoDB table name for worker job idempotency.
+    Value: !Ref JobIdempotencyTable
+  ReportsBucketName:
+    Description: S3 bucket name for generated reports.
+    Value: !Ref ReportsBucket
+  PollWorkerFunctionName:
+    Condition: ShouldCreateWorkerLambdas
+    Description: Lambda function name for poll jobs.
+    Value: !Ref PollWorkerFunction
+  MemoryWorkerFunctionName:
+    Condition: ShouldCreateWorkerLambdas
+    Description: Lambda function name for memory jobs.
+    Value: !Ref MemoryWorkerFunction
+  ReportWorkerFunctionName:
+    Condition: ShouldCreateWorkerLambdas
+    Description: Lambda function name for report jobs.
+    Value: !Ref ReportWorkerFunction
+  WorkerExecutionRoleArn:
+    Condition: ShouldCreateWorkerLambdas
+    Description: IAM role ARN used by the worker Lambdas.
+    Value: !GetAtt WorkerExecutionRole.Arn

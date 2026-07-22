@@ -84,6 +84,12 @@ Run the service:
 python -m uvicorn tailwag_memory.api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
+For containerized serving, build the repository `Dockerfile`; it installs the
+API extra, runs Uvicorn on `TAILWAG_API_PORT` defaulting to `8000`, and exposes
+`GET /health` for container and load-balancer checks. See
+[AWS Deployment And Operations](aws-deployment.md) for the live AWS topology,
+public caller endpoint, private backend path, and ECS/worker deployment workflow.
+
 `GET /health` is unauthenticated and does not initialize Neo4j or OpenAI clients. Provider health and memory API routes require:
 
 ```text
@@ -126,8 +132,7 @@ Request:
   "limit": 10,
   "semantic_scope": "workplace help",
   "current_text": "robot demo later today",
-  "memory_limit": 12,
-  "recent_episode_limit": 5
+  "memory_limit": 12
 }
 ```
 
@@ -159,7 +164,8 @@ Request:
     "place": {"building_code": "MAIN", "room_id": "101"},
     "participants": [{"id": "person_jamie", "role": "speaker"}]
   },
-  "extract_memory": true
+  "extract_memory": false,
+  "enqueue_memory_extraction": true
 }
 ```
 
@@ -568,7 +574,7 @@ Current policy prefers an accepted voice candidate when present, marks
 match, falls back to face when voice is absent, and otherwise returns
 `owner_source="unknown"`.
 
-### `record_episode(episode, *, extract_memory=True)`
+### `record_episode(episode, *, extract_memory=True, enqueue_memory_extraction=True)`
 
 Stores an episode, place, participants, participant relationships, and transcript embedding. By default it also runs transcript-derived memory extraction for the episode participants.
 
@@ -577,7 +583,8 @@ Parameters:
 | Name | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `episode` | `EpisodeInput` | yes | Caller-owned episode payload. |
-| `extract_memory` | `bool` | no | When true, create durable person memory items, support open follow-ups, or address resolved follow-ups from the transcript after storing the episode. |
+| `extract_memory` | `bool` | no | When true, create durable person memory items, support open follow-ups, or address resolved follow-ups from the transcript after storing the episode. When false, extraction is deferred to SQS by default. |
+| `enqueue_memory_extraction` | `bool` | no | Defaults to `true`. Set to `false` with `extract_memory=false` to store the episode without extracting or queuing memory. |
 
 Returns: `EpisodeRecordResult`.
 
@@ -586,6 +593,7 @@ Return fields:
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `episode_id` | `str` | Stored episode ID. |
+| `memory_extraction_job_id` | `str | None` | Idempotent SQS job ID when extraction was deferred; otherwise `None`. |
 | `memory_results` | `list[PersonMemoryExtractionResult]` | Per-person extraction results. Empty when `extract_memory=False`. |
 | `memory_errors` | `list[dict[str, str]]` | Extraction errors by person, if any. Episode storage can still succeed. |
 
@@ -593,9 +601,10 @@ Notes:
 
 - Episode storage always generates text embeddings, so production use requires `OPENAI_API_KEY`.
 - `extract_memory=True` uses OpenAI-backed memory extraction.
+- With `extract_memory=False`, Tailwag enqueues `memory_extract_episode` to `TAILWAG_MEMORY_JOBS_QUEUE_URL`; a missing URL raises before episode storage. Set `enqueue_memory_extraction=False` only when the caller intentionally wants no extraction.
 - Participants with role `speaker` are not required for `record_episode`, but roles help downstream extraction and retrieval semantics.
 
-### `person_context(person_id, limit=10, semantic_scope=None, *, current_text=None, now=None, memory_limit=12, recent_episode_limit=5)`
+### `person_context(person_id, limit=10, semantic_scope=None, *, current_text=None, now=None, memory_limit=12)`
 
 Returns prompt-ready context for a person. The output combines deterministic durable memory markdown and visible follow-ups while excluding episode transcript text.
 
@@ -609,7 +618,6 @@ Parameters:
 | `current_text` | `str \| None` | no | Current utterance/task used to vector-rank durable memory items. When omitted, `semantic_scope` is reused for durable memory ranking. |
 | `now` | `datetime \| None` | no | Reference time for follow-up visibility in the deterministic durable memory section. |
 | `memory_limit` | `int` | no | Maximum durable memory lines per section. |
-| `recent_episode_limit` | `int` | no | Compatibility field still sent by Argos; accepted but ignored because transcripts are excluded. |
 
 Returns: `str`.
 
@@ -707,7 +715,7 @@ Notes:
 - Consolidation can merge related memories into one active merged memory. Source memories are marked `superseded`, linked to the merged memory with `SUPERSEDED_BY`, and excluded from normal endpoint/query results.
 - This is slower background work; normal live ingestion should use `record_episode()`.
 - The tunable defaults are intentionally isolated for tests and scheduled jobs: `min_evidence_episodes`, `seed_limit`, `neighbor_limit`, `cluster_limit`, and `episode_text_limit`.
-- Consolidation is not the deferred asynchronous semantic consolidation queue/orchestrator and does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
+- Consolidation writes only `MemoryItem` records and their supported lifecycle and evidence relationships. It does not add `SemanticFact`, confidence properties, external vector databases, or new graph labels.
 
 ## Input Models
 
@@ -1009,7 +1017,7 @@ Import Slack APIs from the module, not the top-level package:
 from pathlib import Path
 
 from tailwag_memory import TailwagMemoryClient, load_settings
-from tailwag_memory.slack_ingestion import SlackMemoryPoller, SlackWebApiClient
+from tailwag_memory.slack_ingestion import SlackFilePollStateStore, SlackMemoryPoller, SlackWebApiClient
 
 settings = load_settings()
 
@@ -1018,7 +1026,7 @@ with TailwagMemoryClient.from_env() as memory:
     poller = SlackMemoryPoller(
         client=slack,
         episode_recorder=memory,
-        state_path=Path(".tailwag/slack-state.json"),
+        state_store=SlackFilePollStateStore(Path(".tailwag/slack-state.json")),
     )
     result = poller.poll_once("C0123456789", backfill_hours=2)
 
@@ -1029,7 +1037,19 @@ print(result.ingested_episode_ids)
 
 Fetches Slack history, replies, and user profiles through the Slack Web API.
 
-### `SlackMemoryPoller(client, episode_recorder, state_path, *, retention_class="standard", active_thread_hours=24.0, person_id_resolver=None)`
+### `SlackFilePollStateStore(path)`
+
+Persists Slack polling cursors in the JSON file shape used by the CLI.
+
+### `tailwag_memory.aws.SlackDynamoDBPollStateStore(table, *, channel_key="channel_id", version_attribute="version", lease_owner=None, lease_expires_at=None)`
+
+Persists Slack polling cursors in a DynamoDB-style table for AWS workers. The
+store implements the same `SlackPollStateStore` protocol as
+`SlackFilePollStateStore` and uses conditional writes to raise
+`SlackPollStateConflict` when a stale worker tries to save an older cursor
+version.
+
+### `SlackMemoryPoller(client, episode_recorder, state_store, *, retention_class="standard", active_thread_hours=24.0, person_id_resolver=None)`
 
 Creates a poller that converts Slack root messages and threads into Tailwag episodes.
 
@@ -1038,13 +1058,13 @@ Constructor parameters:
 | Name | Type | Meaning |
 | --- | --- | --- |
 | `client` | `SlackConversationClient` | Slack API client or test fake. |
-| `episode_recorder` | `EpisodeRecorder` | Object with `record_episode(episode, extract_memory=True)`. `TailwagMemoryClient` satisfies this and also exposes canonical email resolution. |
-| `state_path` | `Path` | JSON cursor state file. |
+| `episode_recorder` | `EpisodeRecorder` | Object with `record_episode(episode, *, extract_memory=True, enqueue_memory_extraction=True) -> EpisodeRecordResult`. `TailwagMemoryClient` satisfies this and also exposes canonical email resolution. The poller passes the exact enqueue value when the recorder accepts that keyword or arbitrary keyword arguments; it omits the unsupported argument only for legacy recorders that do not accept it. |
+| `state_store` | `SlackPollStateStore` | Poll cursor store. Use `SlackFilePollStateStore(Path(...))` for local JSON state or `SlackDynamoDBPollStateStore` for AWS DynamoDB-backed state. |
 | `retention_class` | `str` | Retention class assigned to Slack episodes. |
 | `active_thread_hours` | `float` | How long standalone roots stay active for later replies. |
 | `person_id_resolver` | `Callable[[str], str \| None] \| None` | Optional normalized-email resolver. When omitted, the poller uses `episode_recorder.canonical_person_id_by_email` when available. |
 
-### `poll_once(channel, *, backfill_hours=None, force_backfill=False, history_limit=200, reply_limit=200, extract_memory=True)`
+### `poll_once(channel, *, backfill_hours=None, force_backfill=False, history_limit=200, reply_limit=200, extract_memory=True, enqueue_memory_extraction=True)`
 
 Runs one Slack channel polling pass.
 
@@ -1059,7 +1079,8 @@ Parameters:
 | `force_backfill` | `bool` | Ignore saved cursor and replay the backfill window. Requires `backfill_hours`. |
 | `history_limit` | `int` | Slack API page size for channel history requests. |
 | `reply_limit` | `int` | Slack API page size for thread reply requests. |
-| `extract_memory` | `bool` | Whether recorded episodes run memory extraction. |
+| `extract_memory` | `bool` | Whether recorded episodes run memory extraction inline. Passed through to `EpisodeRecorder.record_episode`. |
+| `enqueue_memory_extraction` | `bool` | Passed explicitly to supporting `EpisodeRecorder` implementations. With `TailwagMemoryClient` and `extract_memory=False`, it controls deferred queueing. Defaults to `True`; set both flags to `False` to record without extracting or queuing memory. |
 
 Returns: `SlackPollResult`.
 
@@ -1072,9 +1093,22 @@ Return fields:
 | `ingested_threads` | Threads recorded as episodes. |
 | `latest_history_ts` | Saved Slack history cursor. |
 | `armed_without_backfill` | True when first run only initialized the cursor. |
-| `memory_extraction_enabled` | Whether extraction was requested. |
+| `memory_extraction_enabled` | Whether inline extraction was requested (`extract_memory`); this does not report deferred queue status. |
 | `ingested_episode_ids` | Recorded episode IDs. |
-| `episode_records` | `EpisodeRecordResult` values from recording. |
+| `episode_records` | `EpisodeRecordResult` values from recording, including inline `memory_results`/`memory_errors` or a deferred `memory_extraction_job_id`. |
+
+Extraction behavior with `TailwagMemoryClient`:
+
+| `extract_memory` | `enqueue_memory_extraction` | Behavior |
+| --- | --- | --- |
+| `True` | either value | Record the episode and extract memory inline. |
+| `False` | `True` | Require `TAILWAG_MEMORY_JOBS_QUEUE_URL`, record the episode, and enqueue a `memory_extract_episode` job. |
+| `False` | `False` | Record the episode without inline or deferred memory extraction. |
+
+An exception from Slack history/replies, episode recording, or state saving is
+propagated. The poller saves its updated cursor only after all selected threads
+have been processed. Per-person inline extraction errors returned normally in
+`EpisodeRecordResult.memory_errors` do not fail the polling pass.
 
 ### `build_episode_from_slack_thread(*, channel, messages, client, retention_class="standard", person_id_resolver=None)`
 

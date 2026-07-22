@@ -20,7 +20,7 @@ from tailwag_memory.models import (
     PersonMemoryConsolidationResult,
     PersonMemoryExtractionResult,
 )
-from tailwag_memory.slack_ingestion import SlackPollResult
+from tailwag_memory.slack_ingestion import SlackFilePollStateStore, SlackPollResult
 
 
 class CliTest(unittest.TestCase):
@@ -180,10 +180,10 @@ class CliTest(unittest.TestCase):
                 self.settings = settings_arg
 
         class FakePoller:
-            def __init__(self, client, episode_recorder, state_path, *, active_thread_hours: float) -> None:
+            def __init__(self, client, episode_recorder, state_store, *, active_thread_hours: float) -> None:
                 self.client = client
                 self.episode_recorder = episode_recorder
-                self.state_path = state_path
+                self.state_store = state_store
                 self.active_thread_hours = active_thread_hours
 
             def poll_once(
@@ -205,6 +205,7 @@ class CliTest(unittest.TestCase):
                         "reply_limit": reply_limit,
                         "extract_memory": extract_memory,
                         "uses_memory_client": isinstance(self.episode_recorder, FakeMemoryClient),
+                        "state_path": str(self.state_store.path),
                     }
                 )
                 return SlackPollResult(
@@ -260,6 +261,7 @@ class CliTest(unittest.TestCase):
                     "reply_limit": 200,
                     "extract_memory": True,
                     "uses_memory_client": True,
+                    "state_path": ".tailwag/slack-state.json",
                 }
             ],
         )
@@ -279,8 +281,8 @@ class CliTest(unittest.TestCase):
                 pass
 
         class FakePoller:
-            def __init__(self, client, episode_recorder, state_path, *, active_thread_hours: float) -> None:
-                pass
+            def __init__(self, client, episode_recorder, state_store, *, active_thread_hours: float) -> None:
+                self.state_store = state_store
 
             def poll_once(
                 self,
@@ -337,8 +339,8 @@ class CliTest(unittest.TestCase):
                 pass
 
         class FakePoller:
-            def __init__(self, client, episode_recorder, state_path, *, active_thread_hours: float) -> None:
-                pass
+            def __init__(self, client, episode_recorder, state_store, *, active_thread_hours: float) -> None:
+                self.state_store = state_store
 
             def poll_once(
                 self,
@@ -367,6 +369,59 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(client_calls, [{"token": "xoxb-test-token", "include_email": True}])
+
+    def test_slack_poll_state_file_is_wrapped_in_file_state_store(self) -> None:
+        settings = test_settings(embedding_dimension=64, slack_bot_token="xoxb-test-token")
+        runner = RecordingQueryRunner(settings=settings)
+        state_store_paths = []
+        state_store_is_file = []
+
+        class FakeMemoryClient:
+            def __init__(self, runner_arg, settings_arg) -> None:
+                pass
+
+        class FakePoller:
+            def __init__(self, client, episode_recorder, state_store, *, active_thread_hours: float) -> None:
+                self.state_store = state_store
+                state_store_paths.append(str(state_store.path))
+                state_store_is_file.append(isinstance(state_store, SlackFilePollStateStore))
+
+            def poll_once(
+                self,
+                channel: str,
+                *,
+                backfill_hours: float | None,
+                force_backfill: bool,
+                history_limit: int,
+                reply_limit: int,
+                extract_memory: bool,
+            ) -> SlackPollResult:
+                return SlackPollResult(channel=channel, checked_threads=0, ingested_threads=0, latest_history_ts=None)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = str(Path(tmp) / "custom-slack-state.json")
+            with patch("tailwag_memory.cli.load_settings", return_value=settings):
+                with patch("tailwag_memory.cli.Neo4jQueryRunner", return_value=runner):
+                    with patch("tailwag_memory.cli.SlackWebApiClient", return_value=object()):
+                        with patch("tailwag_memory.cli.TailwagMemoryClient", FakeMemoryClient):
+                            with patch("tailwag_memory.cli.SlackMemoryPoller", FakePoller):
+                                stdout = StringIO()
+                                with redirect_stdout(stdout):
+                                    exit_code = main(
+                                        [
+                                            "slack",
+                                            "poll",
+                                            "--channel",
+                                            "C123",
+                                            "--once",
+                                            "--state-file",
+                                            state_path,
+                                        ]
+                                    )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(state_store_paths, [state_path])
+        self.assertEqual(state_store_is_file, [True])
 
     def test_inspect_affect_missing_model_dirs_exits_before_db_runner(self) -> None:
         settings = test_settings(embedding_dimension=64)
@@ -687,7 +742,6 @@ class CliTest(unittest.TestCase):
                 *,
                 current_text: str | None = None,
                 memory_limit: int = 12,
-                recent_episode_limit: int = 5,
             ) -> str:
                 calls.append(
                     {
@@ -696,7 +750,6 @@ class CliTest(unittest.TestCase):
                         "semantic_scope": semantic_scope,
                         "current_text": current_text,
                         "memory_limit": memory_limit,
-                        "recent_episode_limit": recent_episode_limit,
                     }
                 )
                 return "[PERSON MEMORY]\nPreferences:\n- likes robot demos\n\nJamie recently asked about chargers."
@@ -731,7 +784,6 @@ class CliTest(unittest.TestCase):
                     "semantic_scope": None,
                     "current_text": "robot demo",
                     "memory_limit": 4,
-                    "recent_episode_limit": 5,
                 }
             ],
         )

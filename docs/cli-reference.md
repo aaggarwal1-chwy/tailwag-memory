@@ -45,7 +45,13 @@ Deleting a memory item also deletes memories reachable through outgoing
 
 ## Episode And Event Ingestion
 
-Create an episode from JSON without transcript memory extraction:
+Create an episode from JSON and defer transcript memory extraction to SQS. The
+process running this command requires the AWS extra and
+`TAILWAG_MEMORY_JOBS_QUEUE_URL`:
+
+```bash
+python3 -m pip install -e ".[aws]"
+```
 
 ```bash
 tailwag episode create --file examples/episode.json --skip-memory-extraction
@@ -57,7 +63,7 @@ Create an episode and run default transcript memory extraction:
 tailwag episode create --file examples/episode.json
 ```
 
-Create a later episode for an existing person by ID:
+Create another episode for an existing person by ID:
 
 ```bash
 tailwag episode create --file examples/existing-person-episode.json

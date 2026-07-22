@@ -1,11 +1,38 @@
 import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
-from tailwag_memory.config import load_settings, parse_positive_int_env
+from tailwag_memory.config import load_env_file, load_settings, parse_positive_int_env
 
 
 class ConfigTest(unittest.TestCase):
+    def test_load_env_file_normalizes_quotes_and_preserves_existing_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / "runtime.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "# ignored comment",
+                        "DOUBLE_QUOTED=\"double value\"",
+                        "SINGLE_QUOTED='single value'",
+                        "UNQUOTED= unquoted value ",
+                        "EXISTING=file value",
+                        "not-an-assignment",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"EXISTING": "process value"}, clear=True):
+                load_env_file(env_path)
+
+                self.assertEqual(os.environ["DOUBLE_QUOTED"], "double value")
+                self.assertEqual(os.environ["SINGLE_QUOTED"], "single value")
+                self.assertEqual(os.environ["UNQUOTED"], "unquoted value")
+                self.assertEqual(os.environ["EXISTING"], "process value")
+
     def test_parse_positive_int_env_uses_default_when_missing(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(parse_positive_int_env("TAILWAG_EMBEDDING_DIMENSION", 64), 64)

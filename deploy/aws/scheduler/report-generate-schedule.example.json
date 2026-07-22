@@ -1,0 +1,14 @@
+{
+  "Name": "aaggarwal1-tailwag-dev-daily-report",
+  "Description": "Send one daily Tailwag report generation job to SQS.",
+  "ScheduleExpression": "cron(0 10 * * ? *)",
+  "ScheduleExpressionTimezone": "UTC",
+  "FlexibleTimeWindow": {
+    "Mode": "OFF"
+  },
+  "Target": {
+    "Arn": "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-report-jobs",
+    "RoleArn": "arn:aws:iam::<account-id>:role/aaggarwal1-tailwag-dev-scheduler-role",
+    "Input": "{\"job_type\":\"report_generate\",\"job_id\":\"daily-report-<aws.scheduler.execution-id>\",\"reports\":[\"memory_items\",\"person_timeline\",\"followup_validity\"],\"output_prefix\":\"daily/\"}"
+  }
+}

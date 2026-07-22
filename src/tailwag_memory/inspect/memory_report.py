@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .html_utils import _html_escape, inspect_command_panel, render_inspect_report_page
 from .memory_overview_report import memory_overview_css, memory_overview_script, memory_overview_section
-from .reports import InspectReport
+from .models import InspectReport
 
 
 def memory_items_report_html(report: InspectReport) -> str:

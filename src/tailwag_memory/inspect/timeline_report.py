@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .html_utils import _html_escape, inspect_command_panel, render_inspect_report_page
-from .reports import InspectReport
+from .models import InspectReport
 
 
 def person_timeline_report_html(report: InspectReport) -> str:

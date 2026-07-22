@@ -1,0 +1,60 @@
+{
+  "family": "aaggarwal1-tailwag-api-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<account-id>:role/aaggarwal1-tailwag-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::<account-id>:role/aaggarwal1-tailwag-api-task-role",
+  "containerDefinitions": [
+    {
+      "name": "tailwag-memory-api",
+      "image": "<account-id>.dkr.ecr.us-east-2.amazonaws.com/aaggarwal1-tailwag-dev-api:<tag>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {"name": "TAILWAG_API_PORT", "value": "8000"},
+        {"name": "TAILWAG_MEMORY_JOBS_QUEUE_URL", "value": "https://sqs.us-east-2.amazonaws.com/<account-id>/aaggarwal1-tailwag-dev-memory-jobs"},
+        {"name": "TAILWAG_API_DOCS_ENABLED", "value": "false"},
+        {"name": "TAILWAG_EMBEDDING_MODEL", "value": "text-embedding-3-small"},
+        {"name": "TAILWAG_EMBEDDING_DIMENSION", "value": "64"},
+        {"name": "TAILWAG_FACE_EMBEDDING_DIMENSION", "value": "512"},
+        {"name": "TAILWAG_VOICE_EMBEDDING_DIMENSION", "value": "192"},
+        {"name": "TAILWAG_FACE_EMBEDDING_MODEL", "value": "facenet"},
+        {"name": "TAILWAG_VOICE_EMBEDDING_MODEL", "value": "speechbrain_ecapa"},
+        {"name": "TAILWAG_SYNTHESIS_MODEL", "value": "gpt-5.5"}
+      ],
+      "secrets": [
+        {"name": "NEO4J_URI", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/neo4j-uri"},
+        {"name": "NEO4J_USER", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/neo4j-user"},
+        {"name": "NEO4J_PASSWORD", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/neo4j-password"},
+        {"name": "OPENAI_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/openai-api-key"},
+        {"name": "TAILWAG_API_BEARER_TOKEN", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/api-bearer-token"}
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/aaggarwal1-tailwag-api",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

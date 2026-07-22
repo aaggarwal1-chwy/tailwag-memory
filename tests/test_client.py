@@ -279,11 +279,40 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 return episode.id
 
         with patch("tailwag_memory.client.EpisodeIngestionService", FakeIngestion):
-            result = TailwagMemoryClient(runner, _settings()).record_episode(_episode(), extract_memory=False)
+            result = TailwagMemoryClient(runner, _settings()).record_episode(
+                _episode(),
+                extract_memory=False,
+                enqueue_memory_extraction=False,
+            )
 
         self.assertEqual(calls, [("ingest", "episode_1")])
         self.assertEqual(result.memory_results, [])
         self.assertEqual(result.memory_errors, [])
+
+    def test_record_episode_queues_deferred_memory_extraction(self) -> None:
+        runner = RecordingQueryRunner()
+        calls = []
+
+        class FakeIngestion:
+            def __init__(self, runner_arg, embeddings) -> None:
+                pass
+
+            def ingest(self, episode: EpisodeInput) -> str:
+                calls.append(("ingest", episode.id))
+                return episode.id
+
+        with patch.dict("tailwag_memory.client.os.environ", {"TAILWAG_MEMORY_JOBS_QUEUE_URL": "https://sqs.example/memory"}):
+            with patch("tailwag_memory.client.EpisodeIngestionService", FakeIngestion):
+                with patch("tailwag_memory.client._enqueue_memory_extraction_job") as enqueue:
+                    result = TailwagMemoryClient(runner, _settings()).record_episode(
+                        _episode(),
+                        extract_memory=False,
+                    )
+
+        self.assertEqual(calls, [("ingest", "episode_1")])
+        enqueue.assert_called_once_with("https://sqs.example/memory", "episode_1")
+        self.assertEqual(result.memory_extraction_job_id, "memory-extract:episode_1")
+        self.assertEqual(result.memory_results, [])
 
     def test_extract_memory_for_episode_uses_stored_episode_path(self) -> None:
         runner = RecordingQueryRunner()
@@ -348,7 +377,6 @@ class TailwagMemoryClientTest(unittest.TestCase):
                     current_text="robot demo",
                     now=now,
                     memory_limit=4,
-                    recent_episode_limit=2,
                 )
 
         self.assertEqual(

@@ -17,18 +17,14 @@ from .models import (
     InspectFollowupValidityItem,
     InspectMemoryAddressedEpisode,
     InspectMemoryItem,
+    InspectReport,
     InspectRelatedMemoryItem,
     InspectSankeyLink,
     InspectTranscriptLine,
     PersonEpisodeAffectPoint,
     PersonEpisodeTranscriptPoint,
 )
-from .reports import (
-    InspectReport,
-    affect_report,
-    person_timeline_report,
-    report_json,
-)
+from .reports import affect_report, person_timeline_report, report_json
 from .timeline_report import person_timeline_report_html
 from .timeline import PersonTimelineRetrievalService
 from .transcripts import PersonEpisodeTranscriptService, recent_person_episode_rows

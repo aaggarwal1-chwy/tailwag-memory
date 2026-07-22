@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Public API Gateway edge for the private Tailwag memory API.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: tailwag-memory
+    Description: Name prefix for Tailwag resources.
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment suffix for Tailwag resources.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC containing the private Tailwag ALB.
+  VpcLinkSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnets used by the API Gateway VPC Link.
+  AlbListenerArn:
+    Type: String
+    Description: ARN of the private Tailwag ALB HTTP listener.
+  AlbSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group attached to the private Tailwag ALB.
+  IntegrationTimeoutInMillis:
+    Type: Number
+    Default: 10000
+    MinValue: 50
+    MaxValue: 30000
+    Description: Maximum time API Gateway waits for Tailwag.
+  ThrottlingRateLimit:
+    Type: Number
+    Default: 10
+    MinValue: 0
+    Description: Steady-state requests per second allowed by the default stage.
+  ThrottlingBurstLimit:
+    Type: Number
+    Default: 20
+    MinValue: 0
+    Description: Burst requests allowed by the default stage.
+  AccessLogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
+    Description: CloudWatch retention for API Gateway access logs.
+
+Resources:
+  VpcLinkSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "API Gateway VPC Link access to ${ProjectName}-${EnvironmentName}"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: HTTP to the private Tailwag ALB
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          DestinationSecurityGroupId: !Ref AlbSecurityGroupId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-api-gateway-vpc-link"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  AlbIngressFromVpcLink:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: HTTP from the Tailwag API Gateway VPC Link
+      GroupId: !Ref AlbSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !GetAtt VpcLinkSecurityGroup.GroupId
+
+  TailwagVpcLink:
+    Type: AWS::ApiGatewayV2::VpcLink
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentName}-vpc-link"
+      SecurityGroupIds:
+        - !GetAtt VpcLinkSecurityGroup.GroupId
+      SubnetIds: !Ref VpcLinkSubnetIds
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref EnvironmentName
+
+  TailwagHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentName}-http-api"
+      Description: HTTPS entry point for the private Tailwag memory API.
+      ProtocolType: HTTP
+      DisableExecuteApiEndpoint: false
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref EnvironmentName
+
+  TailwagPrivateIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    DependsOn: AlbIngressFromVpcLink
+    Properties:
+      ApiId: !Ref TailwagHttpApi
+      ConnectionId: !Ref TailwagVpcLink
+      ConnectionType: VPC_LINK
+      Description: Private HTTP proxy to the Tailwag ALB.
+      IntegrationMethod: ANY
+      IntegrationType: HTTP_PROXY
+      IntegrationUri: !Ref AlbListenerArn
+      PayloadFormatVersion: "1.0"
+      RequestParameters:
+        "overwrite:path": "$request.path"
+      TimeoutInMillis: !Ref IntegrationTimeoutInMillis
+
+  TailwagDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref TailwagHttpApi
+      AuthorizationType: NONE
+      RouteKey: "$default"
+      Target: !Join
+        - /
+        - - integrations
+          - !Ref TailwagPrivateIntegration
+
+  TailwagAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${ProjectName}-${EnvironmentName}"
+      RetentionInDays: !Ref AccessLogRetentionDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  TailwagDefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref TailwagHttpApi
+      StageName: "$default"
+      AutoDeploy: true
+      DefaultRouteSettings:
+        DetailedMetricsEnabled: true
+        ThrottlingBurstLimit: !Ref ThrottlingBurstLimit
+        ThrottlingRateLimit: !Ref ThrottlingRateLimit
+      AccessLogSettings:
+        DestinationArn: !GetAtt TailwagAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength","integrationLatency":"$context.integrationLatency"}
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref EnvironmentName
+
+Outputs:
+  PublicApiEndpoint:
+    Description: Public HTTPS base URL for Tailwag callers.
+    Value: !GetAtt TailwagHttpApi.ApiEndpoint
+  HttpApiId:
+    Description: API Gateway HTTP API identifier.
+    Value: !Ref TailwagHttpApi
+  VpcLinkId:
+    Description: API Gateway VPC Link identifier.
+    Value: !Ref TailwagVpcLink

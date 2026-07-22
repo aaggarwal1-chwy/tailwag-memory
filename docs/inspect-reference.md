@@ -8,7 +8,7 @@ For command syntax in the broader local workflow, see [CLI Reference](cli-refere
 
 ## Report Family
 
-The `tailwag inspect` command currently exposes four reports:
+The `tailwag inspect` command exposes four reports:
 
 | Command | Default HTML output | Purpose |
 | --- | --- | --- |
@@ -86,8 +86,6 @@ TAILWAG_AFFECT_FOLD2_MODEL=/path/to/fold2
 ```
 
 The affect report scores on demand. Each scatter point represents one person's text within one episode, with assistant and other-person transcript lines excluded before scoring. The plot displays valence and arousal on centered `-1..1` axes while keeping the model's native `0..1` averaged fold scores available in the detail panel. Points with same-person memory item evidence linked to the episode are highlighted and show the linked memory count.
-
-Future persisted affect scores, if added, should live on person-to-episode or person-to-memory relationships rather than on shared episode nodes.
 
 ## Boundaries
 

@@ -99,7 +99,6 @@ class PersonContextRequest(StrictRequest):
     current_text: str | None = None
     now: datetime | None = None
     memory_limit: int = 12
-    recent_episode_limit: int = 5
 
 
 class PersonContextResponse(StrictRequest):
@@ -115,6 +114,7 @@ class EpisodeRecordRequest(StrictRequest):
 
     episode: "EpisodePayload"
     extract_memory: bool = True
+    enqueue_memory_extraction: bool = True
 
 
 class SemanticSearchRequest(StrictRequest):

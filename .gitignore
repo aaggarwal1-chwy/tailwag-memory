@@ -4,6 +4,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+build/
+dist/
 .env
+deploy/aws/deployment.env
+task-definition.json
 .tailwag/
-*.codex

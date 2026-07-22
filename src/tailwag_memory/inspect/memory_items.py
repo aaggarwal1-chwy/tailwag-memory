@@ -7,8 +7,7 @@ from typing import Any
 
 from ..db import QueryRunner
 from ..models import utc_now_iso
-from .models import InspectMemoryAddressedEpisode, InspectMemoryItem, InspectSankeyLink
-from .reports import InspectReport
+from .models import InspectMemoryAddressedEpisode, InspectMemoryItem, InspectReport, InspectSankeyLink
 
 _TERMINAL_ORDER = ["still_active", "addressed", "superseded", "expired_active", "invalid", "other"]
 _TERMINAL_LABELS = {

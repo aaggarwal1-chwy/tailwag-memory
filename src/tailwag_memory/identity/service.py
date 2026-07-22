@@ -1,70 +1,30 @@
+"""Directory-backed identity services."""
+
 from __future__ import annotations
 
 from dataclasses import asdict
-from difflib import SequenceMatcher
-import os
-from pathlib import Path
-from typing import Any, Callable
-
-try:  # pragma: no cover - exercised when optional dependency is available.
-    from rapidfuzz import fuzz as rapidfuzz_fuzz
-    from rapidfuzz.distance import JaroWinkler as rapidfuzz_jaro_winkler
-except Exception:  # pragma: no cover - fallback keeps tests/dev envs lightweight.
-    rapidfuzz_fuzz = None
-    rapidfuzz_jaro_winkler = None
+from typing import Any
 
 from ..db import QueryRunner
 from ..directory_reconciliation import person_directory_reconciliation_cypher
 from ..models import (
     DirectoryPersonRecord,
     DirectorySyncResult,
-    IdentityCandidate,
     IdentityResolutionResult,
     PersonProfile,
     VerifiedProfile,
     utc_now_iso,
 )
-
-
-EMPLOYEE_COLUMNS = (
-    "EMPLOYEE_NAME",
-    "BUSINESS_TITLE",
-    "TIME_IN_JOB_PROFILE",
-    "EMPLOYEE_USERNAME",
-    "JOB_FAMILY",
-    "JOB_FAMILY_GROUP",
-    "JOB_LEVEL",
-    "C_LEVEL",
-    "MANAGER_NAME",
-    "COST_CENTER",
-    "SENIOR_LEADERSHIP_TEAM",
-    "BUSINESS_FUNCTION",
+from . import matching as _matching
+from .snowflake import (
+    connect_snowflake_from_env,
+    employee_email_from_username,
+    load_directory_records_from_snowflake,
+    load_env_file,
+    require_env,
 )
-EMPLOYEE_DIRECTORY_SQL = """
-    SELECT
-        cemp."EMPLOYEE_NAME",
-        cemp."BUSINESS_TITLE",
-        cemp."TIME_IN_JOB_PROFILE",
-        cemp."EMPLOYEE_USERNAME",
-        cemp."JOB_FAMILY",
-        cemp."JOB_FAMILY_GROUP",
-        cemp."JOB_LEVEL",
-        cemp."C_LEVEL",
-        emp."EMPLOYEE_MANAGER1_NAME" AS "MANAGER_NAME",
-        cemp."COST_CENTER",
-        cemp."SENIOR_LEADERSHIP_TEAM",
-        cemp."BUSINESS_FUNCTION"
-    FROM "EDLDB"."CHEWYBI"."CHEWYDATA_CURRENT_EMPLOYEES" cemp
-    LEFT JOIN "EDLDB"."CHEWYBI"."EMPLOYEES" emp
-        ON CAST(emp."EMPLOYEE_ID" AS VARCHAR) = CAST(cemp."EMPLOYEE_ID" AS VARCHAR)
-    WHERE cemp."LOCATION_CODE" = %s
-"""
-MAX_CANDIDATES = 3
-MIN_PLAUSIBLE_SCORE = 74.0
-CLARIFY_SCORE = 84.0
-AUTO_CONFIRM_SCORE = 98.0
-CLEAR_GAP_SCORE = 5.0
-MULTIPLE_MATCH_GAP = 3.0
+
+
 DIRECTORY_RECORD_FIELDS = (
     "site_code",
     "official_name",
@@ -81,88 +41,6 @@ DIRECTORY_RECORD_FIELDS = (
     "senior_leadership_team",
     "business_function",
 )
-
-
-def load_env_file(path: Path = Path(".snowflake_env")) -> None:
-    """Populate unset Snowflake environment variables from a simple env file."""
-    candidates = [
-        Path.cwd() / ".snowflake_env",
-        path,
-        Path(".env"),
-    ]
-    for candidate in candidates:
-        if not candidate.is_file():
-            continue
-        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip())
-        return
-
-
-def require_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-
-def connect_snowflake_from_env() -> Any:
-    import snowflake.connector
-
-    return snowflake.connector.connect(
-        account=require_env("SNOWFLAKE_ACCOUNT"),
-        user=require_env("SNOWFLAKE_USER"),
-        password=os.environ.get("SNOWFLAKE_PASSWORD") or None,
-        authenticator=os.environ.get("SNOWFLAKE_AUTHENTICATOR") or None,
-        role=os.environ.get("SNOWFLAKE_ROLE") or None,
-        warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE") or None,
-        database=require_env("SNOWFLAKE_DATABASE"),
-        schema=os.environ.get("SNOWFLAKE_SCHEMA") or None,
-    )
-
-
-def employee_email_from_username(username: str, email_domain: str) -> str:
-    cleaned_username = str(username or "").strip().lower()
-    if not cleaned_username:
-        return ""
-    if "@" in cleaned_username:
-        return cleaned_username
-    cleaned_domain = str(email_domain or "").strip().lower().lstrip("@")
-    return f"{cleaned_username}@{cleaned_domain}" if cleaned_domain else ""
-
-
-def load_directory_records_from_snowflake(
-    site_code: str,
-    *,
-    email_domain: str = "",
-    env_loader: Callable[[], None] = load_env_file,
-    connector_factory: Callable[[], Any] = connect_snowflake_from_env,
-) -> list[DirectoryPersonRecord]:
-    env_loader()
-    connection = connector_factory()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(EMPLOYEE_DIRECTORY_SQL, (str(site_code or "").strip(),))
-            rows = cursor.fetchall()
-            columns = [
-                str(description[0] if isinstance(description, (tuple, list)) else getattr(description, "name", "")).upper()
-                for description in (getattr(cursor, "description", None) or ())
-            ]
-        return [
-            _record_from_row(
-                row,
-                site_code=str(site_code or "").strip(),
-                email_domain=email_domain,
-                columns=columns,
-            )
-            for row in rows
-        ]
-    finally:
-        connection.close()
-
 
 class DirectoryIdentityService:
     """Owns directory sync, lookup, and person profile projections."""
@@ -251,7 +129,7 @@ class DirectoryIdentityService:
         shared_name: str = "",
         site_code: str = "",
     ) -> IdentityResolutionResult:
-        query_name, first_name, last_name = _build_query_identity(
+        query_name, first_name, last_name = _matching.build_query_identity(
             shared_first_name=shared_first_name,
             shared_last_name=shared_last_name,
             shared_name=shared_name,
@@ -269,7 +147,7 @@ class DirectoryIdentityService:
                 status="directory_unavailable",
                 message="The employee directory is unavailable or empty.",
             )
-        candidates = _rank_candidates(query_name, records)
+        candidates = _matching.rank_candidates(query_name, records)
         if not candidates:
             return IdentityResolutionResult(
                 success=False,
@@ -279,21 +157,24 @@ class DirectoryIdentityService:
             )
         top = candidates[0]
         runner_up = candidates[1].score if len(candidates) > 1 else 0.0
-        if top.score < MIN_PLAUSIBLE_SCORE:
+        if top.score < _matching.MIN_PLAUSIBLE_SCORE:
             return IdentityResolutionResult(
                 success=False,
                 status="no_match",
                 message="No plausible employee match was found.",
                 candidates=candidates,
             )
-        if len(candidates) > 1 and top.score - runner_up <= MULTIPLE_MATCH_GAP:
+        if len(candidates) > 1 and top.score - runner_up <= _matching.MULTIPLE_MATCH_GAP:
             return IdentityResolutionResult(
                 success=False,
                 status="multiple_matches",
                 message="Multiple plausible employees matched that name.",
                 candidates=candidates,
             )
-        if top.score < CLARIFY_SCORE or (top.score < AUTO_CONFIRM_SCORE and top.score - runner_up < CLEAR_GAP_SCORE):
+        if top.score < _matching.CLARIFY_SCORE or (
+            top.score < _matching.AUTO_CONFIRM_SCORE
+            and top.score - runner_up < _matching.CLEAR_GAP_SCORE
+        ):
             return IdentityResolutionResult(
                 success=False,
                 status="needs_clarification",
@@ -316,7 +197,7 @@ class DirectoryIdentityService:
         site_code: str = "",
     ) -> VerifiedProfile | None:
         rendered_username = str(username or "").strip().lower()
-        rendered_name = _normalize_name(official_name)
+        rendered_name = _matching.normalize_name(official_name)
         if not rendered_username or not rendered_name:
             return None
         rows = self.runner.run(
@@ -331,12 +212,10 @@ class DirectoryIdentityService:
         if len(rows) != 1:
             return None
         record = _row_to_record(rows[0])
-        if _normalize_name(record.official_name) != rendered_name:
+        if _matching.normalize_name(record.official_name) != rendered_name:
             return None
-        person_id = f"person_{rendered_username}"
-        metadata = asdict(record)
         return VerifiedProfile(
-            person_id=person_id,
+            person_id=f"person_{rendered_username}",
             official_name=record.official_name,
             username=record.username,
             employee_email=record.employee_email,
@@ -344,7 +223,7 @@ class DirectoryIdentityService:
             tenure=record.tenure,
             manager_name=record.manager_name,
             directory_profile_lines=_directory_lines(record),
-            metadata=metadata,
+            metadata=asdict(record),
         )
 
     def person_profile(self, person_id: str) -> PersonProfile | None:
@@ -442,7 +321,12 @@ class DirectoryIdentityService:
         )
         profile = self.person_profile(rendered)
         if profile is None:
-            return PersonProfile(person_id=rendered, display_name=rendered, last_seen=now, interaction_count=1)
+            return PersonProfile(
+                person_id=rendered,
+                display_name=rendered,
+                last_seen=now,
+                interaction_count=1,
+            )
         return profile
 
     def _directory_records(self, site_code: str) -> list[DirectoryPersonRecord]:
@@ -457,42 +341,10 @@ class DirectoryIdentityService:
         return [_row_to_record(row) for row in rows]
 
 
-def _record_from_row(
-    row: Any,
-    *,
-    site_code: str,
-    email_domain: str,
-    columns: list[str] | None = None,
+def _normalize_record(
+    record: DirectoryPersonRecord | dict[str, Any], site_code: str
 ) -> DirectoryPersonRecord:
-    values_by_column = _row_values_by_column(row, columns or list(EMPLOYEE_COLUMNS))
-
-    def value(column: str) -> str:
-        return str(values_by_column.get(column, "") or "").strip()
-
-    username = value("EMPLOYEE_USERNAME").lower()
-    return DirectoryPersonRecord(
-        official_name=value("EMPLOYEE_NAME"),
-        business_title=value("BUSINESS_TITLE"),
-        tenure=value("TIME_IN_JOB_PROFILE"),
-        username=username,
-        job_family=value("JOB_FAMILY"),
-        job_family_group=value("JOB_FAMILY_GROUP"),
-        job_level=value("JOB_LEVEL"),
-        c_level=value("C_LEVEL"),
-        manager_name=value("MANAGER_NAME"),
-        cost_center=value("COST_CENTER"),
-        senior_leadership_team=value("SENIOR_LEADERSHIP_TEAM"),
-        business_function=value("BUSINESS_FUNCTION"),
-        employee_email=employee_email_from_username(username, email_domain),
-        site_code=site_code,
-    )
-
-
-def _normalize_record(record: DirectoryPersonRecord | dict[str, Any], site_code: str) -> DirectoryPersonRecord:
-    if isinstance(record, DirectoryPersonRecord):
-        raw = asdict(record)
-    else:
-        raw = dict(record)
+    raw = asdict(record) if isinstance(record, DirectoryPersonRecord) else dict(record)
     username = str(raw.get("username") or raw.get("employee_username") or "").strip().lower()
     return DirectoryPersonRecord(
         official_name=str(raw.get("official_name") or raw.get("employee_name") or "").strip(),
@@ -512,24 +364,13 @@ def _normalize_record(record: DirectoryPersonRecord | dict[str, Any], site_code:
     )
 
 
-def _row_values_by_column(row: Any, columns: list[str]) -> dict[str, Any]:
-    if isinstance(row, dict):
-        return {str(key).upper(): value for key, value in row.items()}
-    values = tuple(row)
-    return {
-        str(column or "").upper(): values[index]
-        for index, column in enumerate(columns)
-        if index < len(values)
-    }
-
-
 def _record_payload(record: DirectoryPersonRecord) -> dict[str, Any]:
     payload = asdict(record)
     payload["display_name"] = record.official_name
     payload["name"] = record.official_name
     payload["source"] = "snowflake"
-    payload["normalized_name"] = _normalize_name(record.official_name)
-    payload["token_sorted_name"] = _token_sort_key(record.official_name)
+    payload["normalized_name"] = _matching.normalize_name(record.official_name)
+    payload["token_sorted_name"] = _matching.token_sort_key(record.official_name)
     return payload
 
 
@@ -556,72 +397,6 @@ def _directory_record_projection(alias: str) -> str:
     return ",\n                   ".join(
         f"{alias}.{field} AS {field}" for field in DIRECTORY_RECORD_FIELDS
     )
-
-
-def _rank_candidates(query_name: str, records: list[DirectoryPersonRecord]) -> list[IdentityCandidate]:
-    ranked: list[IdentityCandidate] = []
-    normalized_query = _normalize_name(query_name)
-    token_query = _token_sort_key(query_name)
-    for record in records:
-        name_score = _score_ratio(normalized_query, _normalize_name(record.official_name))
-        token_score = _score_ratio(token_query, _token_sort_key(record.official_name))
-        score = max(name_score, token_score)
-        if score < MIN_PLAUSIBLE_SCORE:
-            continue
-        ranked.append(
-            IdentityCandidate(
-                official_name=record.official_name,
-                username=record.username,
-                employee_email=record.employee_email,
-                business_title=record.business_title,
-                tenure=record.tenure,
-                manager_name=record.manager_name,
-                score=score,
-            )
-        )
-    ranked.sort(key=lambda item: (-item.score, item.official_name.casefold(), item.username))
-    return ranked[:MAX_CANDIDATES]
-
-
-def _build_query_identity(*, shared_first_name: str, shared_last_name: str, shared_name: str) -> tuple[str, str, str]:
-    first_name = _normalize_name(shared_first_name)
-    last_name = _normalize_name(shared_last_name)
-    full_name = _normalize_name(shared_name)
-    if not first_name and not last_name and full_name:
-        parts = full_name.split()
-        first_name = parts[0] if parts else ""
-        last_name = parts[-1] if len(parts) > 1 else ""
-    elif full_name and (not first_name or not last_name):
-        parts = full_name.split()
-        first_name = first_name or (parts[0] if parts else "")
-        last_name = last_name or (parts[-1] if len(parts) > 1 else "")
-    if not full_name:
-        full_name = " ".join(part for part in (first_name, last_name) if part)
-    return full_name, first_name, last_name
-
-
-def _normalize_name(value: str) -> str:
-    normalized = "".join(character.lower() if character.isalnum() else " " for character in str(value or ""))
-    return " ".join(normalized.split())
-
-
-def _token_sort_key(value: str) -> str:
-    normalized = _normalize_name(value)
-    return " ".join(sorted(normalized.split())) if normalized else ""
-
-
-def _score_ratio(left: str, right: str) -> float:
-    if not left or not right:
-        return 0.0
-    if rapidfuzz_fuzz is not None and rapidfuzz_jaro_winkler is not None:
-        return float(
-            max(
-                rapidfuzz_fuzz.WRatio(left, right),
-                rapidfuzz_fuzz.ratio(left, right),
-                100.0 * rapidfuzz_jaro_winkler.normalized_similarity(left, right),
-            )
-        )
-    return 100.0 * SequenceMatcher(a=left, b=right).ratio()
 
 
 def _directory_lines(record: DirectoryPersonRecord | None) -> tuple[str, ...]:

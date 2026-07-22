@@ -22,9 +22,10 @@ Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS
 | CLI Mockup Agent | Developer-facing command surface | CLI commands, command docs |
 | Source Adapter Agent | External source adapters that convert third-party activity into memory inputs | adapter services, adapter tests, source-specific docs and CLI wiring |
 | Integration Contract Agent | Package-consumer boundaries and compatibility | integration guide updates, API compatibility checks, example payload validation |
-| Argos Migration Agent | Tailwag compatibility for the post-migration argos-agent memory provider | Argos-facing API contracts, compatibility notes, compatibility tests, handoff plans |
+| Argos Migration Agent | Tailwag compatibility for the `argos-agent` memory provider | Argos-facing API contracts, compatibility notes, compatibility tests, handoff plans |
+| AWS Deployment Agent | AWS deployment resources, worker packaging, cloud infrastructure templates, and authorized real-account operations | CloudFormation/SAM templates, IAM examples, packaging helpers, deployed resources, verification summaries, AWS deployment docs |
 | Privacy/Biometric Review Agent | Consent, biometric vectors, retention language, and raw media boundaries | privacy review notes, consent/biometric docs, guardrail tests |
-| Scope Guard Agent | Scope boundary checks and deferred concept protection | scope review notes, deferred-concept checks, scope documentation updates |
+| Scope Guard Agent | Scope boundary checks and excluded-runtime protection | scope review notes, excluded-concept checks, scope documentation updates |
 | Release Quality Gate Agent | Final pre-merge or pre-release verification | quality checklist, verification summary, release readiness notes |
 | Test Agent | Test coverage and verification workflow | unittest suite, fixtures, test helpers |
 | Code Refactor Agent | Code structure, module boundaries, duplication control | refactor PRs/patches, module splits, cleanup notes |
@@ -45,11 +46,12 @@ Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS
 | Need to ingest Slack or another external source into `EpisodeInput` or `EventInput` | Source Adapter Agent | Ingestion Agent, CLI Mockup Agent, Privacy/Biometric Review Agent, Test Agent | Adapter and mapping behavior only; core writes stay in ingestion services | Handoff to Ingestion Agent for write behavior |
 | Public dataclasses, service methods, env vars, package metadata, examples, or integration docs change | Integration Contract Agent | Documentation Agent, Test Agent, Release Quality Gate Agent | Package-consumer boundaries only; no internal refactor unless needed to preserve compatibility | Handoff to owning implementation agent for behavior gaps |
 | Need to preserve or validate `argos-agent` Tailwag memory provider compatibility, including Argos-facing Tailwag APIs | Argos Migration Agent | Integration Contract Agent, Memory Item Agent, Source Adapter Agent, Documentation Agent, Test Agent, Release Quality Gate Agent | Tailwag compatibility only; no unrelated Argos runtime, robot, face, speaker, navigation, or display internals | Handoff to Memory Item Agent for Tailwag memory behavior and Source Adapter Agent for Slack ingestion behavior |
+| Need AWS deployment templates, IAM examples, worker packaging, queue/state/report cloud resources, AWS deployment docs, or authorized provisioning and operation in a real AWS account | AWS Deployment Agent | Project Scaffold Agent, Source Adapter Agent, Documentation Agent, Release Quality Gate Agent | Confirm identity, region, prefix, and authorization before account mutations; protect local and remote secrets; do not change package API contracts, CLI defaults, or graph behavior | Handoff to Source Adapter Agent for polling behavior gaps and Project Scaffold Agent for package metadata changes |
 | Consent, biometric reference embeddings, retention, recognition source, Slack identity, or raw media language changes | Privacy/Biometric Review Agent | Ingestion Agent, Retrieval Agent, Documentation Agent, Scope Guard Agent | Review and guardrails only; no upstream recognition implementation | Handoff to owning implementation agent for behavior fixes |
-| A change risks adding deferred concepts, persistent graph confidence fields, `org_id`, secondary persistence, or external vector databases | Scope Guard Agent | Neo4j Schema Agent, Ingestion Agent, Memory Item Agent, Documentation Agent, Test Agent | Scope review and guardrails only unless scope is explicitly updated; approved `MemoryItem` work is limited to durable transcript-derived memory, not a broad ontology | Handoff to Documentation Agent when scope changes |
+| A change risks adding excluded runtime concepts, persistent graph confidence fields, `org_id`, secondary persistence, or external vector databases | Scope Guard Agent | Neo4j Schema Agent, Ingestion Agent, Memory Item Agent, Documentation Agent, Test Agent | Scope review and guardrails only unless scope is explicitly updated; approved `MemoryItem` work is limited to durable transcript-derived memory, not a broad ontology | Handoff to Documentation Agent when scope changes |
 | Broad work is ready for final handoff, merge, package-facing release, or tag | Release Quality Gate Agent | Test Agent, Documentation Agent, Integration Contract Agent | Final verification only; do not implement feature behavior | Handoff back to owning agent if verification fails |
 | Tests are missing, failing, flaky, or not covering changed behavior | Test Agent | Any implementation agent related to the failing area | Tests and fixtures only unless fixing a small test-discovered bug | Handoff to Code Refactor Agent if failures reveal design issues |
-| A file grows too large, a touched file passes roughly 500 lines, a feature adds roughly 250+ lines to one file, generated/static HTML or report rendering accumulates in a service module, Cypher is duplicated, logic crosses module boundaries, or future additions look hard | Code Refactor Agent | Test Agent, Documentation Agent | Structural cleanup only; no new product behavior unless needed to preserve current behavior | Handoff back to owning implementation agent |
+| A file grows too large, a touched file passes roughly 500 lines, a feature adds roughly 250+ lines to one file, generated/static HTML or report rendering accumulates in a service module, Cypher is duplicated, logic crosses module boundaries, or additions look hard | Code Refactor Agent | Test Agent, Documentation Agent | Structural cleanup only; no new product behavior unless needed to preserve current behavior | Handoff back to owning implementation agent |
 | README, architecture docs, command examples, or scope notes are stale | Documentation Agent | Any owning implementation agent | Docs only; do not modify behavior | Handoff to Test Agent if docs expose missing verification |
 
 ## Subagent Definitions
@@ -95,7 +97,7 @@ Outputs:
 
 Non-goals:
 
-- adding deferred labels
+- adding excluded labels
 - adding confidence fields
 - adding `org_id`
 
@@ -177,7 +179,7 @@ Non-goals:
 - owning all schema work when a focused Neo4j schema change is required
 - owning embedding provider internals
 - owning source-specific polling such as Slack API access
-- owning Argos repo migration code
+- owning Argos repository implementation
 - implementing a broad ontology, triple store, or open-ended semantic fact graph
 
 ### Retrieval Agent
@@ -301,19 +303,19 @@ Non-goals:
 
 ### Argos Migration Agent
 
-Owns Tailwag compatibility for the post-migration `argos-agent` memory provider.
+Owns Tailwag compatibility for the `argos-agent` memory provider.
 
 Inputs:
 
 - current Argos memory, identity, Slack, and prompt-context behavior
 - Tailwag package APIs and runtime configuration
 - required Argos prompt-context shape
-- post-migration constraints and explicitly stated compatibility expectations
+- current constraints and explicitly stated compatibility expectations
 
 Outputs:
 
 - Tailwag integration contracts for Argos
-- post-migration compatibility notes for `argos_src/memory_provider`
+- current compatibility notes for `argos_src/memory_provider`
 - compatibility notes for live-chat transcripts, Slack-derived memory, and person context retrieval
 - tests or manual checks that compare Tailwag behavior with Argos expectations
 
@@ -348,12 +350,12 @@ Non-goals:
 
 ### Scope Guard Agent
 
-Owns scope boundary checks and deferred concept protection.
+Owns scope boundary checks and excluded-runtime protection.
 
 Inputs:
 
 - proposed schema, model, ingestion, retrieval, or adapter changes
-- deferred concept list
+- excluded runtime concept list
 - current scope
 
 Outputs:
@@ -437,7 +439,7 @@ Outputs:
 Non-goals:
 
 - changing project scope
-- adding deferred domain concepts
+- adding excluded domain concepts
 - changing behavior without tests
 
 ### Documentation Agent
@@ -476,26 +478,12 @@ Non-goals:
 - If a change touches package-consumer usage, trigger the Integration Contract Agent.
 - If a change touches Argos-facing package usage, trigger the Argos Migration Agent and Integration Contract Agent.
 - If a change touches consent, biometrics, retention, recognition provenance, or raw media boundaries, trigger the Privacy/Biometric Review Agent.
-- If a change risks deferred concepts or out-of-scope storage, trigger the Scope Guard Agent.
+- If a change risks excluded runtime concepts or out-of-scope storage, trigger the Scope Guard Agent.
 - Before broad handoff, merge, package-facing release, or tag, trigger the Release Quality Gate Agent.
 
-## Deferred Concept Parking Lot
+## Excluded Runtime Concepts
 
-These concepts are intentionally not implemented now but should remain easy to add later:
-
-- `Robot`
-- `ObjectConcept`
-- `Activity`
-- `Utterance`
-- `SemanticFact`
-
-Durable transcript-derived `MemoryItem` work is the approved narrow path for person memory extraction. It should not be treated as permission to implement a broad `SemanticFact` ontology or triple store.
-
-When one of these becomes active, create or update:
-
-- schema section
-- model definitions
-- ingestion ownership
-- retrieval ownership
-- tests
-- documentation
+`Robot`, `ObjectConcept`, `Activity`, `Utterance`, and `SemanticFact` are not
+part of the Tailwag runtime. Durable transcript-derived `MemoryItem` records are
+the only person-memory extraction model and do not form an ontology or triple
+store.

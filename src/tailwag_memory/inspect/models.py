@@ -5,6 +5,18 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class InspectReport:
+    """Common report envelope for Tailwag inspect utilities."""
+
+    title: str
+    generated_at: str
+    filters: dict[str, object] = field(default_factory=dict)
+    records: list[dict[str, object]] = field(default_factory=list)
+    metadata: dict[str, object] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class InspectSankeyLink:
     """One weighted flow link in a read-only Sankey inspection report."""
 

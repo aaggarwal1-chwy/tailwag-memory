@@ -523,3 +523,4 @@ class EpisodeRecordResult:
     episode_id: str
     memory_results: list[PersonMemoryExtractionResult] = field(default_factory=list)
     memory_errors: list[dict[str, str]] = field(default_factory=list)
+    memory_extraction_job_id: str | None = None

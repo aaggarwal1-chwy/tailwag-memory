@@ -1,10 +1,137 @@
-from tests.helpers import RecordingQueryRunner
-from tailwag_memory.biometrics import BiometricReferenceService
-import unittest
 import json
+import unittest
+
+from tailwag_memory.biometrics import BiometricReferenceService
+from tests.helpers import RecordingQueryRunner
 
 
 class BiometricReferenceServiceTest(unittest.TestCase):
+    def test_enrollment_validation_errors_and_consent_rejection_are_stable(self) -> None:
+        runner = RecordingQueryRunner()
+        service = BiometricReferenceService(runner)
+
+        with self.assertRaisesRegex(ValueError, "^person_id is required$"):
+            service.enroll_face_reference(person_id="  ", embedding=[1.0])
+        with self.assertRaisesRegex(ValueError, "^embedding is required$"):
+            service.enroll_face_reference(person_id="person_jamie", embedding=[])
+        rejected = service.enroll_face_reference(
+            person_id=" person_jamie ",
+            embedding=[1.0],
+            consent_status="denied",
+        )
+
+        self.assertFalse(rejected.saved)
+        self.assertEqual(rejected.status, "rejected")
+        self.assertEqual(rejected.reason, "consent_required")
+        self.assertEqual(rejected.person_id, "person_jamie")
+        self.assertEqual(rejected.reference_id, "")
+        self.assertEqual(runner.queries, [])
+
+    def test_observation_validation_errors_are_stable(self) -> None:
+        service = BiometricReferenceService(RecordingQueryRunner())
+
+        with self.assertRaisesRegex(ValueError, "^person_id is required$"):
+            service.observe_face_embedding(
+                person_id="",
+                embedding=[1.0],
+                evidence={},
+            )
+        with self.assertRaisesRegex(ValueError, "^embedding is required$"):
+            service.observe_voice_embedding(
+                person_id="person_jamie",
+                embedding=[0.0, 0.0],
+                evidence={},
+            )
+
+    def test_search_without_embedding_returns_before_query(self) -> None:
+        runner = RecordingQueryRunner()
+
+        result = BiometricReferenceService(runner).search_face(embedding=[])
+
+        self.assertEqual(result.modality, "face")
+        self.assertFalse(result.recognized)
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.reason, "no_embedding")
+        self.assertEqual(result.candidates, [])
+        self.assertEqual(runner.queries, [])
+
+    def test_has_voice_reference_handles_blank_and_active_reference(self) -> None:
+        runner = RecordingQueryRunner()
+        service = BiometricReferenceService(runner)
+
+        self.assertFalse(service.has_voice_reference("  "))
+        self.assertEqual(runner.queries, [])
+
+        runner = RecordingQueryRunner(results=[[{"reference_id": "voice:1"}]])
+
+        exists = BiometricReferenceService(runner).has_voice_reference(" person_jamie ")
+
+        self.assertTrue(exists)
+        self.assertIn("HAS_VOICE_REFERENCE", runner.queries[0].query)
+        self.assertIn("coalesce(r.status, 'active') = 'active'", runner.queries[0].query)
+        self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie"})
+
+    def test_observation_missing_reference_result_is_stable(self) -> None:
+        runner = RecordingQueryRunner(results=[[]])
+        service = BiometricReferenceService(runner)
+
+        result = service.observe_face_embedding(
+            person_id="person_jamie",
+            embedding=[1.0, 0.0],
+            evidence={
+                "owner_id": "person_jamie",
+                "owner_source": "audio_face_agree",
+                "primary_face_person_id": "person_jamie",
+                "audio_speaker_id": "person_jamie",
+                "face_margin": 0.3,
+                "voice_margin": 0.3,
+                "unknown_count": 0,
+            },
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.reason, "missing_reference")
+        self.assertEqual(result.person_id, "person_jamie")
+        self.assertEqual(result.modality, "face")
+        self.assertEqual(len(runner.queries), 1)
+
+    def test_observation_dimension_mismatch_result_is_stable(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "reference_id": "voice:person_jamie:1",
+                        "embedding": [1.0, 0.0, 0.0],
+                        "sample_count": "2",
+                        "target_sample_count": "5",
+                    }
+                ]
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.observe_voice_embedding(
+            person_id="person_jamie",
+            embedding=[1.0, 0.0],
+            evidence={
+                "owner_id": "person_jamie",
+                "owner_source": "audio_face_agree",
+                "primary_face_person_id": "person_jamie",
+                "audio_speaker_id": "person_jamie",
+                "face_margin": 0.3,
+                "voice_margin": 0.3,
+                "unknown_count": 0,
+            },
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.reason, "dimension_mismatch")
+        self.assertEqual(result.reference_id, "voice:person_jamie:1")
+        self.assertEqual(result.sample_count, 2)
+        self.assertEqual(result.target_sample_count, 5)
+        self.assertEqual(len(runner.queries), 1)
+
     def test_enroll_face_reference_writes_reference_node(self) -> None:
         runner = RecordingQueryRunner()
         service = BiometricReferenceService(runner, face_embedding_model="facenet-vggface2")

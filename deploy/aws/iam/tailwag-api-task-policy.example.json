@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SendDeferredMemoryExtraction",
+      "Effect": "Allow",
+      "Action": "sqs:SendMessage",
+      "Resource": "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-memory-jobs"
+    }
+  ]
+}

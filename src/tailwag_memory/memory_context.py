@@ -45,7 +45,7 @@ def format_person_memory_markdown(
     now: datetime | None = None,
     limit: int = 12,
 ) -> str:
-    """Format durable memory items as markdown context."""
+    """Format durable memory items as prompt-ready markdown."""
     sections = [
         ("Boundaries", _section_lines(items, "boundary", now=now, limit=limit)),
         ("Preferences", _section_lines(items, "preference", now=now, limit=limit)),

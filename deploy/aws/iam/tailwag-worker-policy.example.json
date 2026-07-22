@@ -1,0 +1,51 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ProcessTailwagQueues",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:SendMessage"
+      ],
+      "Resource": [
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-poll-jobs",
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-memory-jobs",
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-report-jobs"
+      ]
+    },
+    {
+      "Sid": "UseTailwagWorkerTables",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-2:<account-id>:table/aaggarwal1-tailwag-dev-slack-poll-state",
+        "arn:aws:dynamodb:us-east-2:<account-id>:table/aaggarwal1-tailwag-dev-job-idempotency"
+      ]
+    },
+    {
+      "Sid": "WriteTailwagReports",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::aaggarwal1-tailwag-reports-<account-id>-us-east-2",
+        "arn:aws:s3:::aaggarwal1-tailwag-reports-<account-id>-us-east-2/*"
+      ]
+    }
+  ]
+}
