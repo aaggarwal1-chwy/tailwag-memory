@@ -67,6 +67,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 python3 -m json.tool deploy/ecs-task-definition.example.json >/dev/null
 python3 -m json.tool deploy/aws/iam/tailwag-api-task-policy.example.json >/dev/null
+python3 -m json.tool deploy/aws/iam/tailwag-api-execution-role-policy.example.json >/dev/null
 python3 -m json.tool deploy/aws/iam/tailwag-scheduler-policy.example.json >/dev/null
 python3 -m json.tool deploy/aws/iam/tailwag-worker-policy.example.json >/dev/null
 python3 -m json.tool deploy/aws/scheduler/slack-poll-schedule.example.json >/dev/null

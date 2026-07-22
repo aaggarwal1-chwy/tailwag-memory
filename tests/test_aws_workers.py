@@ -30,14 +30,41 @@ class FakeDynamoTable:
     def update_item(self, **kwargs):
         self.updates.append(kwargs)
         key = kwargs["Key"]["job_id"]
-        item = self.items.setdefault(key, {"job_id": key})
+        item = self.items.get(key)
         values = kwargs["ExpressionAttributeValues"]
+        condition = kwargs.get("ConditionExpression", "")
+        if condition.startswith("attribute_not_exists"):
+            reclaimable = item is None or item.get("status") == "failed" or (
+                item.get("status") == "running"
+                and item.get("lease_expires_at", 0) <= values[":now"]
+            )
+            if not reclaimable:
+                raise ConditionalCheckFailedException()
+        elif condition:
+            if item is None or item.get("status") != values[":running"] or item.get("claim_token") != values[":claim_token"]:
+                raise ConditionalCheckFailedException()
+        if item is None:
+            item = {"job_id": key}
+            self.items[key] = item
+        if ":job_type" in values:
+            item["job_type"] = values[":job_type"]
+        if ":running" in values and "attempt_count" in kwargs["UpdateExpression"]:
+            item["status"] = values[":running"]
+            item["lease_expires_at"] = values[":lease_expires_at"]
+            item["claim_token"] = values[":claim_token"]
+            item["expires_at"] = values[":expires_at"]
+            item["attempt_count"] = int(item.get("attempt_count", 0)) + values[":attempt_increment"]
+            item.pop("error", None)
+            item.pop("result", None)
         if ":status" in values:
             item["status"] = values[":status"]
+        if ":updated_at" in values:
+            item["updated_at"] = values[":updated_at"]
         if ":result" in values:
             item["result"] = values[":result"]
         if ":error" in values:
             item["error"] = values[":error"]
+        return {"Attributes": dict(item)}
 
 
 class FakeSqsClient:
@@ -69,23 +96,24 @@ class AwsWorkerHelpersTest(unittest.TestCase):
         self.assertFalse(second.started)
         self.assertEqual(second.status, "running")
 
-    def test_dynamodb_idempotency_marks_success_and_failure(self) -> None:
+    def test_dynamodb_idempotency_reclaims_failure_and_marks_success(self) -> None:
         table = FakeDynamoTable()
         store = DynamoDBJobIdempotencyStore(table)
-        store.start_job("job-1", job_type="memory_extract_episode")
+        first = store.start_job("job-1", job_type="memory_extract_episode")
 
-        store.mark_succeeded("job-1", result={"ok": True})
-        store.mark_failed("job-1", error="boom")
+        self.assertTrue(first.started)
+        self.assertIsNotNone(first.claim_token)
+        store.mark_failed("job-1", claim_token=first.claim_token or "", error="boom")
+        retry = store.start_job("job-1", job_type="memory_extract_episode")
+        store.mark_succeeded("job-1", claim_token=retry.claim_token or "", result={"ok": True})
 
-        self.assertEqual(table.items["job-1"]["status"], "failed")
+        self.assertTrue(retry.started)
+        self.assertEqual(table.items["job-1"]["status"], "succeeded")
+        self.assertEqual(table.items["job-1"]["attempt_count"], 2)
         self.assertEqual(table.items["job-1"]["result"], {"ok": True})
-        self.assertEqual(table.items["job-1"]["error"], "boom")
-        success_update = table.updates[0]
-        self.assertIn("#result = :result", success_update["UpdateExpression"])
-        self.assertEqual(success_update["ExpressionAttributeNames"]["#result"], "result")
-        failure_update = table.updates[1]
-        self.assertIn("#error = :error", failure_update["UpdateExpression"])
-        self.assertEqual(failure_update["ExpressionAttributeNames"]["#error"], "error")
+        reclaim_update = table.updates[2]
+        self.assertIn("attempt_count :attempt_increment", reclaim_update["UpdateExpression"])
+        self.assertIn("lease_expires_at <= :now", reclaim_update["ConditionExpression"])
 
     def test_sqs_send_job_serializes_payload_and_attributes(self) -> None:
         sqs = FakeSqsClient()
@@ -143,6 +171,45 @@ class AwsWorkerHelpersTest(unittest.TestCase):
 
         self.assertEqual(response, {"batchItemFailures": [{"itemIdentifier": "msg-1"}]})
         self.assertEqual(store.items["extract-1"]["status"], "failed")
+
+    def test_handler_retries_the_same_failed_message_until_it_succeeds(self) -> None:
+        store = InMemoryJobIdempotencyStore()
+        event = {
+            "Records": [
+                {
+                    "messageId": "msg-1",
+                    "body": "{\"job_type\":\"memory_extract_episode\",\"job_id\":\"extract-1\",\"episode_id\":\"episode_1\"}",
+                }
+            ]
+        }
+        calls: list[str] = []
+
+        def fail(job):
+            calls.append(job.job_id)
+            raise RuntimeError("model unavailable")
+
+        for _ in range(3):
+            self.assertEqual(
+                _handle_sqs_jobs(event, fail, idempotency_store=store),
+                {"batchItemFailures": [{"itemIdentifier": "msg-1"}]},
+            )
+
+        self.assertEqual(calls, ["extract-1", "extract-1", "extract-1"])
+        self.assertEqual(store.items["extract-1"]["attempt_count"], 3)
+        self.assertEqual(store.items["extract-1"]["status"], "failed")
+
+    def test_running_job_is_reclaimed_after_its_lease_expires(self) -> None:
+        now = [100]
+        store = InMemoryJobIdempotencyStore(lease_seconds=10, clock=lambda: now[0])
+        first = store.start_job("job-1", job_type="memory_extract_episode")
+        now[0] = 109
+        self.assertFalse(store.start_job("job-1", job_type="memory_extract_episode").started)
+        now[0] = 110
+        retry = store.start_job("job-1", job_type="memory_extract_episode")
+
+        self.assertTrue(retry.started)
+        self.assertEqual(store.items["job-1"]["attempt_count"], 2)
+        self.assertNotEqual(first.claim_token, retry.claim_token)
 
     def test_publish_report_files_writes_prefixed_s3_objects(self) -> None:
         s3 = FakeS3Client()

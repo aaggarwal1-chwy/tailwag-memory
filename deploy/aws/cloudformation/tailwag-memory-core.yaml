@@ -21,19 +21,19 @@ Parameters:
     Description: Failed receives before SQS moves a message to the DLQ.
   PollVisibilityTimeout:
     Type: Number
-    Default: 900
+    Default: 5400
     MinValue: 30
-    Description: Visibility timeout, in seconds, for poll jobs.
+    Description: Visibility timeout, in seconds, for poll jobs. Must remain at least six times WorkerTimeout.
   MemoryVisibilityTimeout:
     Type: Number
-    Default: 900
+    Default: 5400
     MinValue: 30
-    Description: Visibility timeout, in seconds, for memory jobs.
+    Description: Visibility timeout, in seconds, for memory jobs. Must remain at least six times WorkerTimeout.
   ReportVisibilityTimeout:
     Type: Number
-    Default: 900
+    Default: 5400
     MinValue: 30
-    Description: Visibility timeout, in seconds, for report jobs.
+    Description: Visibility timeout, in seconds, for report jobs. Must remain at least six times WorkerTimeout.
   MessageRetentionPeriod:
     Type: Number
     Default: 1209600
@@ -372,6 +372,7 @@ Resources:
           TAILWAG_REPORT_JOBS_QUEUE_URL: !Ref ReportJobsQueue
           TAILWAG_SLACK_POLL_STATE_TABLE: !Ref SlackPollStateTable
           TAILWAG_JOB_IDEMPOTENCY_TABLE: !Ref JobIdempotencyTable
+          TAILWAG_JOB_LEASE_SECONDS: !Ref WorkerTimeout
           TAILWAG_REPORTS_BUCKET: !Ref ReportsBucket
           LOG_LEVEL: !Ref LogLevel
           NEO4J_URI: !Sub "{{resolve:secretsmanager:${Neo4jUriSecretId}:SecretString}}"
@@ -413,6 +414,7 @@ Resources:
           TAILWAG_REPORT_JOBS_QUEUE_URL: !Ref ReportJobsQueue
           TAILWAG_SLACK_POLL_STATE_TABLE: !Ref SlackPollStateTable
           TAILWAG_JOB_IDEMPOTENCY_TABLE: !Ref JobIdempotencyTable
+          TAILWAG_JOB_LEASE_SECONDS: !Ref WorkerTimeout
           TAILWAG_REPORTS_BUCKET: !Ref ReportsBucket
           LOG_LEVEL: !Ref LogLevel
           NEO4J_URI: !Sub "{{resolve:secretsmanager:${Neo4jUriSecretId}:SecretString}}"
@@ -454,6 +456,7 @@ Resources:
           TAILWAG_REPORT_JOBS_QUEUE_URL: !Ref ReportJobsQueue
           TAILWAG_SLACK_POLL_STATE_TABLE: !Ref SlackPollStateTable
           TAILWAG_JOB_IDEMPOTENCY_TABLE: !Ref JobIdempotencyTable
+          TAILWAG_JOB_LEASE_SECONDS: !Ref WorkerTimeout
           TAILWAG_REPORTS_BUCKET: !Ref ReportsBucket
           LOG_LEVEL: !Ref LogLevel
           NEO4J_URI: !Sub "{{resolve:secretsmanager:${Neo4jUriSecretId}:SecretString}}"
