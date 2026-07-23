@@ -17,12 +17,14 @@ Inputs:
 - face embedding vector
 - audio embedding vector
 - optional person_id
+- optional robot_id
 - optional building_code
 - optional room_id
 - optional retrieval limit
 
 Outputs:
 - matching episode IDs
+- structured Robot participation with stable ID, current display name, role, and source
 - matching event IDs for place event queries
 - matching person IDs for biometric queries
 - summaries
@@ -33,6 +35,7 @@ Non-goals:
 - writes
 - data import
 - semantic consolidation
+- robot operational-state or fleet retrieval
 
 Verification:
 - PYTHONPATH=src python3 -m unittest tests.test_retrieval

@@ -31,6 +31,10 @@ def schema_statements(
         FOR (e:Episode) REQUIRE e.id IS UNIQUE
         """,
         """
+        CREATE CONSTRAINT robot_id IF NOT EXISTS
+        FOR (r:Robot) REQUIRE r.id IS UNIQUE
+        """,
+        """
         CREATE CONSTRAINT event_id IF NOT EXISTS
         FOR (e:Event) REQUIRE e.id IS UNIQUE
         """,

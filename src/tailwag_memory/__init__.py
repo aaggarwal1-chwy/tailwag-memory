@@ -44,6 +44,8 @@ from .models import (
     PersonProfile,
     PersonRecognitionResult,
     PlaceInput,
+    RobotInput,
+    RobotParticipationResult,
     SearchQuery,
     VerifiedProfile,
 )
@@ -103,6 +105,8 @@ __all__ = [
     "PersonRecognitionResult",
     "PlaceInput",
     "QueryRunner",
+    "RobotInput",
+    "RobotParticipationResult",
     "SearchQuery",
     "Settings",
     "TailwagMemoryClient",

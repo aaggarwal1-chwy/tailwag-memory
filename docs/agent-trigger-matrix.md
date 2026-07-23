@@ -13,7 +13,7 @@ Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS
 | Agent | Primary Scope | Main Outputs |
 | --- | --- | --- |
 | Project Scaffold Agent | Repo structure and local developer workflow | package files, Docker Compose, `.env.example`, folders |
-| Neo4j Schema Agent | Database schema, constraints, vector indexes | idempotent schema setup code |
+| Neo4j Schema Agent | Database schema, constraints, vector indexes | idempotent schema setup code, including narrow robot identity |
 | OpenAI Embeddings Agent | Embedding interface, OpenAI runtime provider, and deterministic mock provider | provider interface, OpenAI embeddings, mock vectors, embedding tests |
 | Ingestion Agent | Episode and event write paths | ingestion services, Cypher writes, ingestion tests |
 | Memory Item Agent | Durable transcript-derived memory item semantics and behavior | memory item models, services, extraction contracts, context formatting, tests |
@@ -36,19 +36,19 @@ Concrete repo-local custom agents live in `.codex/agents/`, and the root `AGENTS
 | Trigger | Agent | Subagents To Consider | Scope Boundary | Handoff |
 | --- | --- | --- | --- | --- |
 | Repo lacks package structure, local run instructions, or environment examples | Project Scaffold Agent | Documentation Agent | Create scaffolding only; do not implement domain logic | Handoff to Schema Agent and CLI Mockup Agent |
-| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `EmployeeDirectoryRecord`, `FaceReference`, `VoiceReference`, approved relationships, episode transcript vector index, biometric reference vector indexes, and the `MemoryItem.summary_embedding` vector index | Handoff to Ingestion Agent once schema is available |
+| Need Neo4j constraints, labels, indexes, or schema migration changes | Neo4j Schema Agent | Test Agent | Only `Person`, narrow `Robot`, `Episode`, `Event`, `Place`, `MemoryItem`, `EmployeeDirectoryRecord`, `FaceReference`, `VoiceReference`, approved relationships, episode transcript vector index, biometric reference vector indexes, and the `MemoryItem.summary_embedding` vector index | Handoff to Ingestion Agent once schema is available |
 | Need embedding generation or embedding configuration | OpenAI Embeddings Agent | Test Agent, Code Refactor Agent | Runtime embeddings use OpenAI; tests use deterministic mocks and no network calls | Handoff to Ingestion Agent and Retrieval Agent |
-| Need to create or update episode memory records or place events | Ingestion Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Test Agent | Write path only; no retrieval ranking logic | Handoff to Retrieval Agent for query behavior |
+| Need to create or update episode memory records, narrow robot episode participation, or place events | Ingestion Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Test Agent | Write path only; robot writes are limited to stable ID/current name and relationship name/role/source provenance; no retrieval ranking logic | Handoff to Retrieval Agent for query behavior |
 | Need durable transcript-derived memory items, memory item extraction, memory item context formatting, or memory item vector retrieval | Memory Item Agent | Neo4j Schema Agent, OpenAI Embeddings Agent, Retrieval Agent, Integration Contract Agent, Test Agent, Scope Guard Agent | Memory item semantics only; do not expand into a broad ontology, triple store, or open-ended semantic fact graph | Handoff to Retrieval Agent for context selection and Integration Contract Agent for public APIs |
-| Need person participation lookup, place lookup, event lookup, episode vector search, biometric reference search, or hybrid search | Retrieval Agent | OpenAI Embeddings Agent, Test Agent | Read path only; no schema expansion beyond approved scope | Handoff to CLI Mockup Agent for commands |
+| Need person or robot participation lookup, place lookup, event lookup, episode vector search, biometric reference search, or hybrid search | Retrieval Agent | OpenAI Embeddings Agent, Test Agent | Read path only; robot filters use stable ID and results expose narrow participation provenance; no schema expansion beyond approved scope | Handoff to CLI Mockup Agent for commands |
 | Need sample local data or repeatable demo state | Demo Seed Agent | Ingestion Agent, Documentation Agent | Demo records only; no production import pipeline | Handoff to Test Agent for fixture reuse |
 | Need a developer command, shellable workflow, or local demo entry point | CLI Mockup Agent | Ingestion Agent, Retrieval Agent, Source Adapter Agent, Documentation Agent | CLI-first; no API surface | Handoff to Documentation Agent for usage docs |
 | Need to ingest Slack or another external source into `EpisodeInput` or `EventInput` | Source Adapter Agent | Ingestion Agent, CLI Mockup Agent, Privacy/Biometric Review Agent, Test Agent | Adapter and mapping behavior only; core writes stay in ingestion services | Handoff to Ingestion Agent for write behavior |
 | Public dataclasses, service methods, env vars, package metadata, examples, or integration docs change | Integration Contract Agent | Documentation Agent, Test Agent, Release Quality Gate Agent | Package-consumer boundaries only; no internal refactor unless needed to preserve compatibility | Handoff to owning implementation agent for behavior gaps |
-| Need to preserve or validate `argos-agent` Tailwag memory provider compatibility, including Argos-facing Tailwag APIs | Argos Migration Agent | Integration Contract Agent, Memory Item Agent, Source Adapter Agent, Documentation Agent, Test Agent, Release Quality Gate Agent | Tailwag compatibility only; no unrelated Argos runtime, robot, face, speaker, navigation, or display internals | Handoff to Memory Item Agent for Tailwag memory behavior and Source Adapter Agent for Slack ingestion behavior |
+| Need to preserve or validate `argos-agent` Tailwag memory provider compatibility, including Argos-facing Tailwag APIs | Argos Migration Agent | Integration Contract Agent, Memory Item Agent, Source Adapter Agent, Documentation Agent, Test Agent, Release Quality Gate Agent | Tailwag compatibility only; narrow robot identity/provenance payloads are allowed, but no Argos robot capabilities, sensors, software, live state, maintenance, fleet, face, speaker, navigation, or display internals | Handoff to Memory Item Agent for Tailwag memory behavior and Source Adapter Agent for Slack ingestion behavior |
 | Need AWS deployment templates, IAM examples, worker packaging, queue/state/report cloud resources, AWS deployment docs, or authorized provisioning and operation in a real AWS account | AWS Deployment Agent | Project Scaffold Agent, Source Adapter Agent, Documentation Agent, Release Quality Gate Agent | Confirm identity, region, prefix, and authorization before account mutations; protect local and remote secrets; do not change package API contracts, CLI defaults, or graph behavior | Handoff to Source Adapter Agent for polling behavior gaps and Project Scaffold Agent for package metadata changes |
 | Consent, biometric reference embeddings, retention, recognition source, Slack identity, or raw media language changes | Privacy/Biometric Review Agent | Ingestion Agent, Retrieval Agent, Documentation Agent, Scope Guard Agent | Review and guardrails only; no upstream recognition implementation | Handoff to owning implementation agent for behavior fixes |
-| A change risks adding excluded runtime concepts, persistent graph confidence fields, `org_id`, secondary persistence, or external vector databases | Scope Guard Agent | Neo4j Schema Agent, Ingestion Agent, Memory Item Agent, Documentation Agent, Test Agent | Scope review and guardrails only unless scope is explicitly updated; approved `MemoryItem` work is limited to durable transcript-derived memory, not a broad ontology | Handoff to Documentation Agent when scope changes |
+| A change risks expanding `Robot` beyond narrow identity/provenance, adding excluded runtime concepts, persistent graph confidence fields, `org_id`, secondary persistence, or external vector databases | Scope Guard Agent | Neo4j Schema Agent, Ingestion Agent, Memory Item Agent, Documentation Agent, Test Agent | Scope review and guardrails only unless scope is explicitly updated; approved `Robot` work excludes operational models and approved `MemoryItem` work is limited to durable transcript-derived memory, not a broad ontology | Handoff to Documentation Agent when scope changes |
 | Broad work is ready for final handoff, merge, package-facing release, or tag | Release Quality Gate Agent | Test Agent, Documentation Agent, Integration Contract Agent | Final verification only; do not implement feature behavior | Handoff back to owning agent if verification fails |
 | Tests are missing, failing, flaky, or not covering changed behavior | Test Agent | Any implementation agent related to the failing area | Tests and fixtures only unless fixing a small test-discovered bug | Handoff to Code Refactor Agent if failures reveal design issues |
 | A file grows too large, a touched file passes roughly 500 lines, a feature adds roughly 250+ lines to one file, generated/static HTML or report rendering accumulates in a service module, Cypher is duplicated, logic crosses module boundaries, or additions look hard | Code Refactor Agent | Test Agent, Documentation Agent | Structural cleanup only; no new product behavior unless needed to preserve current behavior | Handoff back to owning implementation agent |
@@ -91,13 +91,14 @@ Inputs:
 
 Outputs:
 
-- constraints for `Person.id`, `Person.email`, `Episode.id`, `Event.id`, `MemoryItem.id`, `(EmployeeDirectoryRecord.site_code, EmployeeDirectoryRecord.username)`, `FaceReference.id`, `VoiceReference.id`, and `(Place.building_code, Place.room_id)`
+- constraints for `Person.id`, `Person.email`, `Robot.id`, `Episode.id`, `Event.id`, `MemoryItem.id`, `(EmployeeDirectoryRecord.site_code, EmployeeDirectoryRecord.username)`, `FaceReference.id`, `VoiceReference.id`, and `(Place.building_code, Place.room_id)`
 - vector indexes for `Episode.transcript_embedding`, `FaceReference.embedding`, `VoiceReference.embedding`, and `MemoryItem.summary_embedding`
 - schema initialization command support
 
 Non-goals:
 
 - adding excluded labels
+- adding robot capabilities, sensors, software, live state, maintenance, or fleet fields
 - adding confidence fields
 - adding `org_id`
 
@@ -131,6 +132,7 @@ Inputs:
 - caller-provided `Episode.id`
 - caller-provided `Event.id`
 - caller-provided `Person.id`
+- caller-provided stable `Robot.id`, current display name, and episode role/source provenance
 - participant roles and relationship provenance sources
 - caller-supplied biometric vectors only through biometric reference APIs
 - episode transcript
@@ -145,6 +147,7 @@ Outputs:
 - upserted people
 - updated `Person.last_seen`
 - stored `FaceReference` and `VoiceReference` nodes when biometric APIs are called
+- upserted narrow `Robot` identity and `PARTICIPATED_IN.display_name_at_time` snapshots when episodes supply robots
 - upserted place
 - graph relationships
 - episode embeddings
@@ -189,6 +192,7 @@ Owns the read path.
 Inputs:
 
 - natural language query text
+- stable robot ID
 - face embedding vector
 - audio embedding vector
 - optional `person_id`
@@ -203,6 +207,7 @@ Outputs:
 - matching person IDs for biometric queries
 - transcript snippets
 - vector scores where applicable
+- robot participation results with current display name and relationship role/source
 
 Non-goals:
 
@@ -468,7 +473,7 @@ Non-goals:
 
 - If a task touches schema and ingestion, start with the Neo4j Schema Agent, then hand off to the Ingestion Agent.
 - If a task touches ingestion and retrieval, keep writes in the Ingestion Agent and reads in the Retrieval Agent.
-- If a change adds a new concept beyond approved `Person`, `Episode`, `Event`, `Place`, `MemoryItem`, `EmployeeDirectoryRecord`, `FaceReference`, or `VoiceReference` scope, pause and update the project scope before implementation.
+- If a change adds a new concept beyond approved `Person`, narrow `Robot`, `Episode`, `Event`, `Place`, `MemoryItem`, `EmployeeDirectoryRecord`, `FaceReference`, or `VoiceReference` scope, pause and update the project scope before implementation.
 - If a change adds or changes memory item semantics, trigger the Memory Item Agent before handing off to schema, embeddings, or retrieval owners.
 - If a change targets `argos-agent` Tailwag memory provider compatibility, trigger the Argos Migration Agent.
 - If code starts mixing provider logic, Cypher, CLI parsing, and domain models in one file, trigger the Code Refactor Agent.
@@ -483,7 +488,12 @@ Non-goals:
 
 ## Excluded Runtime Concepts
 
-`Robot`, `ObjectConcept`, `Activity`, `Utterance`, and `SemanticFact` are not
-part of the Tailwag runtime. Durable transcript-derived `MemoryItem` records are
-the only person-memory extraction model and do not form an ontology or triple
-store.
+`Robot` is approved only for stable identity, current display name, and episode
+participation provenance (`display_name_at_time`, `role`, and `source`). Robot
+capabilities, sensors, installed software, live operational state, maintenance
+records, fleet modeling, objects, activities, and utterances are excluded.
+`ObjectConcept`, `Activity`, `Utterance`, and `SemanticFact` remain outside the
+Tailwag runtime. Persistent confidence properties, `org_id`, external vector
+databases, and secondary persistence are also excluded. Durable
+transcript-derived `MemoryItem` records are the only person-memory extraction
+model and do not form an ontology or triple store.

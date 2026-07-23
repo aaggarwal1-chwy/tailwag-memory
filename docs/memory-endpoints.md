@@ -129,6 +129,7 @@ Request:
 ```json
 {
   "person_id": "person_jamie",
+  "robot_id": "cody",
   "limit": 10,
   "semantic_scope": "workplace help",
   "current_text": "robot demo later today",
@@ -162,7 +163,8 @@ Request:
     "transcript": "Jamie: Are there spare laptop chargers in room 101?",
     "retention_class": "standard",
     "place": {"building_code": "MAIN", "room_id": "101"},
-    "participants": [{"id": "person_jamie", "role": "speaker"}]
+    "participants": [{"id": "person_jamie", "role": "speaker"}],
+    "robots": [{"id": "cody", "display_name": "Cody"}]
   },
   "extract_memory": false,
   "enqueue_memory_extraction": true
@@ -176,7 +178,7 @@ Returns the `EpisodeRecordResult` dictionary shape.
 Request:
 
 ```json
-{"text": "robot demos", "person_id": "person_jamie", "building_code": "MAIN", "limit": 5}
+{"text": "robot demos", "person_id": "person_jamie", "robot_id": "cody", "building_code": "MAIN", "limit": 5}
 ```
 
 Returns the existing semantic search shape:
@@ -339,7 +341,7 @@ Returns the `OwnerResolutionResult` dictionary shape.
 ## Quick Start
 
 ```python
-from tailwag_memory import EpisodeInput, PersonInput, PlaceInput, TailwagMemoryClient
+from tailwag_memory import EpisodeInput, PersonInput, PlaceInput, RobotInput, TailwagMemoryClient
 
 episode = EpisodeInput(
     id="episode_live_001",
@@ -358,6 +360,7 @@ episode = EpisodeInput(
             source="live_chat",
         )
     ],
+    robots=[RobotInput(id="cody", display_name="Cody")],
 )
 
 with TailwagMemoryClient.from_env() as memory:
@@ -488,6 +491,7 @@ Notes:
 
 - Rows are keyed by `(site_code, username)`.
 - Sync writes `EmployeeDirectoryRecord` nodes and links existing `Person` nodes whose email username matches the directory username.
+- Every row with a nonblank `site_code` is linked from `EmployeeDirectoryRecord` through `HOME_BASED_AT` to the canonical `Place(building_code=<site_code>, room_id="__site__")`. Sync reconciles stale home-base targets for that exact `(site_code, username)` record. Because sync is additive and `site_code` is part of the record key, an employee move creates a new keyed row and does not automatically delete the old row; no `Person-HOME_BASED_AT` link is created.
 - This endpoint does not call Snowflake; use `sync_directory_from_snowflake()` for that.
 
 ### `sync_directory_from_snowflake(site_code, *, email_domain="")`
@@ -603,8 +607,11 @@ Notes:
 - `extract_memory=True` uses OpenAI-backed memory extraction.
 - With `extract_memory=False`, Tailwag enqueues `memory_extract_episode` to `TAILWAG_MEMORY_JOBS_QUEUE_URL`; a missing URL raises before episode storage. Set `enqueue_memory_extraction=False` only when the caller intentionally wants no extraction.
 - Participants with role `speaker` are not required for `record_episode`, but roles help downstream extraction and retrieval semantics.
+- `episode.robots` may contain multiple narrow robot identities. Omitted `role` and `source` default to `"host"` and `"argos"`.
+- Recording a robot updates its current `Robot.display_name`; the newly created episode relationship snapshots that name as `display_name_at_time`. Rewriting an existing relationship does not replace its original name snapshot.
+- Robot participation does not create a person, update `Person.last_seen`, or write biometric or operational robot state.
 
-### `person_context(person_id, limit=10, semantic_scope=None, *, current_text=None, now=None, memory_limit=12)`
+### `person_context(person_id, limit=10, semantic_scope=None, *, robot_id=None, current_text=None, now=None, memory_limit=12)`
 
 Returns prompt-ready context for a person. The output combines deterministic durable memory markdown and visible follow-ups while excluding episode transcript text.
 
@@ -613,6 +620,7 @@ Parameters:
 | Name | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `person_id` | `str` | yes | Caller-owned `Person.id`. |
+| `robot_id` | `str \| None` | no | Stable Robot ID used to include robot-free episodes/memories plus evidence involving that robot. Blank or omitted preserves person-wide retrieval. |
 | `limit` | `int` | no | Reserved retrieval limit for lower-level person context evidence. |
 | `semantic_scope` | `str \| None` | no | Topic reused for durable memory ranking when `current_text` is omitted, and for a scoped episode no-match check. |
 | `current_text` | `str \| None` | no | Current utterance/task used to vector-rank durable memory items. When omitted, `semantic_scope` is reused for durable memory ranking. |
@@ -624,6 +632,7 @@ Returns: `str`.
 Notes:
 
 - If no person exists, person context returns `the database does not have a record of this person`.
+- With `robot_id`, direct memories without episode evidence remain visible. A memory with multiple supporting episodes is visible when any support is robot-free or includes that robot.
 - If `semantic_scope` is supplied, an embedding provider is required. Matching episodes can affect the no-match sentinel but their transcript text is not rendered.
 - The returned string is suitable for prompts, not a structured API contract.
 
@@ -648,7 +657,7 @@ Potential Follow-Ups:
 - Cape Cod trip with their parents planned for the weekend of 2026-06-20.
 ```
 
-### `search_semantic_memory(*, text, person_id, building_code=None, limit=5, now=None)`
+### `search_semantic_memory(*, text, person_id, robot_id=None, building_code=None, limit=5, now=None)`
 
 Returns structured semantic search results for one person without requiring callers to instantiate lower-level retrieval services.
 
@@ -658,7 +667,8 @@ Parameters:
 | --- | --- | --- | --- |
 | `text` | `str` | yes | Query text to embed and match against episode transcripts and memory item summaries. |
 | `person_id` | `str` | yes | Caller-owned `Person.id` used to scope both episode and memory item results. |
-| `building_code` | `str \| None` | no | Optional episode place filter. Memory item results are person-scoped only. |
+| `robot_id` | `str \| None` | no | Stable Robot ID used to include robot-free episodes/memories plus evidence involving that robot. Blank or omitted preserves person-wide retrieval. |
+| `building_code` | `str \| None` | no | Optional episode place filter. |
 | `limit` | `int` | no | Maximum episode results and maximum memory item results. |
 | `now` | `datetime \| None` | no | Reference time for filtering expired memory items. |
 
@@ -669,7 +679,9 @@ Notes:
 - This is the public high-level API for consumers that need structured semantic hits across episode evidence and durable `MemoryItem` facts/preferences/follow-ups.
 - The client embeds the query text once, then passes the vector to `EpisodeRetrievalService.hybrid_search_with_embedding(...)` and `MemoryItemService.vector_search_by_embedding(...)`.
 - Episode results include transcript, time/place metadata, and optional score.
+- Episode result dictionaries also include `robots`, sorted by stable robot ID. Each entry contains `robot_id`, the robot's current `display_name`, and the episode relationship's `role` and `source`.
 - Memory item results return only active, unexpired memories; addressed and superseded memories are excluded.
+- With `robot_id`, episodes attached only to other robots and memories supported only by those episodes are excluded. Direct and robot-free-source memories remain visible.
 - Blank `text` or `person_id` returns empty `episodes` and `memory_items` lists without initializing embeddings.
 
 ### `extract_memory_for_episode(episode_id, person_id=None)`
@@ -740,6 +752,21 @@ Omitted profile fields preserve existing `Person` values on later writes. When a
 `EpisodeInput.from_dict(...)`, `EventInput.from_dict(...)`, and HTTP episode
 payloads accept `official_name` on nested person shapes.
 
+### `RobotInput`
+
+Caller-supplied narrow robot identity and episode provenance.
+
+| Field | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `id` | `str` | yes | none | Stable caller-owned robot ID. |
+| `display_name` | `str` | yes | none | Current human-readable robot name. |
+| `role` | `str` | no | `"host"` | Role on this episode's `PARTICIPATED_IN` relationship. |
+| `source` | `str` | no | `"argos"` | Provenance on this episode's `PARTICIPATED_IN` relationship. |
+
+The model intentionally accepts no capability, sensor, software, live-state,
+maintenance, fleet, biometric, or person-identity fields. The optional HTTP
+adapter uses a strict request model and rejects additional robot fields.
+
 ### `DirectoryPersonRecord`
 
 Employee-directory row owned by Tailwag.
@@ -768,6 +795,11 @@ Neo4j Browser display and fuzzy matching: `display_name`, `name`,
 Tailwag does not store an application-level `id` property; `(site_code,
 username)` is the directory record key.
 
+Directory sync links each record with a nonblank `site_code` through
+`(:EmployeeDirectoryRecord)-[:HOME_BASED_AT]->(:Place)` to the canonical site
+place `Place(building_code=<site_code>, room_id="__site__")`. The relationship
+is not written from `Person`, and Tailwag does not infer a room-level home base.
+
 ### `PlaceInput`
 
 | Field | Type | Required | Meaning |
@@ -788,6 +820,7 @@ username)` is the directory record key.
 | `place` | `PlaceInput` | yes | Episode location. |
 | `participants` | `list[PersonInput]` | no | People linked through `PARTICIPATED_IN`. |
 | `mentioned_people` | `list[EpisodeMentionInput]` | no | People linked through `MENTIONED_IN` without participation or `last_seen` semantics. |
+| `robots` | `list[RobotInput]` | no | Robots linked through `PARTICIPATED_IN`; defaults to `[]`. |
 
 `EpisodeInput.from_dict(payload)` parses the same shape from a dictionary.
 
@@ -915,11 +948,17 @@ Follow-up support and addressing are handled internally by transcript extraction
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
 | `by_person(person_id, limit=10)` | person ID | `list[EpisodeMemoryResult]` | Recent episodes linked to a person. |
+| `by_robot(robot_id, limit=10)` | stable robot ID | `list[EpisodeMemoryResult]` | Recent episodes linked to a robot. |
 | `by_place(building_code, room_id, limit=10)` | place key | `list[EpisodeMemoryResult]` | Recent episodes at a place. |
 | `vector_search(text, limit=10)` | query text | `list[EpisodeMemoryResult]` | Global vector-ranked episode search. |
-| `hybrid_search(SearchQuery(...))` | structured query | `list[EpisodeMemoryResult]` | Vector search filtered by person/place. |
+| `hybrid_search(SearchQuery(...))` | structured query | `list[EpisodeMemoryResult]` | Vector search filtered by person/robot/place. |
 
-`SearchQuery` fields: `text`, optional `person_id`, optional `building_code`, optional `room_id`, `limit=10`.
+`SearchQuery` fields: `text`, optional `person_id`, optional `robot_id`, optional
+`building_code`, optional `room_id`, and `limit=10`. `robot_id` matches stable
+`Robot.id`, not a display name, and selects robot-free episodes plus episodes
+involving that robot. `by_robot(...)` remains the strict provenance lookup for
+episodes actually linked to a robot. All episode retrieval methods return every
+participating robot in `EpisodeMemoryResult.robots`, sorted by `robot_id`.
 
 ### `EventRetrievalService(runner)`
 
@@ -935,7 +974,7 @@ Methods mirror the high-level client directory methods:
 
 | Endpoint | Parameters | Returns | Meaning |
 | --- | --- | --- | --- |
-| `sync_directory_people(...)` | site code, records | `DirectorySyncResult` | Store normalized directory rows and link same-email people by username. |
+| `sync_directory_people(...)` | site code, records | `DirectorySyncResult` | Store normalized directory rows, link same-email people by username, and link each nonblank-site row to its canonical site place. |
 | `sync_directory_from_snowflake(...)` | site code, optional email domain | `DirectorySyncResult` | Load rows from Snowflake and store them. |
 | `resolve_identity(...)` | first, last, optional full name and site | `IdentityResolutionResult` | Fuzzy-match directory rows. |
 | `get_verified_profile(...)` | username, official name, optional site | `VerifiedProfile \| None` | Return one verified profile for enrollment rehydration. |
@@ -1131,7 +1170,8 @@ Common return types:
 
 | Type | Important fields |
 | --- | --- |
-| `EpisodeMemoryResult` | `episode_id`, `transcript`, optional `start_time`, `end_time`, `building_code`, `room_id`, and `score`. |
+| `RobotParticipationResult` | stable `robot_id`, current `display_name`, and episode relationship `role` and `source`. |
+| `EpisodeMemoryResult` | `episode_id`, `transcript`, optional `start_time`, `end_time`, `building_code`, `room_id`, and `score`, plus sorted `robots`. |
 | `EventResult` | `event_id`, `description`, `start_time`, `end_time`, `building_code`, `room_id`. |
 | `BiometricEnrollmentResult` | `saved`, `status`, `reason`, `person_id`, `reference_id`. |
 | `BiometricSearchResult` | candidates, recognition status/reason, threshold, top score, runner-up score, and margin. |
@@ -1160,4 +1200,5 @@ Common return types:
 - Do not pass raw face images or raw audio into Tailwag. Pass embeddings only.
 - Direct memory item writes are advanced. Prefer episode recording plus extraction for live systems.
 - `fact` memories must remain narrow person-prompt context, not broad ontology facts.
-- `SemanticFact`, persistent graph confidence fields, `org_id`, external vector stores, and secondary persistence are outside current scope.
+- `Robot` storage is limited to stable ID, current display name, and per-episode name/role/source provenance. Robot capabilities, sensors, installed software, live operational state, maintenance records, and fleet modeling are outside current scope.
+- `ObjectConcept`, `Activity`, `Utterance`, `SemanticFact`, persistent graph confidence fields, `org_id`, external vector stores, and secondary persistence are outside current scope.

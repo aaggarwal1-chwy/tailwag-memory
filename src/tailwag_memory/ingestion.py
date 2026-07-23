@@ -275,6 +275,15 @@ class EpisodeIngestionService:
             )
             for mention in episode.mentioned_people
         ]
+        robots = [
+            {
+                "id": robot.id,
+                "display_name": robot.display_name,
+                "role": robot.role,
+                "source": robot.source,
+            }
+            for robot in episode.robots
+        ]
 
         participant_ids = [str(person["id"]) for person in participants]
         for person, participant_id in zip(participants, participant_ids, strict=True):
@@ -282,6 +291,7 @@ class EpisodeIngestionService:
         mentioned_person_ids = [str(person["id"]) for person in mentioned_people]
         for person, mentioned_person_id in zip(mentioned_people, mentioned_person_ids, strict=True):
             person["person_id"] = mentioned_person_id
+        robot_ids = [str(robot["id"]) for robot in robots]
 
         self.runner.run(
             """
@@ -309,6 +319,10 @@ class EpisodeIngestionService:
             WITH e, old_mentioned, old_mention
             FOREACH (_ IN CASE WHEN old_mentioned IS NOT NULL AND NOT old_mentioned.id IN $mentioned_person_ids THEN [1] ELSE [] END | DELETE old_mention)
             WITH DISTINCT e
+            OPTIONAL MATCH (old_robot:Robot)-[old_robot_rel:PARTICIPATED_IN]->(e)
+            WITH e, old_robot, old_robot_rel
+            FOREACH (_ IN CASE WHEN old_robot IS NOT NULL AND NOT old_robot.id IN $robot_ids THEN [1] ELSE [] END | DELETE old_robot_rel)
+            WITH DISTINCT e
             CALL (e) {
               UNWIND $participants AS person
             """
@@ -328,6 +342,18 @@ class EpisodeIngestionService:
                 SET r.source = mentioned.source
               RETURN count(*) AS mention_write_count
             }
+            CALL (e) {
+              UNWIND $robots AS robot
+                MERGE (r:Robot {id: robot.id})
+                SET r.display_name = robot.display_name,
+                    r.created_at = coalesce(r.created_at, $created_at),
+                    r.updated_at = $updated_at
+                MERGE (r)-[participation:PARTICIPATED_IN]->(e)
+                ON CREATE SET participation.display_name_at_time = robot.display_name
+                SET participation.role = robot.role,
+                    participation.source = robot.source
+              RETURN count(*) AS robot_write_count
+            }
             RETURN e.id AS episode_id
                 """,
             {
@@ -344,6 +370,8 @@ class EpisodeIngestionService:
                 "participant_ids": participant_ids,
                 "mentioned_people": mentioned_people,
                 "mentioned_person_ids": mentioned_person_ids,
+                "robots": robots,
+                "robot_ids": robot_ids,
                 "created_at": written_at,
                 "updated_at": written_at,
                 "last_seen": episode.end_time or episode.start_time,

@@ -274,13 +274,16 @@ class TailwagMemoryClient:
         limit: int = 10,
         semantic_scope: str | None = None,
         *,
+        robot_id: str | None = None,
         current_text: str | None = None,
         now: datetime | None = None,
         memory_limit: int = 12,
     ) -> str:
         """Return durable, transcript-free context for a person."""
+        rendered_robot_id = str(robot_id or "").strip() or None
         memory_context = PersonMemoryContextService(self.runner, self._embeddings()).markdown_for_person(
             person_id,
+            robot_id=rendered_robot_id,
             current_text=current_text or semantic_scope,
             now=now,
             memory_limit=memory_limit,
@@ -289,6 +292,7 @@ class TailwagMemoryClient:
             person_id,
             limit=limit,
             semantic_scope=semantic_scope,
+            robot_id=rendered_robot_id,
         )
         return "\n\n".join(part for part in [memory_context, retrieved_context] if part)
 
@@ -297,6 +301,7 @@ class TailwagMemoryClient:
         *,
         text: str,
         person_id: str,
+        robot_id: str | None = None,
         building_code: str | None = None,
         limit: int = 5,
         now: datetime | None = None,
@@ -304,6 +309,7 @@ class TailwagMemoryClient:
         """Return vector-ranked episode and memory-item matches for one person."""
         rendered_text = str(text or "").strip()
         rendered_person_id = str(person_id or "").strip()
+        rendered_robot_id = str(robot_id or "").strip() or None
         if not rendered_text or not rendered_person_id:
             return {"episodes": [], "memory_items": []}
 
@@ -317,6 +323,7 @@ class TailwagMemoryClient:
             SearchQuery(
                 text=rendered_text,
                 person_id=rendered_person_id,
+                robot_id=rendered_robot_id,
                 building_code=str(building_code or "").strip() or None,
                 limit=bounded_limit,
             ),
@@ -324,6 +331,7 @@ class TailwagMemoryClient:
         )
         memory_item_results = MemoryItemService(self.runner, embeddings).vector_search_by_embedding(
             person_id=rendered_person_id,
+            robot_id=rendered_robot_id,
             embedding=query_embedding,
             limit=bounded_limit,
             now=now,

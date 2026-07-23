@@ -17,5 +17,13 @@
       "role": "speaker",
       "source": "example"
     }
+  ],
+  "robots": [
+    {
+      "id": "cody",
+      "display_name": "Cody",
+      "role": "host",
+      "source": "argos"
+    }
   ]
 }

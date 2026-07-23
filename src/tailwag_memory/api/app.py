@@ -81,6 +81,7 @@ def _memory_router() -> APIRouter:
     ) -> PersonContextResponse:
         rendered = client.person_context(
             payload.person_id,
+            robot_id=payload.robot_id,
             limit=payload.limit,
             semantic_scope=payload.semantic_scope,
             current_text=payload.current_text,
@@ -113,6 +114,7 @@ def _memory_router() -> APIRouter:
         return client.search_semantic_memory(
             text=payload.text,
             person_id=payload.person_id,
+            robot_id=payload.robot_id,
             building_code=payload.building_code,
             limit=payload.limit,
             now=payload.now,

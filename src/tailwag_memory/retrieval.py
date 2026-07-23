@@ -4,6 +4,11 @@ import re
 
 from .db import QueryRunner
 from .embeddings import EmbeddingProvider
+from .episode_result_projection import (
+    episode_place_projection_subquery,
+    robot_participation_projection_subquery,
+    robot_participations_from_row,
+)
 from .models import (
     EpisodeMemoryResult,
     EventResult,
@@ -24,11 +29,18 @@ NO_SCOPED_PERSON_EVIDENCE_MESSAGE_PREFIX = "no episodes matched the semantic sco
 _MAX_CONTEXT_LINE_CHARS = 500
 
 
-def recent_episode_rows_for_person(runner: QueryRunner, person_id: str, limit: int) -> list[dict[str, object]]:
+def recent_episode_rows_for_person(
+    runner: QueryRunner,
+    person_id: str,
+    limit: int,
+    *,
+    robot_id: str | None = None,
+) -> list[dict[str, object]]:
     """Fetch recent episode rows linked to a person."""
     return person_episode_rows(
         runner,
         person_id=person_id,
+        robot_id=robot_id,
         limit=limit,
         include_context_fields=True,
     )
@@ -64,6 +76,30 @@ class EpisodeRetrievalService:
         rows = recent_episode_rows_for_person(self.runner, person_id, limit)
         return [self._row_to_result(row) for row in rows]
 
+    def by_robot(self, robot_id: str, limit: int = 10) -> list[EpisodeMemoryResult]:
+        """Return recent episode memories for a robot's stable identity."""
+        rows = self.runner.run(
+            """
+            MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(e:Episode)
+            WITH DISTINCT e
+            """
+            + episode_place_projection_subquery("e")
+            + robot_participation_projection_subquery("e")
+            + """
+            RETURN e.id AS episode_id,
+                   e.transcript AS transcript,
+                   e.start_time AS start_time,
+                   e.end_time AS end_time,
+                   place.building_code AS building_code,
+                   place.room_id AS room_id,
+                   robots AS robots
+            ORDER BY e.start_time DESC
+            LIMIT $limit
+            """,
+            {"robot_id": robot_id, "limit": limit},
+        )
+        return [self._row_to_result(row) for row in rows]
+
     def by_place(self, building_code: str, room_id: str, limit: int = 10) -> list[EpisodeMemoryResult]:
         """Return recent episode memories for a place."""
         rows = self.runner.run(
@@ -72,12 +108,17 @@ class EpisodeRetrievalService:
               building_code: $building_code,
               room_id: $room_id
             })
+            WITH DISTINCT e
+            """
+            + robot_participation_projection_subquery("e")
+            + """
             RETURN e.id AS episode_id,
                    e.transcript AS transcript,
                    e.start_time AS start_time,
                    e.end_time AS end_time,
                    $building_code AS building_code,
-                   $room_id AS room_id
+                   $room_id AS room_id,
+                   robots AS robots
             ORDER BY e.start_time DESC
             LIMIT $limit
             """,
@@ -89,14 +130,16 @@ class EpisodeRetrievalService:
         """Return episode memories ranked by vector similarity."""
         rows = self.runner.run(
             _vector_search_clause("episode_transcript_embedding", "node", "limit")
+            + episode_place_projection_subquery("node")
+            + robot_participation_projection_subquery("node")
             + """
-            OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
             RETURN node.id AS episode_id,
                    node.transcript AS transcript,
                    node.start_time AS start_time,
                    node.end_time AS end_time,
                    place.building_code AS building_code,
                    place.room_id AS room_id,
+                   robots AS robots,
                    score AS score
             ORDER BY score DESC
             """,
@@ -121,25 +164,34 @@ class EpisodeRetrievalService:
         rows = self.runner.run(
             _vector_search_clause("episode_transcript_embedding", "node", "candidate_limit")
             + """
-            OPTIONAL MATCH (person:Person)-[:PARTICIPATED_IN]->(node)
-            OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
-            WITH node, score, collect(DISTINCT person.id) AS person_ids, collect(DISTINCT place) AS places
-            WHERE ($person_id IS NULL OR $person_id IN person_ids)
+            WITH node, score
+            WHERE ($person_id IS NULL OR EXISTS {
+                MATCH (:Person {id: $person_id})-[:PARTICIPATED_IN]->(node)
+            })
               AND (
-                $building_code IS NULL
-                OR any(place IN places WHERE place.building_code = $building_code AND ($room_id IS NULL OR place.room_id = $room_id))
+                $robot_id IS NULL
+                OR NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(node) }
+                OR EXISTS { MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(node) }
               )
               AND (
-                $room_id IS NULL
-                OR any(place IN places WHERE place.room_id = $room_id AND ($building_code IS NULL OR place.building_code = $building_code))
+                ($building_code IS NULL AND $room_id IS NULL)
+                OR EXISTS {
+                    MATCH (node)-[:OCCURRED_AT]->(filter_place:Place)
+                    WHERE ($building_code IS NULL OR filter_place.building_code = $building_code)
+                      AND ($room_id IS NULL OR filter_place.room_id = $room_id)
+                }
               )
-            WITH node, score, head(places) AS place
+            """
+            + episode_place_projection_subquery("node")
+            + robot_participation_projection_subquery("node")
+            + """
             RETURN node.id AS episode_id,
                    node.transcript AS transcript,
                    node.start_time AS start_time,
                    node.end_time AS end_time,
                    place.building_code AS building_code,
                    place.room_id AS room_id,
+                   robots AS robots,
                    score AS score
             ORDER BY score DESC
             LIMIT $limit
@@ -149,6 +201,7 @@ class EpisodeRetrievalService:
                 "limit": query.limit,
                 "embedding": embedding,
                 "person_id": query.person_id,
+                "robot_id": query.robot_id,
                 "building_code": query.building_code,
                 "room_id": query.room_id,
             },
@@ -165,6 +218,7 @@ class EpisodeRetrievalService:
             end_time=str(row["end_time"]) if row.get("end_time") is not None else None,
             building_code=str(row["building_code"]) if row.get("building_code") is not None else None,
             room_id=str(row["room_id"]) if row.get("room_id") is not None else None,
+            robots=robot_participations_from_row(row),
         )
 
 
@@ -221,6 +275,7 @@ class PersonContextRetrievalService:
         person_id: str,
         limit: int = 10,
         semantic_scope: str | None = None,
+        robot_id: str | None = None,
     ) -> PersonContextSource | None:
         """Return context source data for a person when present."""
         person_source = self._person_source(person_id)
@@ -229,14 +284,14 @@ class PersonContextRetrievalService:
 
         scope = self._normalize_semantic_scope(semantic_scope)
         if scope is not None:
-            items = self._scoped_items_for_person(person_id, scope, limit)
+            items = self._scoped_items_for_person(person_id, scope, limit, robot_id=robot_id)
             return PersonContextSource(
                 person_id=person_source.person_id,
                 display_name=person_source.display_name,
                 items=items,
             )
 
-        episode_rows = recent_episode_rows_for_person(self.runner, person_id, limit)
+        episode_rows = recent_episode_rows_for_person(self.runner, person_id, limit, robot_id=robot_id)
         event_rows = self.runner.run(
             """
             MATCH (:Person {id: $person_id})-[r]->(e:Event)
@@ -271,12 +326,18 @@ class PersonContextRetrievalService:
         person_id: str,
         limit: int = 10,
         semantic_scope: str | None = None,
+        robot_id: str | None = None,
     ) -> str:
         """Return sentinel markdown for missing or no-match person evidence."""
         bounded_limit = _bounded_limit(limit)
         scope = self._normalize_semantic_scope(semantic_scope)
         if scope is not None:
-            source = self.source_for_person(person_id, limit=bounded_limit, semantic_scope=scope)
+            source = self.source_for_person(
+                person_id,
+                limit=bounded_limit,
+                semantic_scope=scope,
+                robot_id=robot_id,
+            )
         else:
             source = self._person_source(person_id)
         return format_person_context_evidence_markdown(
@@ -311,13 +372,20 @@ class PersonContextRetrievalService:
         scope = semantic_scope.strip()
         return scope or None
 
-    def _scoped_items_for_person(self, person_id: str, semantic_scope: str, limit: int) -> list[PersonContextItem]:
+    def _scoped_items_for_person(
+        self,
+        person_id: str,
+        semantic_scope: str,
+        limit: int,
+        *,
+        robot_id: str | None = None,
+    ) -> list[PersonContextItem]:
         """Return semantically scoped context items for a person."""
         if self.embeddings is None:
             raise ValueError("semantic_scope requires an embedding provider")
 
         embedding = self.embeddings.embed(semantic_scope)
-        rows = self._scoped_episode_rows(person_id, embedding, limit)
+        rows = self._scoped_episode_rows(person_id, embedding, limit, robot_id=robot_id)
 
         best_rows: dict[str, dict[str, object]] = {}
         for row in rows:
@@ -338,6 +406,8 @@ class PersonContextRetrievalService:
         person_id: str,
         embedding: list[float],
         limit: int,
+        *,
+        robot_id: str | None = None,
     ) -> list[dict[str, object]]:
         """Fetch scoped episode rows from one vector index."""
         candidate_limit = max(limit * 5, 25)
@@ -345,6 +415,11 @@ class PersonContextRetrievalService:
             _vector_search_clause("episode_transcript_embedding", "node", "candidate_limit")
             + """
             MATCH (:Person {id: $person_id})-[r:PARTICIPATED_IN]->(node)
+            WHERE (
+                $robot_id IS NULL
+                OR NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(node) }
+                OR EXISTS { MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(node) }
+            )
             OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)
             RETURN node.id AS item_id,
                    'episode' AS item_type,
@@ -363,6 +438,7 @@ class PersonContextRetrievalService:
                 "candidate_limit": candidate_limit,
                 "embedding": embedding,
                 "person_id": person_id,
+                "robot_id": str(robot_id or "").strip() or None,
                 "limit": limit,
             },
         )

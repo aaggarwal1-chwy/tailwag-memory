@@ -12,6 +12,7 @@ The focused docs are the source of truth:
 - [AWS deployment and operations](docs/aws-deployment.md): live resources, private network topology, laptop Neo4j access, caller hookup, deployment workflow, verification, and deployment constraints.
 - [AWS deployment resources](deploy/aws/README.md): local CloudFormation, IAM policy examples, image build/push helper, and worker packaging helper for AWS deployment.
 - [AWS manual updates](docs/aws-manual-updates.md): operator-run API, worker, and infrastructure update procedures with verification and rollback.
+- [Robot provenance and BOS3 migration](docs/robot-provenance-bos3-migration.md): local rehearsal, guarded Cypher transaction, coordinated AWS and Argos rollout, verification, and rollback.
 - [CLI reference](docs/cli-reference.md): local schema setup, ingestion, retrieval, memory maintenance, inspect, and Slack command examples.
 - [Inspect reference](docs/inspect-reference.md): read-only report behavior, generated assets, filters, and affect report requirements.
 - [Slack ingestion guide](docs/slack-ingestion.md): Slack app setup, polling, state handling, and inspection queries.
@@ -19,7 +20,7 @@ The focused docs are the source of truth:
 
 ## Current Scope
 
-Tailwag stores caller-owned people, places, episodes, events, directory rows, biometric references, and transcript-derived memory items in Neo4j. For the complete runtime scope and explicit boundaries, see [Architecture](docs/architecture.md).
+Tailwag stores caller-owned people, narrow robot identities and episode provenance, places, episodes, events, directory rows, biometric references, and transcript-derived memory items in Neo4j. Robot storage is intentionally limited to a stable ID, current display name, and per-episode name/role/source provenance; capabilities, sensors, software, live state, maintenance, and fleet modeling remain outside Tailwag. For the complete runtime scope and explicit boundaries, see [Architecture](docs/architecture.md).
 
 ## Local Setup
 

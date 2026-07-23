@@ -94,6 +94,7 @@ class PersonContextRequest(StrictRequest):
     """Request body for prompt-ready person context."""
 
     person_id: str
+    robot_id: str | None = None
     limit: int = 10
     semantic_scope: str | None = None
     current_text: str | None = None
@@ -122,6 +123,7 @@ class SemanticSearchRequest(StrictRequest):
 
     text: str
     person_id: str
+    robot_id: str | None = None
     building_code: str | None = None
     limit: int = 5
     now: datetime | None = None
@@ -141,6 +143,15 @@ class PersonPayload(StrictRequest):
     def as_kwargs(self) -> dict[str, Any]:
         """Return a version-compatible Pydantic dict."""
         return _model_dump(self)
+
+
+class RobotPayload(StrictRequest):
+    """HTTP shape for RobotInput identity and episode provenance."""
+
+    id: str
+    display_name: str
+    role: str = "host"
+    source: str = "argos"
 
 
 class PlacePayload(StrictRequest):
@@ -169,6 +180,7 @@ class EpisodePayload(StrictRequest):
     place: PlacePayload
     participants: list[PersonPayload] = Field(default_factory=list)
     mentioned_people: list[EpisodeMentionPayload] = Field(default_factory=list)
+    robots: list[RobotPayload] = Field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         """Return an EpisodeInput-compatible dictionary."""

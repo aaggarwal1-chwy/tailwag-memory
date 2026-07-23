@@ -27,7 +27,7 @@ Outputs:
 - tests or manual checks that compare Tailwag behavior with Argos expectations
 
 Non-goals:
-- owning unrelated Argos runtime, robot, face, speaker, navigation, or display internals
+- owning unrelated Argos runtime, face, speaker, navigation, or display internals; narrow Robot identity/provenance compatibility is allowed, but capabilities, sensors, software, live state, maintenance, and fleet behavior are not
 - owning Tailwag memory item internals already covered by memory-item
 - owning source-specific ingestion behavior already covered by source-adapter
 - making cross-repo edits without an explicit task that includes the Argos repo

@@ -1,10 +1,21 @@
 from tests.helpers import RecordingQueryRunner
 from tailwag_memory.schema import initialize_schema, schema_statements
+import re
 import unittest
+from unittest.mock import patch
 
 
 def _compact(statement: str) -> str:
-    return " ".join(statement.split())
+    return re.sub(r"\s+", " ", statement).strip()
+
+
+def _statement_names(statements: list[str], kind: str) -> dict[str, str]:
+    pattern = re.compile(rf"^CREATE {kind} (?P<name>\S+)")
+    return {
+        match.group("name"): statement
+        for statement in statements
+        if (match := pattern.match(statement)) is not None
+    }
 
 
 class SchemaTest(unittest.TestCase):
@@ -14,7 +25,6 @@ class SchemaTest(unittest.TestCase):
         self.assertNotIn("org_id", text)
         self.assertNotIn("identity_status", text)
         self.assertNotIn("confidence", text)
-        self.assertNotIn("Robot", text)
         self.assertNotIn("ObjectConcept", text)
         self.assertNotIn("Activity", text)
         self.assertNotIn("Utterance", text)
@@ -23,48 +33,82 @@ class SchemaTest(unittest.TestCase):
     def test_schema_creates_expected_constraints_and_vector_indexes(self) -> None:
         statements = [_compact(statement) for statement in schema_statements(64)]
 
-        self.assertEqual(len(statements), 13)
-        self.assertEqual(
-            statements[:9],
-            [
-                "CREATE CONSTRAINT person_id IF NOT EXISTS FOR (p:Person) REQUIRE p.id IS UNIQUE",
-                "CREATE CONSTRAINT person_email IF NOT EXISTS FOR (p:Person) REQUIRE p.email IS UNIQUE",
-                "CREATE CONSTRAINT episode_id IF NOT EXISTS FOR (e:Episode) REQUIRE e.id IS UNIQUE",
-                "CREATE CONSTRAINT event_id IF NOT EXISTS FOR (e:Event) REQUIRE e.id IS UNIQUE",
-                "CREATE CONSTRAINT memory_item_id IF NOT EXISTS FOR (m:MemoryItem) REQUIRE m.id IS UNIQUE",
-                "CREATE CONSTRAINT employee_directory_record_key IF NOT EXISTS FOR (d:EmployeeDirectoryRecord) REQUIRE (d.site_code, d.username) IS UNIQUE",
-                "CREATE CONSTRAINT face_reference_id IF NOT EXISTS FOR (r:FaceReference) REQUIRE r.id IS UNIQUE",
-                "CREATE CONSTRAINT voice_reference_id IF NOT EXISTS FOR (r:VoiceReference) REQUIRE r.id IS UNIQUE",
-                "CREATE CONSTRAINT place_key IF NOT EXISTS FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE",
-            ],
-        )
-        expected_indexes = [
-            ("episode_transcript_embedding", "Episode", "transcript_embedding"),
-            ("face_reference_embedding", "FaceReference", "embedding"),
-            ("voice_reference_embedding", "VoiceReference", "embedding"),
-            ("memory_item_summary_embedding", "MemoryItem", "summary_embedding"),
-        ]
-        for statement, (name, label, property_name) in zip(statements[9:], expected_indexes):
-            self.assertIn(f"CREATE VECTOR INDEX {name} IF NOT EXISTS", statement)
-            self.assertIn(f"FOR (", statement)
-            self.assertIn(f":{label}) ON", statement)
-            self.assertIn(f".{property_name})", statement)
-            self.assertIn("`vector.similarity_function`: 'cosine'", statement)
-        self.assertIn("`vector.dimensions`: 64", statements[9])
-        self.assertIn("`vector.dimensions`: 512", statements[10])
-        self.assertIn("`vector.dimensions`: 192", statements[11])
-        self.assertIn("`vector.dimensions`: 64", statements[12])
+        constraints = _statement_names(statements, "CONSTRAINT")
+        # Schema names are a compatibility contract; statement order and formatting are not.
+        expected_constraints = {
+            "person_id": ("Person", ("id",)),
+            "person_email": ("Person", ("email",)),
+            "episode_id": ("Episode", ("id",)),
+            "robot_id": ("Robot", ("id",)),
+            "event_id": ("Event", ("id",)),
+            "memory_item_id": ("MemoryItem", ("id",)),
+            "employee_directory_record_key": (
+                "EmployeeDirectoryRecord",
+                ("site_code", "username"),
+            ),
+            "face_reference_id": ("FaceReference", ("id",)),
+            "voice_reference_id": ("VoiceReference", ("id",)),
+            "place_key": ("Place", ("building_code", "room_id")),
+        }
+        self.assertEqual(set(constraints), set(expected_constraints))
+        for name, (label, properties) in expected_constraints.items():
+            property_pattern = r",\s*".join(
+                rf"(?P=alias)\.{re.escape(property_name)}"
+                for property_name in properties
+            )
+            if len(properties) > 1:
+                property_pattern = rf"\({property_pattern}\)"
+            with self.subTest(constraint=name):
+                self.assertRegex(
+                    constraints[name],
+                    rf"FOR\s+\((?P<alias>[A-Za-z_]\w*):{re.escape(label)}\)\s+"
+                    rf"REQUIRE\s+{property_pattern}\s+IS\s+UNIQUE\b",
+                )
+
+        indexes = _statement_names(statements, "VECTOR INDEX")
+        expected_indexes = {
+            "episode_transcript_embedding": ("Episode", "transcript_embedding", 64),
+            "face_reference_embedding": ("FaceReference", "embedding", 512),
+            "voice_reference_embedding": ("VoiceReference", "embedding", 192),
+            "memory_item_summary_embedding": ("MemoryItem", "summary_embedding", 64),
+        }
+        self.assertEqual(set(indexes), set(expected_indexes))
+        for name, (label, property_name, dimension) in expected_indexes.items():
+            with self.subTest(index=name):
+                self.assertRegex(
+                    indexes[name],
+                    rf"FOR\s+\((?P<alias>[A-Za-z_]\w*):{re.escape(label)}\)\s+"
+                    rf"ON\s+\((?P=alias)\.{re.escape(property_name)}\)",
+                )
+                self.assertRegex(
+                    indexes[name],
+                    rf"`vector\.dimensions`:\s*{dimension}(?=\s*[,}}])",
+                )
+                self.assertRegex(
+                    indexes[name],
+                    r"`vector\.similarity_function`:\s*'cosine'",
+                )
 
     def test_initialize_schema_runs_all_statements(self) -> None:
         runner = RecordingQueryRunner()
 
-        initialize_schema(runner, embedding_dimension=64)
+        with patch(
+            "tailwag_memory.schema.schema_statements",
+            return_value=["statement one", "statement two"],
+        ) as statements:
+            initialize_schema(
+                runner,
+                embedding_dimension=64,
+                face_embedding_dimension=256,
+                voice_embedding_dimension=96,
+            )
 
-        self.assertEqual(len(runner.queries), len(schema_statements(64)))
-        self.assertEqual(
-            [_compact(query.query) for query in runner.queries],
-            [_compact(statement) for statement in schema_statements(64)],
+        statements.assert_called_once_with(
+            64,
+            face_embedding_dimension=256,
+            voice_embedding_dimension=96,
         )
+        self.assertEqual([query.query for query in runner.queries], ["statement one", "statement two"])
 
     def test_schema_rejects_invalid_embedding_dimension(self) -> None:
         for value in (0, -1, 1.5):

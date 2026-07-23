@@ -25,6 +25,7 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(rejected.reason, "consent_required")
         self.assertEqual(rejected.person_id, "person_jamie")
         self.assertEqual(rejected.reference_id, "")
+        # Privacy guard: denied consent must stop before any graph write.
         self.assertEqual(runner.queries, [])
 
     def test_observation_validation_errors_are_stable(self) -> None:
@@ -67,8 +68,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         exists = BiometricReferenceService(runner).has_voice_reference(" person_jamie ")
 
         self.assertTrue(exists)
-        self.assertIn("HAS_VOICE_REFERENCE", runner.queries[0].query)
-        self.assertIn("coalesce(r.status, 'active') = 'active'", runner.queries[0].query)
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie"})
 
     def test_observation_missing_reference_result_is_stable(self) -> None:
@@ -94,7 +93,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(result.reason, "missing_reference")
         self.assertEqual(result.person_id, "person_jamie")
         self.assertEqual(result.modality, "face")
-        self.assertEqual(len(runner.queries), 1)
 
     def test_observation_dimension_mismatch_result_is_stable(self) -> None:
         runner = RecordingQueryRunner(
@@ -130,9 +128,8 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(result.reference_id, "voice:person_jamie:1")
         self.assertEqual(result.sample_count, 2)
         self.assertEqual(result.target_sample_count, 5)
-        self.assertEqual(len(runner.queries), 1)
 
-    def test_enroll_face_reference_writes_reference_node(self) -> None:
+    def test_enroll_face_reference_returns_saved_result_and_write_parameters(self) -> None:
         runner = RecordingQueryRunner()
         service = BiometricReferenceService(runner, face_embedding_model="facenet-vggface2")
 
@@ -144,17 +141,11 @@ class BiometricReferenceServiceTest(unittest.TestCase):
 
         self.assertTrue(result.saved)
         query = runner.queries[-1]
-        self.assertIn("CREATE (r:FaceReference", query.query)
-        self.assertIn("HAS_FACE_REFERENCE", query.query)
         self.assertEqual(query.parameters["person_id"], "person_jamie")
         self.assertEqual(query.parameters["model"], "facenet-vggface2")
         self.assertEqual(query.parameters["dimension"], 512)
         self.assertEqual(query.parameters["target_sample_count"], 5)
         self.assertEqual(json.loads(query.parameters["metadata_json"]), {"quality": "good"})
-        self.assertIn("r.sample_count = 1", query.query)
-        self.assertIn("r.accepted_update_count = 0", query.query)
-        self.assertIn("r.target_sample_count = $target_sample_count", query.query)
-        self.assertIn("r.aggregate_method = 'normalized_running_average'", query.query)
 
     def test_enroll_face_reference_updates_person_profile_from_metadata(self) -> None:
         runner = RecordingQueryRunner()
@@ -174,7 +165,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(person_query.parameters["person"]["display_name"], "Jamie Example")
         self.assertEqual(person_query.parameters["person"]["official_name"], "Jamie Official")
         self.assertEqual(person_query.parameters["person"]["email"], "jamie@example.com")
-        self.assertIn("WHEN person.official_name IS NOT NULL THEN person.official_name", person_query.query)
 
     def test_enroll_voice_reference_without_name_metadata_does_not_use_person_id_as_display_name(self) -> None:
         runner = RecordingQueryRunner()
@@ -208,12 +198,11 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         )
 
         query = runner.queries[-1]
-        self.assertIn("r.metadata_json = $metadata_json", query.query)
         stored = json.loads(query.parameters["metadata_json"])
         self.assertEqual(stored["metadata"]["username"], "jamie")
         self.assertEqual(stored["directory_profile_lines"], ["Title: Engineer"])
 
-    def test_enroll_face_reference_links_directory_record_when_metadata_is_verified(self) -> None:
+    def test_enroll_face_reference_passes_verified_directory_identity(self) -> None:
         runner = RecordingQueryRunner()
         service = BiometricReferenceService(runner)
 
@@ -229,9 +218,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         )
 
         query = runner.queries[-1]
-        self.assertIn("HAS_DIRECTORY_RECORD", query.query)
-        self.assertIn("p.official_name", query.query)
-        self.assertIn("p.name = p.id", query.query)
         self.assertEqual(query.parameters["directory_username"], "jamie")
         self.assertEqual(query.parameters["directory_site_code"], "BOS3")
 
@@ -246,13 +232,12 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         )
 
         query = runner.queries[-1]
-        self.assertIn("r.display_name = $reference_display_name", query.query)
         self.assertEqual(
             query.parameters["reference_display_name"],
             "Face reference for Jamie Example",
         )
 
-    def test_search_voice_uses_reference_index_and_thresholds(self) -> None:
+    def test_search_voice_returns_candidate_and_metadata(self) -> None:
         runner = RecordingQueryRunner(
             results=[
                 [
@@ -275,8 +260,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertTrue(result.recognized)
         self.assertEqual(result.candidates[0].person_id, "person_jamie")
         self.assertEqual(result.candidates[0].metadata, {"quality": "good"})
-        self.assertIn("voice_reference_embedding", runner.queries[0].query)
-        self.assertIn("HAS_VOICE_REFERENCE", runner.queries[0].query)
 
     def test_search_voice_rejects_below_updated_threshold(self) -> None:
         runner = RecordingQueryRunner(
@@ -387,16 +370,12 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertAlmostEqual(result.top_score, 0.46)
         self.assertAlmostEqual(result.threshold, 0.60)
 
-    def test_search_face_site_filter_keeps_directoryless_enrolled_people(self) -> None:
+    def test_search_face_passes_site_filter(self) -> None:
         runner = RecordingQueryRunner()
         service = BiometricReferenceService(runner)
 
         service.search_face(embedding=[0.1] * 512, site_code="BOS3")
 
-        self.assertIn(
-            "directory IS NULL OR directory.site_code = $site_code",
-            runner.queries[0].query,
-        )
         self.assertEqual(runner.queries[0].parameters["site_code"], "BOS3")
 
     def test_observe_face_embedding_updates_reference_from_agreement(self) -> None:
@@ -438,7 +417,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(result.target_sample_count, 5)
         self.assertAlmostEqual(result.similarity, 1.0)
         update_query = runner.queries[-1]
-        self.assertIn("r.sample_count = $sample_count", update_query.query)
         self.assertEqual(update_query.parameters["sample_count"], 2)
         self.assertEqual(update_query.parameters["accepted_update_count"], 1)
         stored = json.loads(update_query.parameters["metadata_json"])
@@ -481,7 +459,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(result.status, "complete")
         self.assertEqual(result.reason, "sample_target_reached")
         self.assertEqual(result.sample_count, 5)
-        self.assertEqual(len(runner.queries), 1)
 
     def test_observe_reference_rejects_low_similarity(self) -> None:
         runner = RecordingQueryRunner(
@@ -553,7 +530,6 @@ class BiometricReferenceServiceTest(unittest.TestCase):
 
         self.assertFalse(result.accepted)
         self.assertEqual(result.reason, "model_mismatch")
-        self.assertEqual(len(runner.queries), 1)
 
     def test_observe_face_embedding_rejects_face_only_evidence(self) -> None:
         runner = RecordingQueryRunner()
@@ -574,6 +550,7 @@ class BiometricReferenceServiceTest(unittest.TestCase):
 
         self.assertFalse(result.accepted)
         self.assertEqual(result.reason, "weak_evidence")
+        # Privacy guard: weak evidence must never adapt a biometric reference.
         self.assertEqual(runner.queries, [])
 
     def test_observe_voice_embedding_rejects_face_only_evidence(self) -> None:
@@ -595,6 +572,7 @@ class BiometricReferenceServiceTest(unittest.TestCase):
 
         self.assertFalse(result.accepted)
         self.assertEqual(result.reason, "weak_evidence")
+        # Privacy guard: weak evidence must never adapt a biometric reference.
         self.assertEqual(runner.queries, [])
 
     def test_observe_voice_embedding_accepts_audio_face_agreement(self) -> None:

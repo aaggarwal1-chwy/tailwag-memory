@@ -21,16 +21,23 @@ class PersonMemoryContextService:
         self,
         person_id: str,
         *,
+        robot_id: str | None = None,
         current_text: str | None = None,
         now: datetime | None = None,
         memory_limit: int = 12,
     ) -> str:
         """Return durable memory markdown for a person."""
         memory_service = MemoryItemService(self.runner, self.embeddings or _NoopEmbeddingProvider())
-        items = memory_service.list_active_items(person_id=person_id, limit=max(memory_limit * 3, 30), now=now)
+        items = memory_service.list_active_items(
+            person_id=person_id,
+            robot_id=robot_id,
+            limit=max(memory_limit * 3, 30),
+            now=now,
+        )
         if current_text and self.embeddings is not None:
             vector_items = memory_service.vector_search(
                 person_id=person_id,
+                robot_id=robot_id,
                 text=current_text,
                 limit=memory_limit,
                 now=now,

@@ -347,11 +347,12 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 self,
                 person_id: str,
                 *,
+                robot_id: str | None = None,
                 current_text: str | None = None,
                 now=None,
                 memory_limit: int = 12,
             ) -> str:
-                memory_calls.append((person_id, current_text, now, memory_limit))
+                memory_calls.append((person_id, robot_id, current_text, now, memory_limit))
                 return "[PERSON MEMORY]\nPreferences:\n- likes robot demos"
 
         class FakeRetrieval:
@@ -363,8 +364,9 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 person_id: str,
                 limit: int = 10,
                 semantic_scope: str | None = None,
+                robot_id: str | None = None,
             ) -> str:
-                retrieval_calls.append((person_id, limit, semantic_scope))
+                retrieval_calls.append((person_id, robot_id, limit, semantic_scope))
                 return ""
 
         now = datetime(2026, 6, 18, tzinfo=timezone.utc)
@@ -372,6 +374,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
             with patch("tailwag_memory.client.PersonContextRetrievalService", FakeRetrieval):
                 context = TailwagMemoryClient(RecordingQueryRunner(), _settings()).person_context(
                     "person_jamie",
+                    robot_id="cody",
                     limit=3,
                     semantic_scope="chargers",
                     current_text="robot demo",
@@ -383,8 +386,8 @@ class TailwagMemoryClientTest(unittest.TestCase):
             context,
             "[PERSON MEMORY]\nPreferences:\n- likes robot demos",
         )
-        self.assertEqual(memory_calls, [("person_jamie", "robot demo", now, 4)])
-        self.assertEqual(retrieval_calls, [("person_jamie", 3, "chargers")])
+        self.assertEqual(memory_calls, [("person_jamie", "cody", "robot demo", now, 4)])
+        self.assertEqual(retrieval_calls, [("person_jamie", "cody", 3, "chargers")])
 
     def test_search_semantic_memory_returns_episode_and_memory_item_results(self) -> None:
         runner = RecordingQueryRunner()
@@ -442,6 +445,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
                     result = client.search_semantic_memory(
                         text=" robot demos ",
                         person_id=" person_jamie ",
+                        robot_id=" puffle ",
                         building_code=" BOS ",
                         limit=3,
                         now=now,
@@ -452,6 +456,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
         self.assertEqual(calls[2][0], "episode_search")
         self.assertEqual(calls[2][1].text, "robot demos")
         self.assertEqual(calls[2][1].person_id, "person_jamie")
+        self.assertEqual(calls[2][1].robot_id, "puffle")
         self.assertEqual(calls[2][1].building_code, "BOS")
         self.assertIsNone(calls[2][1].room_id)
         self.assertEqual(calls[2][1].limit, 3)
@@ -463,6 +468,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 "memory_search",
                 {
                     "person_id": "person_jamie",
+                    "robot_id": "puffle",
                     "embedding": [0.1, 0.2],
                     "limit": 3,
                     "now": now,
@@ -481,6 +487,7 @@ class TailwagMemoryClientTest(unittest.TestCase):
                         "end_time": "2026-06-01T10:05:00Z",
                         "building_code": "BOS",
                         "room_id": "lab",
+                        "robots": [],
                     }
                 ],
                 "memory_items": [

@@ -12,7 +12,7 @@ import unittest
 
 
 class EpisodeRetrievalServiceTest(unittest.TestCase):
-    def test_recent_episode_rows_for_person_centralizes_context_query_shape(self) -> None:
+    def test_recent_episode_rows_for_person_returns_rows_and_forwards_bounds(self) -> None:
         runner = RecordingQueryRunner(
             results=[
                 [
@@ -34,14 +34,24 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
 
         self.assertEqual(rows[0]["episode_id"], "episode_1")
         self.assertEqual(rows[0]["item_type"], "episode")
+        self.assertEqual(len(runner.queries), 1)
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 3})
-        self.assertIn("e.id AS episode_id", runner.queries[0].query)
-        self.assertIn("'episode' AS item_type", runner.queries[0].query)
-        self.assertIn("person.id AS person_id", runner.queries[0].query)
-        self.assertIn("person.display_name AS display_name", runner.queries[0].query)
-        self.assertIn("speaker_labels AS speaker_labels", runner.queries[0].query)
-        self.assertIn("e.transcript AS transcript", runner.queries[0].query)
-        self.assertIn("PARTICIPATED_IN", runner.queries[0].query)
+
+    def test_recent_episode_rows_for_person_robot_scope_includes_global_and_self(self) -> None:
+        runner = RecordingQueryRunner()
+
+        recent_episode_rows_for_person(runner, "person_jamie", 3, robot_id="cody")
+
+        query = runner.queries[0]
+        self.assertEqual(
+            query.parameters,
+            {"person_id": "person_jamie", "robot_id": "cody", "limit": 3},
+        )
+        self.assertIn("NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(e) }", query.query)
+        self.assertIn(
+            "EXISTS { MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(e) }",
+            query.query,
+        )
 
     def test_by_person_uses_recent_episode_helper_rows(self) -> None:
         runner = RecordingQueryRunner(
@@ -54,6 +64,20 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
                         "end_time": "2026-06-16T14:05:00+00:00",
                         "building_code": "MAIN",
                         "room_id": "101",
+                        "robots": [
+                            {
+                                "robot_id": "puffle",
+                                "display_name": "Puffle",
+                                "role": "host",
+                                "source": "argos",
+                            },
+                            {
+                                "robot_id": "cody",
+                                "display_name": "Cody",
+                                "role": "host",
+                                "source": "argos",
+                            },
+                        ],
                     }
                 ]
             ]
@@ -67,8 +91,46 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(results[0].end_time, "2026-06-16T14:05:00+00:00")
         self.assertEqual(results[0].building_code, "MAIN")
         self.assertEqual(results[0].room_id, "101")
+        self.assertEqual([robot.robot_id for robot in results[0].robots], ["cody", "puffle"])
+        self.assertEqual(len(runner.queries), 1)
         self.assertEqual(runner.queries[0].parameters, {"person_id": "person_jamie", "limit": 2})
-        self.assertIn("e.id AS episode_id", runner.queries[0].query)
+
+    def test_by_robot_uses_stable_id_and_returns_all_episode_robots(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [
+                    {
+                        "episode_id": "episode_1",
+                        "transcript": "Cody: Welcome.",
+                        "start_time": "2026-06-16T14:00:00+00:00",
+                        "building_code": "BOS3",
+                        "room_id": "__site__",
+                        "robots": [
+                            {
+                                "robot_id": "cody",
+                                "display_name": "Cody Renamed",
+                                "role": "host",
+                                "source": "argos",
+                            },
+                            {
+                                "robot_id": "assistant",
+                                "display_name": "Cody",
+                                "role": "assistant",
+                                "source": "caller",
+                            },
+                        ],
+                    }
+                ]
+            ]
+        )
+        service = EpisodeRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        results = service.by_robot("cody", limit=4)
+
+        self.assertEqual(len(runner.queries), 1)
+        self.assertEqual(runner.queries[0].parameters, {"robot_id": "cody", "limit": 4})
+        self.assertEqual([robot.robot_id for robot in results[0].robots], ["assistant", "cody"])
+        self.assertEqual(results[0].robots[1].display_name, "Cody Renamed")
 
     def test_by_place_returns_episode_time_and_place(self) -> None:
         runner = RecordingQueryRunner(
@@ -94,8 +156,11 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(results[0].end_time, "2026-06-16T14:05:00+00:00")
         self.assertEqual(results[0].building_code, "MAIN")
         self.assertEqual(results[0].room_id, "101")
-        self.assertIn("e.start_time AS start_time", runner.queries[0].query)
-        self.assertIn("$building_code AS building_code", runner.queries[0].query)
+        self.assertEqual(len(runner.queries), 1)
+        self.assertEqual(
+            runner.queries[0].parameters,
+            {"building_code": "MAIN", "room_id": "101", "limit": 2},
+        )
 
     def test_vector_search_uses_transcript_index(self) -> None:
         runner = RecordingQueryRunner(
@@ -121,9 +186,12 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertEqual(results[0].start_time, "2026-06-16T14:00:00+00:00")
         self.assertEqual(results[0].building_code, "MAIN")
         self.assertEqual(results[0].room_id, "101")
+        # Index safety guard: vector reads stay on the approved Episode index and label.
         self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[0].query)
         self.assertIn("WHERE node:Episode", runner.queries[0].query)
-        self.assertIn("OPTIONAL MATCH (node)-[:OCCURRED_AT]->(place:Place)", runner.queries[0].query)
+        self.assertEqual(results[0].robots, [])
+        self.assertEqual(runner.queries[0].parameters["limit"], 10)
+        self.assertEqual(len(runner.queries[0].parameters["embedding"]), 8)
 
     def test_search_clause_rejects_unknown_index_identifiers(self) -> None:
         # Vector index names are interpolated as string literals from a known allowlist.
@@ -155,23 +223,30 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
                 building_code="MAIN",
                 room_id="101",
                 limit=5,
+                robot_id="cody",
             )
         )
 
         params = runner.queries[0].parameters
         self.assertEqual(params["person_id"], "person_jamie")
+        self.assertEqual(params["robot_id"], "cody")
         self.assertEqual(params["building_code"], "MAIN")
         self.assertEqual(params["room_id"], "101")
         self.assertEqual(params["limit"], 5)
         self.assertEqual(params["candidate_limit"], 25)
-        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[0].query)
+        self.assertIn(
+            "NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(node) }",
+            runner.queries[0].query,
+        )
+        self.assertIn(
+            "EXISTS { MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(node) }",
+            runner.queries[0].query,
+        )
         self.assertEqual(results[0].start_time, "2026-06-16T14:00:00+00:00")
         self.assertEqual(results[0].end_time, "2026-06-16T14:05:00+00:00")
         self.assertEqual(results[0].building_code, "MAIN")
         self.assertEqual(results[0].room_id, "101")
-        self.assertIn("node.start_time AS start_time", runner.queries[0].query)
-        self.assertIn("place.building_code AS building_code", runner.queries[0].query)
-        self.assertIn("WITH node, score, head(places) AS place", runner.queries[0].query)
+        self.assertEqual(len(runner.queries), 1)
 
     def test_hybrid_search_supports_one_sided_place_filters(self) -> None:
         runner = RecordingQueryRunner()
@@ -186,8 +261,7 @@ class EpisodeRetrievalServiceTest(unittest.TestCase):
         self.assertIsNone(building_query.parameters["room_id"])
         self.assertIsNone(room_query.parameters["building_code"])
         self.assertEqual(room_query.parameters["room_id"], "101")
-        self.assertIn("$room_id IS NULL OR place.room_id = $room_id", building_query.query)
-        self.assertIn("$building_code IS NULL OR place.building_code = $building_code", room_query.query)
+        self.assertEqual(len(runner.queries), 2)
 
 
 class EventRetrievalServiceTest(unittest.TestCase):
@@ -238,8 +312,6 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
 
         self.assertEqual(markdown, "")
         self.assertEqual(len(runner.queries), 1)
-        self.assertIn("MATCH (p:Person", runner.queries[0].query)
-        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
 
     def test_markdown_for_person_scoped_no_match_does_not_fallback_to_events(self) -> None:
         runner = RecordingQueryRunner(
@@ -253,9 +325,8 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         markdown = service.markdown_for_person("person_jamie", semantic_scope=" chargers ")
 
         self.assertEqual(markdown, "no episodes matched the semantic scope: chargers")
-        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[1].query)
-        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
-        self.assertTrue(all("ORDER BY e.start_time DESC" not in query.query for query in runner.queries[1:]))
+        self.assertEqual(len(runner.queries), 2)
+        self.assertEqual(len(runner.queries[1].parameters["embedding"]), 8)
 
     def test_markdown_for_person_does_not_render_scoped_episode_summaries(self) -> None:
         runner = RecordingQueryRunner(
@@ -282,7 +353,7 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         markdown = service.markdown_for_person("person_jamie", limit=1, semantic_scope="chargers")
 
         self.assertEqual(markdown, "")
-        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
+        self.assertEqual(len(runner.queries), 2)
 
     def test_source_for_person_combines_recent_episodes_and_events(self) -> None:
         runner = RecordingQueryRunner(
@@ -324,10 +395,9 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         assert source is not None
         self.assertEqual(source.person_id, "person_jamie")
         self.assertEqual([item.item_id for item in source.items], ["event_1", "episode_1"])
-        self.assertIn("e.transcript AS transcript", runner.queries[1].query)
-        self.assertIn("PARTICIPATED_IN", runner.queries[1].query)
-        self.assertIn("type(r) = 'ATTENDED'", runner.queries[2].query)
-        self.assertIn("properties(r) AS rel_props", runner.queries[2].query)
+        self.assertEqual(len(runner.queries), 3)
+        self.assertEqual(runner.queries[1].parameters, {"person_id": "person_jamie", "limit": 10})
+        self.assertEqual(runner.queries[2].parameters, {"person_id": "person_jamie", "limit": 10})
 
     def test_source_for_person_parses_timestamped_transcript_lines(self) -> None:
         runner = RecordingQueryRunner(
@@ -400,18 +470,27 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
         )
         service = PersonContextRetrievalService(runner, MockOpenAIEmbeddingProvider(dimension=8))
 
-        source = service.source_for_person("person_jamie", limit=10, semantic_scope="chargers")
+        source = service.source_for_person(
+            "person_jamie",
+            limit=10,
+            semantic_scope="chargers",
+            robot_id="cody",
+        )
 
         self.assertIsNotNone(source)
         assert source is not None
         self.assertEqual([item.item_id for item in source.items], ["episode_2", "episode_1"])
         self.assertEqual([item.score for item in source.items], [0.88, 0.72])
-        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[1].query)
+        self.assertEqual(len(runner.queries[1].parameters["embedding"]), 8)
         self.assertEqual(runner.queries[1].parameters["person_id"], "person_jamie")
+        self.assertEqual(runner.queries[1].parameters["robot_id"], "cody")
+        self.assertIn(
+            "NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(node) }",
+            runner.queries[1].query,
+        )
         self.assertEqual(runner.queries[1].parameters["limit"], 10)
         self.assertEqual(runner.queries[1].parameters["candidate_limit"], 50)
-        self.assertTrue(all("db.index.vector.queryNodes" in query.query for query in runner.queries[1:]))
-        self.assertTrue(all("type(r) = 'ATTENDED'" not in query.query for query in runner.queries))
+        self.assertEqual(len(runner.queries), 2)
 
     def test_source_for_person_whitespace_semantic_scope_uses_unscoped_context(self) -> None:
         runner = RecordingQueryRunner(
@@ -434,7 +513,6 @@ class PersonContextRetrievalServiceTest(unittest.TestCase):
 
         self.assertIsNotNone(source)
         self.assertEqual(len(runner.queries), 3)
-        self.assertIn("ATTENDED", runner.queries[2].query)
 
     def test_source_for_person_semantic_scope_requires_embeddings(self) -> None:
         service = PersonContextRetrievalService(

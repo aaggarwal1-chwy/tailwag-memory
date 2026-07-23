@@ -202,9 +202,8 @@ class NodeDeletionService:
               UNWIND owned_episode_places AS place
               WITH place
               WHERE place IS NOT NULL
-              OPTIONAL MATCH (place)<-[:OCCURRED_AT]-()
-              WITH place, count(*) AS remaining_place_refs
-              WHERE remaining_place_refs = 0
+                AND NOT EXISTS { MATCH ()-[:OCCURRED_AT]->(place) }
+                AND NOT EXISTS { MATCH ()-[:HOME_BASED_AT]->(place) }
               RETURN collect(DISTINCT place) AS orphan_places
             }
             FOREACH (place IN orphan_places | DETACH DELETE place)
@@ -263,9 +262,8 @@ class NodeDeletionService:
               UNWIND episode_places AS place
               WITH place
               WHERE place IS NOT NULL
-              OPTIONAL MATCH (place)<-[:OCCURRED_AT]-()
-              WITH place, count(*) AS remaining_place_refs
-              WHERE remaining_place_refs = 0
+                AND NOT EXISTS { MATCH ()-[:OCCURRED_AT]->(place) }
+                AND NOT EXISTS { MATCH ()-[:HOME_BASED_AT]->(place) }
               RETURN collect(DISTINCT place) AS orphan_places
             }
             FOREACH (place IN orphan_places | DETACH DELETE place)

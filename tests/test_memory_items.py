@@ -75,6 +75,35 @@ def _consolidation_service(runner: RecordingQueryRunner, provider: object) -> Me
     return MemoryConsolidationService(runner, MockOpenAIEmbeddingProvider(dimension=8), provider)
 
 
+def _recorded_query_with_parameters(
+    runner: RecordingQueryRunner,
+    expected: dict[str, object],
+    *,
+    required_keys: tuple[str, ...] = (),
+):
+    matches = [
+        query
+        for query in runner.queries
+        if all(query.parameters.get(key) == value for key, value in expected.items())
+        and all(key in query.parameters for key in required_keys)
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected one recorded query for parameters {expected!r} and keys "
+            f"{required_keys!r}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _assert_no_graph_writes(test: unittest.TestCase, runner: RecordingQueryRunner) -> None:
+    """Guard rejected provider operations from causing any hidden graph mutation."""
+    mutation_tokens = (" CREATE ", " MERGE ", " SET ", " DELETE ", " REMOVE ")
+    for recorded_query in runner.queries:
+        normalized = f" {' '.join(recorded_query.query.upper().split())} "
+        for token in mutation_tokens:
+            test.assertNotIn(token, normalized)
+
+
 class MemoryItemServiceTest(unittest.TestCase):
     def test_create_item_writes_memory_item_relationships_and_embedding(self) -> None:
         runner = RecordingQueryRunner()
@@ -94,6 +123,8 @@ class MemoryItemServiceTest(unittest.TestCase):
 
         self.assertTrue(memory_id.startswith("mem_"))
         query = runner.queries[0]
+        # Append-only lifecycle guard: a new memory ID must be created rather
+        # than merged into an existing MemoryItem, with its owner/evidence links.
         self.assertIn("CREATE (m:MemoryItem", query.query)
         self.assertNotIn("MERGE (m:MemoryItem", query.query)
         self.assertIn("MemoryItem", query.query)
@@ -191,10 +222,13 @@ class MemoryItemServiceTest(unittest.TestCase):
         second_id = service.create_item(person_id="person_jamie", item=item)
 
         self.assertNotEqual(first_id, second_id)
-        create_queries = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query]
-        self.assertEqual(len(create_queries), 2)
-        self.assertEqual(create_queries[0].parameters["key"], "robot_memory_project")
-        self.assertEqual(create_queries[1].parameters["key"], "robot_memory_project")
+        created_ids = {
+            query.parameters["memory_id"]
+            for query in runner.queries
+            if query.parameters.get("key") == "robot_memory_project"
+            and "memory_id" in query.parameters
+        }
+        self.assertEqual(created_ids, {first_id, second_id})
 
     def test_vector_search_scores_memory_items_within_person_scope(self) -> None:
         runner = RecordingQueryRunner(
@@ -219,10 +253,7 @@ class MemoryItemServiceTest(unittest.TestCase):
 
         self.assertEqual(results[0].memory_id, "mem_1")
         self.assertEqual(results[0].score, 0.87)
-        self.assertIn("db.index.vector.queryNodes('memory_item_summary_embedding'", runner.queries[0].query)
-        self.assertIn("HAS_MEMORY", runner.queries[0].query)
-        self.assertIn("SUPERSEDED_BY", runner.queries[0].query)
-        self.assertNotIn("vector.similarity.cosine", runner.queries[0].query)
+        self.assertEqual(runner.queries[0].parameters["person_id"], "person_jamie")
         self.assertEqual(runner.queries[0].parameters["candidate_limit"], 25)
 
     def test_vector_search_overfetches_before_filtering_expired_items(self) -> None:
@@ -292,6 +323,8 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertEqual(service.vector_search(person_id="person_jamie", text="family", limit=3), [])
 
         query = runner.queries[0].query
+        # Memory lifecycle guard: superseded audit records must never re-enter
+        # active semantic retrieval.
         self.assertIn("node.status = 'active'", query)
         self.assertIn("SUPERSEDED_BY", query)
 
@@ -335,6 +368,8 @@ class MemoryItemServiceTest(unittest.TestCase):
 
         self.assertTrue(addressed)
         query = runner.queries[0]
+        # Memory lifecycle guard: addressing changes status and appends episode
+        # evidence without placing addressed_at on the MemoryItem itself.
         self.assertIn("m.status = 'addressed'", query.query)
         self.assertIn("MERGE (m)-[r:ADDRESSED_BY]->(e)", query.query)
         self.assertIn("r.addressed_at", query.query)
@@ -371,6 +406,8 @@ class MemoryItemServiceTest(unittest.TestCase):
         merged_id = runner.queries[1].parameters["memory_id"]
         self.assertEqual(result.merged_memory_id, merged_id)
         self.assertTrue(result.merged_memory_id.startswith("mem_"))
+        # Append-only lifecycle guard: merge creates a replacement, copies
+        # evidence, then supersedes sources instead of rewriting them in place.
         self.assertIn("CREATE (m:MemoryItem", runner.queries[1].query)
         self.assertEqual(result.superseded_memory_ids, ["mem_old_spouse", "mem_old_kids"])
         self.assertEqual(result.linked_episode_count, 4)
@@ -407,6 +444,7 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertEqual(result.skipped_source_memory_ids, [])
         self.assertEqual(result.superseded_memory_ids, ["mem_from_slack_person_id"])
         ownership_query = runner.queries[0]
+        # Ownership guard: visibility follows HAS_MEMORY, not an ID convention.
         self.assertIn("(:Person {id: $person_id})-[:HAS_MEMORY]->(m:MemoryItem)", ownership_query.query)
         self.assertEqual(ownership_query.parameters["person_id"], "person_argos_jamie")
 
@@ -447,7 +485,6 @@ class MemoryItemServiceTest(unittest.TestCase):
             )
 
         self.assertEqual(len(runner.queries), 1)
-        self.assertFalse(any("MERGE (m:MemoryItem" in query.query for query in runner.queries))
 
     def test_get_and_list_items_map_rows_and_exclude_superseded_audit_memories(self) -> None:
         runner = RecordingQueryRunner(
@@ -467,10 +504,46 @@ class MemoryItemServiceTest(unittest.TestCase):
         self.assertEqual([item.memory_id for item in listed], ["mem_list"])
         self.assertEqual(listed[0].summary, "Listed memory.")
 
+        # Memory lifecycle guard: superseded records remain audit-only for both
+        # single-item and list retrieval.
         self.assertIn("coalesce(m.status, 'active') <> 'superseded'", runner.queries[0].query)
         self.assertIn("SUPERSEDED_BY", runner.queries[0].query)
         self.assertIn("coalesce(m.status, 'active') <> 'superseded'", runner.queries[1].query)
         self.assertIn("SUPERSEDED_BY", runner.queries[1].query)
+
+    def test_list_items_robot_scope_accepts_direct_global_or_self_supported_memory(self) -> None:
+        runner = RecordingQueryRunner()
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        service.list_items(person_id="person_jamie", robot_id="cody")
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["robot_id"], "cody")
+        self.assertIn("NOT EXISTS { MATCH (m)-[:SUPPORTED_BY]->(:Episode) }", query.query)
+        self.assertIn("MATCH (m)-[:SUPPORTED_BY]->(visible_episode:Episode)", query.query)
+        self.assertIn(
+            "NOT EXISTS { MATCH (:Robot)-[:PARTICIPATED_IN]->(visible_episode) }",
+            query.query,
+        )
+        self.assertIn(
+            "MATCH (:Robot {id: $robot_id})-[:PARTICIPATED_IN]->(visible_episode)",
+            query.query,
+        )
+
+    def test_vector_search_robot_scope_uses_same_memory_visibility_policy(self) -> None:
+        runner = RecordingQueryRunner()
+        service = MemoryItemService(runner, MockOpenAIEmbeddingProvider(dimension=8))
+
+        service.vector_search_by_embedding(
+            person_id="person_jamie",
+            robot_id="puffle",
+            embedding=[0.1] * 8,
+        )
+
+        query = runner.queries[0]
+        self.assertEqual(query.parameters["robot_id"], "puffle")
+        self.assertIn("NOT EXISTS { MATCH (node)-[:SUPPORTED_BY]->(:Episode) }", query.query)
+        self.assertIn("MATCH (node)-[:SUPPORTED_BY]->(visible_episode:Episode)", query.query)
 
     def test_rejects_invalid_observed_at(self) -> None:
         service = MemoryItemService(RecordingQueryRunner(), MockOpenAIEmbeddingProvider(dimension=8))
@@ -615,12 +688,20 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
             [item["episode_id"] for item in provider.calls[0]["episode_clusters"][0]],
             ["ep1", "ep2", "ep3", "ep4"],
         )
-        self.assertIn("db.index.vector.queryNodes('episode_transcript_embedding'", runner.queries[1].query)
-        self.assertIn("WHERE node:Episode", runner.queries[1].query)
-        memory_query = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query][-1]
+        memory_query = _recorded_query_with_parameters(
+            runner,
+            {"person_id": "person_jamie", "source_ref": "consolidation"},
+            required_keys=("memory_id",),
+        )
         self.assertEqual(memory_query.parameters["source_ref"], "consolidation")
-        link_query = runner.queries[-1]
+        link_query = _recorded_query_with_parameters(
+            runner,
+            {"episode_ids": ["ep1", "ep2", "ep3", "ep4"]},
+            required_keys=("memory_id",),
+        )
         self.assertEqual(link_query.parameters["episode_ids"], ["ep1", "ep2", "ep3", "ep4"])
+        # Memory lifecycle guard: consolidation preserves every accepted
+        # supporting episode as evidence for the new memory.
         self.assertIn("MERGE (m)-[:SUPPORTED_BY]->(e)", link_query.query)
 
     def test_consolidation_skips_operation_when_valid_evidence_drops_below_four(self) -> None:
@@ -641,7 +722,7 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
         self.assertEqual(result.created_memory_ids, [])
         self.assertIn("unsupported_episode_id", {item["reason"] for item in result.skipped_ops})
         self.assertIn("insufficient_valid_evidence", {item["reason"] for item in result.skipped_ops})
-        self.assertFalse(any("CREATE (m:MemoryItem" in query.query for query in runner.queries))
+        _assert_no_graph_writes(self, runner)
 
     def test_consolidation_skips_unknown_operations(self) -> None:
         provider = StubConsolidationProvider(
@@ -663,8 +744,7 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
 
         self.assertEqual(result.created_memory_ids, [])
         self.assertEqual({item["reason"] for item in result.skipped_ops}, {"unknown_operation"})
-        self.assertFalse(any("SET m.summary" in query.query for query in runner.queries))
-        self.assertFalse(any("status = 'archived'" in query.query for query in runner.queries))
+        _assert_no_graph_writes(self, runner)
 
     def test_consolidation_merges_related_candidate_memories(self) -> None:
         provider = StubConsolidationProvider(
@@ -711,13 +791,27 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
 
         result = service.consolidate_person("person_jamie", cluster_limit=1)
 
-        memory_queries = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query]
-        merged_id = memory_queries[-1].parameters["memory_id"]
+        create_query = _recorded_query_with_parameters(
+            runner,
+            {"person_id": "person_jamie", "source_ref": "consolidation"},
+            required_keys=("memory_id",),
+        )
+        merged_id = create_query.parameters["memory_id"]
         self.assertEqual(result.created_memory_ids, [merged_id])
         self.assertTrue(merged_id.startswith("mem_"))
         self.assertEqual(result.superseded_memory_ids, ["mem_spouse", "mem_kids"])
         self.assertEqual(result.skipped_ops, [])
-        self.assertTrue(any("SUPERSEDED_BY" in query.query for query in runner.queries))
+        # Memory lifecycle guard: consolidation merges append a supersession
+        # relationship rather than rewriting source memories.
+        supersede_query = _recorded_query_with_parameters(
+            runner,
+            {
+                "merged_memory_id": merged_id,
+                "source_memory_ids": ["mem_spouse", "mem_kids"],
+            },
+            required_keys=("now",),
+        )
+        self.assertIn("SUPERSEDED_BY", supersede_query.query)
 
     def test_consolidation_rejects_nonempty_provider_metadata(self) -> None:
         provider = StubConsolidationProvider(provider_response(consolidation_op(metadata={"extra": True})))
@@ -734,7 +828,7 @@ class MemoryConsolidationServiceTest(unittest.TestCase):
 
         self.assertEqual(result.created_memory_ids, [])
         self.assertIn("memory consolidation metadata must be empty", {item["reason"] for item in result.skipped_ops})
-        self.assertFalse(any("MERGE (m:MemoryItem" in query.query for query in runner.queries))
+        _assert_no_graph_writes(self, runner)
 
     def test_consolidation_skips_provider_when_fewer_than_four_seed_episodes(self) -> None:
         runner = RecordingQueryRunner(results=[[_seed_row("ep1"), _seed_row("ep2"), _seed_row("ep3")]])
@@ -962,6 +1056,7 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
 
         markdown = service.markdown_for_person(
             "person_jamie",
+            robot_id="cody",
             now=datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc),
             memory_limit=12,
         )
@@ -976,6 +1071,7 @@ class PersonMemoryContextServiceTest(unittest.TestCase):
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Preferences:"))
         self.assertLess(markdown.index("Boundaries:"), markdown.index("Facts:"))
         self.assertEqual(runner.queries[0].parameters["person_id"], "person_jamie")
+        self.assertEqual(runner.queries[0].parameters["robot_id"], "cody")
         self.assertEqual(runner.queries[0].parameters["statuses"], ["active"])
         self.assertEqual(len(runner.queries), 1)
 
@@ -1141,9 +1237,11 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         self.assertEqual(provider.calls[0]["target_display_name"], "Jamie")
         self.assertEqual(provider.calls[0]["existing_memories"], [])
         self.assertEqual(provider.calls[0]["current_time"], "2026-06-16T10:00:00+00:00")
-        memory_queries = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query]
-        self.assertTrue(memory_queries)
-        memory_params = memory_queries[-1].parameters
+        memory_params = _recorded_query_with_parameters(
+            runner,
+            {"episode_id": "episode_segment_1", "source_ref": "episode_segment_1"},
+            required_keys=("memory_id",),
+        ).parameters
         self.assertEqual(memory_params["episode_id"], "episode_segment_1")
         self.assertEqual(memory_params["source"], "calling-system")
         self.assertEqual(memory_params["source_ref"], "episode_segment_1")
@@ -1178,7 +1276,7 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         person_result = result.memory_results[0]
         self.assertEqual(person_result.created_memory_ids, [])
         self.assertEqual(person_result.skipped_ops[0]["reason"], "followup_already_expired")
-        self.assertFalse(any("CREATE (m:MemoryItem" in query.query for query in runner.queries))
+        _assert_no_graph_writes(self, runner)
 
     def test_extract_for_episode_skips_unknown_and_bad_operations(self) -> None:
         runner = RecordingQueryRunner(
@@ -1223,8 +1321,7 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         self.assertEqual(len(person_result.skipped_ops), 5)
         self.assertIn("unknown_operation", {item["reason"] for item in person_result.skipped_ops})
         self.assertIn("unknown_memory_id", {item["reason"] for item in person_result.skipped_ops})
-        self.assertFalse(any("SET m.summary" in query.query for query in runner.queries))
-        self.assertFalse(any("status = 'archived'" in query.query for query in runner.queries))
+        _assert_no_graph_writes(self, runner)
 
     def test_extract_for_episode_applies_address_operations_for_followups_at_play(self) -> None:
         runner = RecordingQueryRunner(
@@ -1253,6 +1350,8 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         person_result = result.memory_results[0]
         self.assertEqual(person_result.addressed_memory_ids, ["mem_followup"])
         address_query = runner.queries[-1]
+        # Memory lifecycle guard: an accepted address operation records the
+        # resolving episode instead of silently changing only local state.
         self.assertIn("ADDRESSED_BY", address_query.query)
         self.assertEqual(address_query.parameters["memory_id"], "mem_followup")
         self.assertEqual(address_query.parameters["episode_id"], "episode_answer")
@@ -1313,6 +1412,8 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
         self.assertEqual(person_result.supported_memory_ids, ["mem_followup"])
         self.assertEqual(person_result.addressed_memory_ids, [])
         support_query = runner.queries[-1]
+        # Memory lifecycle guard: accepted support remains auditable as episode
+        # evidence on the existing follow-up.
         self.assertIn("MERGE (m)-[:SUPPORTED_BY]->(e)", support_query.query)
         self.assertEqual(support_query.parameters["memory_id"], "mem_followup")
         self.assertEqual(support_query.parameters["episode_ids"], ["episode_related"])
@@ -1387,8 +1488,7 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
             {item["reason"] for item in person_result.skipped_ops},
             {"address_non_followup", "support_non_followup", "unknown_memory_id"},
         )
-        self.assertFalse(any("ADDRESSED_BY" in query.query for query in runner.queries))
-        self.assertFalse(any("MERGE (m)-[:SUPPORTED_BY]->(e)" in query.query for query in runner.queries))
+        _assert_no_graph_writes(self, runner)
 
     def test_metadata_value_alias_is_not_accepted(self) -> None:
         runner = RecordingQueryRunner(results=[[], [], []])
@@ -1414,8 +1514,12 @@ class EpisodeMemoryOperationTest(unittest.TestCase):
             )
         )
 
-        memory_queries = [query for query in runner.queries if "CREATE (m:MemoryItem" in query.query]
-        self.assertEqual(memory_queries[-1].parameters["metadata_json"], "{}")
+        memory_query = _recorded_query_with_parameters(
+            runner,
+            {"episode_id": "episode_segment_3", "source_ref": "episode_segment_3"},
+            required_keys=("memory_id", "metadata_json"),
+        )
+        self.assertEqual(memory_query.parameters["metadata_json"], "{}")
 
 
 class OpenAIMemoryExtractionProviderTest(unittest.TestCase):

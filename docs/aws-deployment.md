@@ -475,6 +475,7 @@ curl -fsS \
   -H "Content-Type: application/json" \
   -d '{
     "person_id": "person_jamie",
+    "robot_id": "cody",
     "current_text": "robot demo later today",
     "memory_limit": 12
   }' \
@@ -497,9 +498,17 @@ curl -fsS \
       "end_time": "2026-07-15T14:03:00+00:00",
       "transcript": "Jamie: I prefer hands-on robot demos.",
       "retention_class": "standard",
-      "place": {"building_code": "MAIN", "room_id": "101"},
+      "place": {"building_code": "BOS3", "room_id": "__site__"},
       "participants": [
         {"id": "person_jamie", "role": "speaker", "source": "live_chat"}
+      ],
+      "robots": [
+        {
+          "id": "cody",
+          "display_name": "Cody",
+          "role": "host",
+          "source": "argos"
+        }
       ]
     },
     "extract_memory": true
@@ -525,9 +534,9 @@ In an Argos-style memory provider:
 
 | Argos responsibility | Tailwag operation |
 | --- | --- |
-| Build prompt context | `POST .../request/person_context`; use `context_markdown` |
+| Build prompt context | `POST .../request/person_context` with the active stable `robot_id`; use `context_markdown` |
 | Persist a completed live transcript | `POST .../request/episodes_record` |
-| Run a user-directed memory search | `POST .../request/semantic_search` |
+| Run a user-directed memory search | `POST .../request/semantic_search` with the active stable `robot_id` |
 | Create or update a known person | `POST .../request/people_upsert` |
 | Archive a person | `POST .../request/people_archive` |
 | Resolve identity/profile data | identity and profile routes in the endpoint reference |
@@ -535,11 +544,14 @@ In an Argos-style memory provider:
 Argos remains responsible for realtime turn ownership, robot/runtime identity,
 raw audio/video/transcript production, face and speaker embedding generation,
 retention decisions, and final prompt assembly. Tailwag owns durable memory,
-retrieval, Slack ingestion, and Neo4j persistence.
+retrieval, Slack ingestion, Neo4j persistence, and the narrow stored Robot
+identity/provenance carried by episodes: stable ID, current display name, and
+per-episode display-name snapshot, role, and source. Tailwag does not own robot
+capabilities, sensors, software, live state, maintenance, or fleet behavior.
 
-Use stable caller-owned person and episode IDs. Treat Tailwag memory-item IDs as
-opaque. Retry only with the same episode ID when the payload represents the
-same logical episode.
+Use stable caller-owned person, Robot, and episode IDs. Treat Tailwag memory-item
+IDs as opaque. Retry only with the same episode ID when the payload represents
+the same logical episode.
 
 ### Argos robot validation
 
@@ -579,12 +591,19 @@ service:
    - Argos receives that person's Tailwag context without authentication or
      timeout errors.
    - Tailwag records the completed conversation episode for the resolved person.
+   - The episode is stored at `BOS3/__site__` with exactly one Robot attribution
+     whose stable ID matches the active manifest, current display name matches
+     that manifest, role is `host`, and source is `argos`.
    - An authenticated `semantic_search` request can retrieve the episode.
    - API Gateway logs in `/aws/apigateway/aaggarwal1-tailwag-dev` and API logs
      in `/ecs/aaggarwal1-tailwag-api` show successful Tailwag events without
      bearer-token, request-body, or memory-content logging.
 
 6. Record the validation result in the operator run log.
+
+For the release-specific read-only Cypher checks covering Robot relationships,
+historical display-name snapshots, and canonical BOS3 home-base links, use the
+[Robot Provenance And BOS3 Migration Runbook](robot-provenance-bos3-migration.md#10-final-acceptance-and-rollback).
 
 If the gateway or hosted service is unavailable, stop the live runtime and rely
 on Argos's existing memory-unavailable behavior while investigating. Deleting the edge stack does not modify Tailwag's Neo4j data.

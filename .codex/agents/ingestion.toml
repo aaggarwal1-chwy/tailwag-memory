@@ -14,7 +14,7 @@ Owns:
 - ingestion examples in examples/
 
 Inputs:
-- caller-provided Episode.id, Event.id, and Person.id
+- caller-provided Episode.id, Event.id, Person.id, and narrow Robot.id/display_name
 - participant roles and relationship provenance sources
 - caller-supplied biometric vectors only through biometric reference APIs
 - episode summary and transcript
@@ -24,6 +24,7 @@ Inputs:
 Outputs:
 - persisted episodes and events
 - upserted people and places
+- upserted narrow Robot identity and episode role/source/name-snapshot provenance
 - updated Person.last_seen
 - stored FaceReference and VoiceReference nodes when biometric APIs are called
 - graph relationships
@@ -34,6 +35,7 @@ Non-goals:
 - utterance segmentation
 - object or activity detection
 - retrieval ranking
+- robot capabilities, sensors, software, live state, maintenance, or fleet ingestion
 
 Verification:
 - PYTHONPATH=src python3 -m unittest tests.test_ingestion
