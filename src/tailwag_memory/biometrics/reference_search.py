@@ -34,11 +34,12 @@ def search_references(
         vector_search_clause(index, "ref", "candidate_limit")
         + f"""
         MATCH (person:Person)-[:{rel}]->(ref)
-        OPTIONAL MATCH (person)-[:HAS_DIRECTORY_RECORD]->(directory:EmployeeDirectoryRecord)
         WHERE coalesce(ref.status, 'active') = 'active'
           AND coalesce(person.status, 'active') <> 'archived'
           AND coalesce(ref.consent_status, person.consent_status, '') = 'consented'
-          AND ($site_code IS NULL OR directory IS NULL OR directory.site_code = $site_code)
+        OPTIONAL MATCH (person)-[:HAS_DIRECTORY_RECORD]->(directory:EmployeeDirectoryRecord)
+        WITH person, ref, score, directory
+        WHERE $site_code IS NULL OR directory IS NULL OR directory.site_code = $site_code
         RETURN person.id AS person_id,
                person.display_name AS display_name,
                person.consent_status AS consent_status,

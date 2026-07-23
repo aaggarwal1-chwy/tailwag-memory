@@ -247,6 +247,72 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         )
         self.assertEqual(len(runner.queries), 1)
 
+    def test_get_verified_profile_prefers_linked_person_id(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[[{
+                "site_code": "BOS3",
+                "official_name": "Jamie Example",
+                "username": "jamie",
+                "employee_email": "jamie@example.com",
+                "linked_person_ids": ["legacy-person-id"],
+                "email_person_ids": ["person_jamie"],
+            }]]
+        )
+
+        profile = DirectoryIdentityService(runner).get_verified_profile(
+            username="jamie", official_name="Jamie Example", site_code="BOS3"
+        )
+
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile.person_id, "legacy-person-id")
+        self.assertIn("HAS_DIRECTORY_RECORD", runner.queries[0].query)
+        self.assertIn("toLower(email_person.email)", runner.queries[0].query)
+
+    def test_get_verified_profile_uses_unique_email_person_before_derived_id(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[[{
+                "site_code": "BOS3",
+                "official_name": "Jamie Example",
+                "username": "jamie",
+                "employee_email": "jamie@example.com",
+                "linked_person_ids": [],
+                "email_person_ids": ["existing-email-person"],
+            }]]
+        )
+
+        profile = DirectoryIdentityService(runner).get_verified_profile(
+            username="jamie", official_name="Jamie Example", site_code="BOS3"
+        )
+
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile.person_id, "existing-email-person")
+
+    def test_get_verified_profile_rejects_ambiguous_person_reconciliation(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{
+                    "official_name": "Jamie Example",
+                    "username": "jamie",
+                    "linked_person_ids": ["person-1", "person-2"],
+                    "email_person_ids": [],
+                }],
+                [{
+                    "official_name": "Jamie Example",
+                    "username": "jamie",
+                    "linked_person_ids": [],
+                    "email_person_ids": ["person-1", "person-2"],
+                }],
+            ]
+        )
+        service = DirectoryIdentityService(runner)
+
+        self.assertIsNone(
+            service.get_verified_profile(username="jamie", official_name="Jamie Example")
+        )
+        self.assertIsNone(
+            service.get_verified_profile(username="jamie", official_name="Jamie Example")
+        )
+
     def test_get_verified_profile_rejects_invalid_ambiguous_and_name_mismatch(self) -> None:
         runner = RecordingQueryRunner(
             results=[

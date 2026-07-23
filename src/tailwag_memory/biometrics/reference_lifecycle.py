@@ -43,7 +43,7 @@ def enroll_reference(
         )
 
     meta = dict(metadata or {})
-    PersonIngestionService(runner).upsert(
+    persisted_person_id = PersonIngestionService(runner).upsert(
         PersonInput(
             id=rendered_person_id,
             display_name=(
@@ -61,6 +61,14 @@ def enroll_reference(
             consent_status=rendered_consent,
         )
     )
+    if persisted_person_id != rendered_person_id:
+        return BiometricEnrollmentResult(
+            saved=False,
+            status="rejected",
+            reason="person_id_mismatch",
+            person_id=persisted_person_id,
+        )
+
     now = utc_now_iso()
     directory_username = metadata_value(meta, "username").lower()
     directory_site_code = metadata_value(meta, "site_code")
@@ -76,7 +84,7 @@ def enroll_reference(
         f"{'Face' if modality == 'face' else 'Voice'} reference for {person_label}"
     )
     rel = "HAS_FACE_REFERENCE" if modality == "face" else "HAS_VOICE_REFERENCE"
-    runner.run(
+    rows = runner.run(
         f"""
         MATCH (p:Person {{id: $person_id}})
         OPTIONAL MATCH (d:EmployeeDirectoryRecord {{site_code: $directory_site_code, username: $directory_username}})
@@ -121,12 +129,22 @@ def enroll_reference(
             "directory_site_code": directory_site_code,
         },
     )
+    written_reference_id = (
+        str(rows[0].get("reference_id") or "").strip() if rows else ""
+    )
+    if written_reference_id != reference_id:
+        return BiometricEnrollmentResult(
+            saved=False,
+            status="rejected",
+            reason="write_failed",
+            person_id=rendered_person_id,
+        )
     return BiometricEnrollmentResult(
         saved=True,
         status="saved",
         reason="saved",
         person_id=rendered_person_id,
-        reference_id=reference_id,
+        reference_id=written_reference_id,
     )
 
 

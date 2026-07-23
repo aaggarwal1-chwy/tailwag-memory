@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from tailwag_memory.biometrics import BiometricReferenceService
 from tests.helpers import RecordingQueryRunner
@@ -149,14 +150,21 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(result.target_sample_count, 5)
 
     def test_enroll_face_reference_returns_saved_result_and_write_parameters(self) -> None:
-        runner = RecordingQueryRunner()
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie"}],
+                [{"reference_id": "face:person_jamie:reference"}],
+            ]
+        )
         service = BiometricReferenceService(runner, face_embedding_model="facenet-vggface2")
 
-        result = service.enroll_face_reference(
-            person_id="person_jamie",
-            embedding=[0.1] * 512,
-            metadata={"quality": "good"},
-        )
+        with patch("tailwag_memory.biometrics.reference_lifecycle.uuid4") as generated_uuid:
+            generated_uuid.return_value.hex = "reference"
+            result = service.enroll_face_reference(
+                person_id="person_jamie",
+                embedding=[0.1] * 512,
+                metadata={"quality": "good"},
+            )
 
         self.assertTrue(result.saved)
         query = runner.queries[-1]
@@ -165,6 +173,48 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         self.assertEqual(query.parameters["dimension"], 512)
         self.assertEqual(query.parameters["target_sample_count"], 5)
         self.assertEqual(json.loads(query.parameters["metadata_json"]), {"quality": "good"})
+
+    def test_enrollment_rejects_reconciled_person_id(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_existing"}],
+                [{"person_id": "person_existing"}],
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.enroll_face_reference(
+            person_id="person_jamie",
+            embedding=[0.1] * 512,
+            metadata={"employee_email": "shared@example.com"},
+        )
+
+        self.assertFalse(result.saved)
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.reason, "person_id_mismatch")
+        self.assertEqual(result.person_id, "person_existing")
+        self.assertEqual(result.reference_id, "")
+        self.assertEqual(len(runner.queries), 2)
+
+    def test_enrollment_rejects_missing_reference_write(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[
+                [{"person_id": "person_jamie"}],
+                [],
+            ]
+        )
+        service = BiometricReferenceService(runner)
+
+        result = service.enroll_voice_reference(
+            person_id="person_jamie",
+            embedding=[0.1] * 192,
+        )
+
+        self.assertFalse(result.saved)
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.reason, "write_failed")
+        self.assertEqual(result.person_id, "person_jamie")
+        self.assertEqual(result.reference_id, "")
 
     def test_enroll_face_reference_updates_person_profile_from_metadata(self) -> None:
         runner = RecordingQueryRunner()
@@ -396,6 +446,15 @@ class BiometricReferenceServiceTest(unittest.TestCase):
         service.search_face(embedding=[0.1] * 512, site_code="BOS3")
 
         self.assertEqual(runner.queries[0].parameters["site_code"], "BOS3")
+        query = runner.queries[0].query
+        eligibility_where = query.index("WHERE coalesce(ref.status, 'active')")
+        optional_directory = query.index("OPTIONAL MATCH (person)-[:HAS_DIRECTORY_RECORD]")
+        site_filter = query.index(
+            "WHERE $site_code IS NULL OR directory IS NULL OR directory.site_code = $site_code"
+        )
+        self.assertLess(eligibility_where, optional_directory)
+        self.assertLess(optional_directory, site_filter)
+        self.assertIn("WITH person, ref, score, directory", query)
 
     def test_observe_face_embedding_updates_reference_from_agreement(self) -> None:
         runner = RecordingQueryRunner(

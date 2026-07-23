@@ -216,7 +216,20 @@ class DirectoryIdentityService:
             f"""
             MATCH (d:EmployeeDirectoryRecord {{username: $username}})
             WHERE ($site_code = '' OR d.site_code = $site_code)
-            RETURN {_directory_record_projection("d")}
+            OPTIONAL MATCH (linked_person:Person)-[:HAS_DIRECTORY_RECORD]->(d)
+            WITH d, [
+              person_id IN collect(DISTINCT linked_person.id)
+              WHERE person_id IS NOT NULL
+            ] AS linked_person_ids
+            OPTIONAL MATCH (email_person:Person)
+            WHERE d.employee_email <> ''
+              AND toLower(email_person.email) = toLower(d.employee_email)
+            RETURN {_directory_record_projection("d")},
+                   linked_person_ids,
+                   [
+                     person_id IN collect(DISTINCT email_person.id)
+                     WHERE person_id IS NOT NULL
+                   ] AS email_person_ids
             LIMIT 2
             """,
             {"username": rendered_username, "site_code": str(site_code or "").strip()},
@@ -226,8 +239,11 @@ class DirectoryIdentityService:
         record = _row_to_record(rows[0])
         if _matching.normalize_name(record.official_name) != rendered_name:
             return None
+        person_id = _verified_person_id(rows[0], username=rendered_username)
+        if not person_id:
+            return None
         return VerifiedProfile(
-            person_id=f"person_{rendered_username}",
+            person_id=person_id,
             official_name=record.official_name,
             username=record.username,
             employee_email=record.employee_email,
@@ -424,6 +440,32 @@ def _directory_lines(record: DirectoryPersonRecord | None) -> tuple[str, ...]:
     if record.business_function:
         lines.append(f"Function: {record.business_function}")
     return tuple(lines)
+
+
+def _verified_person_id(row: dict[str, Any], *, username: str) -> str:
+    linked_person_ids = _distinct_person_ids(row.get("linked_person_ids"))
+    if len(linked_person_ids) > 1:
+        return ""
+    if linked_person_ids:
+        return linked_person_ids[0]
+    email_person_ids = _distinct_person_ids(row.get("email_person_ids"))
+    if len(email_person_ids) > 1:
+        return ""
+    if email_person_ids:
+        return email_person_ids[0]
+    return f"person_{username}"
+
+
+def _distinct_person_ids(value: Any) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return list(
+        dict.fromkeys(
+            rendered
+            for item in value
+            if (rendered := str(item or "").strip())
+        )
+    )
 
 
 def _safe_int(value: Any) -> int:
