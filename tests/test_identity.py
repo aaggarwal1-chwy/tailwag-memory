@@ -65,6 +65,12 @@ class DirectoryIdentityServiceTest(unittest.TestCase):
         self.assertIn("HAS_DIRECTORY_RECORD", query.query)
         self.assertIn("MERGE (site:Place {building_code: record.site_code, room_id: '__site__'})", query.query)
         self.assertIn("MERGE (d)-[:HOME_BASED_AT]->(site)", query.query)
+        self.assertIn(
+            "MERGE (site:Place {building_code: record.site_code, room_id: '__site__'})\n"
+            "              WITH d, record, site\n"
+            "              CALL (d, site)",
+            query.query,
+        )
         self.assertIn("WHERE old_target <> site", query.query)
         self.assertIn("toLower(split(p.email, '@')[0]) = record.username", query.query)
         self.assertNotIn("p.id = 'person_' + record.username", query.query)

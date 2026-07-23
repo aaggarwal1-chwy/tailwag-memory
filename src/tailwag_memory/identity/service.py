@@ -88,6 +88,7 @@ class DirectoryIdentityService:
               WITH d, record
               WHERE record.site_code <> ''
               MERGE (site:Place {building_code: record.site_code, room_id: '__site__'})
+              WITH d, record, site
               CALL (d, site) {
                 MATCH (d)-[old_home:HOME_BASED_AT]->(old_target)
                 WHERE old_target <> site
