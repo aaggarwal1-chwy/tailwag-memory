@@ -76,6 +76,10 @@ Excluded from the runtime:
 - `RelayMessage` is an operational delivery record, not durable person memory.
   Its body is retained permanently under the selected policy even after
   delivery, decline, uncertainty, or expiry.
+- The caller must explicitly confirm the exact recipient and body with the
+  recognized sender before create, then obtain permission from the recognized
+  recipient before Tailwag releases the body. There is no receipt
+  acknowledgement.
 - Relay concurrency uses explicit temporary Neo4j lock properties and
   post-lock compare-and-set or rate-limit checks. Lock properties are removed
   in the same transaction; there are no persistent relay counters on `Person`
@@ -471,8 +475,9 @@ Event ingestion stores or updates the event, upserts the place, creates the even
 Person-only ingestion supports explicit identity/profile refreshes through `upsert_person()`, lifecycle archival through `archive_person()`, and Slack-to-canonical identity convergence through `rekey_person_by_email()`. Biometric writes use the reference APIs, not `PersonInput`.
 
 Relay writes resolve canonical person emails and the authenticated robot, apply
-the workplace-safety policy before creation, and enforce the delivery state
-machine with compare-and-set guards. Mutations acquire explicit temporary
+the workplace-safety policy before creation, and enforce the permission-gated
+delivery state machine with compare-and-set guards. The caller owns explicit
+sender confirmation before create. Mutations acquire explicit temporary
 Neo4j write locks, then re-evaluate the expected state or rate limit while the
 lock is held. Create locks the sender; claim locks the assigned robot and
 candidate messages; subsequent transitions lock the message. The locks are
@@ -563,6 +568,10 @@ Core runtime settings are loaded from environment variables or `.env`:
 | `TAILWAG_RELAY_POLICY_MODEL` | `gpt-5.5` | OpenAI model used for relay workplace-safety screening. |
 | `TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS` | `8` | Safety request timeout; must be from 1 through 10 seconds. |
 | `TAILWAG_RELAY_POLICY_MAX_RETRIES` | `1` | Safety request retries; must be 0 or 1. |
+| `TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS` | `30` | Default and maximum relay delivery window in days. |
+| `TAILWAG_RELAY_MAX_BODY_CHARACTERS` | `500` | Maximum exact relay body length. |
+| `TAILWAG_RELAY_MAX_PENDING_PER_PAIR` | `3` | Maximum active messages for one sender-recipient pair. |
+| `TAILWAG_RELAY_MAX_SENDS_PER_SENDER_PER_DAY` | `5` | Maximum creates per sender per UTC day. |
 | `TAILWAG_API_DOCS_ENABLED` | `false` | Enables `/docs`, `/redoc`, and `/openapi.json` when set to `1`, `true`, `yes`, or `on`. |
 | `SLACK_BOT_TOKEN` | unset | Required only when polling Slack. |
 | `SNOWFLAKE_ACCOUNT` | unset | Required by `tailwag directory sync` when reading directory rows from Snowflake. |

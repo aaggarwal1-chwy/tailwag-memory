@@ -448,12 +448,15 @@ system:
 
 ```text
 TAILWAG_BASE_URL=https://a9vhnyd929.execute-api.us-east-2.amazonaws.com
-TAILWAG_BEARER_TOKEN=<value from aaggarwal1-tailwag/api-bearer-token>
+TAILWAG_API_BEARER_TOKEN=<value from aaggarwal1-tailwag/api-bearer-token>
+TAILWAG_ROBOT_API_BEARER_TOKEN=<value for the active Robot.id from aaggarwal1-tailwag/robot-api-tokens-json>
 ```
 
 Those names are recommended examples. If Argos uses different configuration
-keys, map its keys to the same base URL and bearer token. Do not copy the bearer
-token into Argos source control.
+keys, map its keys to the same base URL and credentials. The administrative
+token serves memory routes; the robot-scoped token serves relay routes and must
+match the active robot's stable ID. Do not copy either token into source
+control.
 
 ### Health checks
 
@@ -463,11 +466,17 @@ The load-balancer health route is unauthenticated:
 curl -fsS "$TAILWAG_BASE_URL/health"
 ```
 
-The provider health route verifies authentication:
+For relay-enabled callers, readiness must also pass:
+
+```bash
+curl -fsS "$TAILWAG_BASE_URL/ready"
+```
+
+The memory-provider health route verifies administrative authentication:
 
 ```bash
 curl -fsS \
-  -H "Authorization: Bearer $TAILWAG_BEARER_TOKEN" \
+  -H "Authorization: Bearer $TAILWAG_API_BEARER_TOKEN" \
   "$TAILWAG_BASE_URL/argos/providers/memory/resources/memory/health"
 ```
 
@@ -477,7 +486,7 @@ Request prompt-ready person context:
 
 ```bash
 curl -fsS \
-  -H "Authorization: Bearer $TAILWAG_BEARER_TOKEN" \
+  -H "Authorization: Bearer $TAILWAG_API_BEARER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "person_id": "person_jamie",
@@ -494,7 +503,7 @@ Record a conversation episode:
 
 ```bash
 curl -fsS \
-  -H "Authorization: Bearer $TAILWAG_BEARER_TOKEN" \
+  -H "Authorization: Bearer $TAILWAG_API_BEARER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "episode": {
@@ -526,7 +535,7 @@ Search a person's semantic memory:
 
 ```bash
 curl -fsS \
-  -H "Authorization: Bearer $TAILWAG_BEARER_TOKEN" \
+  -H "Authorization: Bearer $TAILWAG_API_BEARER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"text":"robot demos","person_id":"person_jamie","limit":5}' \
   "$TAILWAG_BASE_URL/argos/providers/memory/resources/memory/request/semantic_search"
@@ -546,14 +555,17 @@ In an Argos-style memory provider:
 | Create or update a known person | `POST .../request/people_upsert` |
 | Archive a person | `POST .../request/people_archive` |
 | Resolve identity/profile data | identity and profile routes in the endpoint reference |
+| Relay an exact message | Use the message-relay routes with the active robot's token; explicitly confirm before `create` and obtain recipient permission before body release |
 
 Argos remains responsible for realtime turn ownership, robot/runtime identity,
 raw audio/video/transcript production, face and speaker embedding generation,
+relay sender confirmation, relay recipient permission, controlled playback,
 retention decisions, and final prompt assembly. Tailwag owns durable memory,
-retrieval, Slack ingestion, Neo4j persistence, and the narrow stored Robot
-identity/provenance carried by episodes: stable ID, current display name, and
-per-episode display-name snapshot, role, and source. Tailwag does not own robot
-capabilities, sensors, software, live state, maintenance, or fleet behavior.
+retrieval, Slack ingestion, relay lifecycle enforcement, Neo4j persistence, and
+the narrow stored Robot identity/provenance carried by episodes: stable ID,
+current display name, and per-episode display-name snapshot, role, and source.
+Tailwag does not own robot capabilities, sensors, software, live state,
+maintenance, or fleet behavior.
 
 Use stable caller-owned person, Robot, and episode IDs. Treat Tailwag memory-item
 IDs as opaque. Retry only with the same episode ID when the payload represents
@@ -567,20 +579,27 @@ service:
 1. Inject the current value of Secrets Manager secret
    `aaggarwal1-tailwag/api-bearer-token` as
    `TAILWAG_API_BEARER_TOKEN` through the robot's approved runtime secret
-   mechanism. Do not store it in a manifest, shell script, or repository.
-2. From the robot, set the public base URL and run both health checks:
+   mechanism. Also map the value for the active robot's stable ID from
+   `aaggarwal1-tailwag/robot-api-tokens-json` to
+   `TAILWAG_ROBOT_API_BEARER_TOKEN`. Do not store either token in a manifest,
+   shell script, or repository.
+2. From the robot, set the public base URL and run liveness, readiness, and
+   memory-provider authentication checks:
 
    ```bash
    export TAILWAG_BASE_URL=https://a9vhnyd929.execute-api.us-east-2.amazonaws.com
 
    curl -fsS "$TAILWAG_BASE_URL/health"
 
+   curl -fsS "$TAILWAG_BASE_URL/ready"
+
    curl -fsS \
      -H "Authorization: Bearer $TAILWAG_API_BEARER_TOKEN" \
      "$TAILWAG_BASE_URL/argos/providers/memory/resources/memory/health"
    ```
 
-   Both commands must succeed. No VPN or Tailwag VPC route is required.
+   All three commands must succeed before starting a relay-enabled
+   `static_interaction` profile. No VPN or Tailwag VPC route is required.
 3. With explicit operator approval for live robot and audio activity, start the
    normal Argos profile:
 
@@ -601,6 +620,10 @@ service:
      whose stable ID matches the active manifest, current display name matches
      that manifest, role is `host`, and source is `argos`.
    - An authenticated `semantic_search` request can retrieve the episode.
+   - A synthetic relay request uses the active robot token, requires explicit
+     sender confirmation and recipient permission, and exposes no body before
+     permission or in sender status. It does not ask for receipt
+     acknowledgement.
    - API Gateway logs in `/aws/apigateway/aaggarwal1-tailwag-dev` and API logs
      in `/ecs/aaggarwal1-tailwag-api` show successful Tailwag events without
      bearer-token, request-body, or memory-content logging.
@@ -664,14 +687,12 @@ clear rollback target.
 
 ### Relay schedule changes
 
-Render
-[`deploy/aws/scheduler/relay-maintenance-schedule.example.json`](../deploy/aws/scheduler/relay-maintenance-schedule.example.json)
-with confirmed ARNs and create or update it in `DISABLED` state. Its scheduler
-execution role must allow `sqs:SendMessage` to both the memory queue and the
-memory-jobs DLQ. Keep the bounded `RetryPolicy` and `DeadLetterConfig`, verify a
-manual maintenance job and the existing memory worker/queue/DLQ alarms, then
-enable the schedule with the explicit round-trip update in
-[Message Relay On AWS](message-relay-aws-testing.md#deployed-smoke-test).
+Relay reuses the memory queue, worker, idempotency table, and DLQ. Render the
+[disabled schedule example](../deploy/aws/scheduler/relay-maintenance-schedule.example.json),
+then follow the relay-specific gates in
+[Message Relay On AWS](message-relay-aws-testing.md). Use
+[AWS Manual Updates](aws-manual-updates.md) for exact create, update, verify,
+and rollback commands.
 
 ### Infrastructure changes
 
@@ -685,20 +706,10 @@ applications.
 ### Schema changes
 
 Schema initialization is idempotent. Run `tailwag schema init` from a network
-path that can reach Neo4j before deploying the API or enabling a schedule that
-depends on new schema. For message relay, use `SHOW CONSTRAINTS` to verify
-`relay_message_id` and `SHOW INDEXES` to verify
-`relay_message_status`, `relay_message_delivery`, and
-`relay_message_expires_at` are all `ONLINE`. The exact commands are in
-[AWS Manual Updates](aws-manual-updates.md#initialize-and-verify-the-graph-schema).
-
-For relay changes, `/health` proves process liveness only. Readiness also
-requires the schema gate, ECS convergence on the intended task revision,
-complete-ARN secret wiring, successful robot-scoped authentication, an enabled
-memory-worker event source mapping, and a successful manual maintenance job.
-The default `claim_timeout_seconds` value of 120 is a stale-claim recovery
-threshold. Tune it above measured high-percentile claim-to-playback-start
-latency plus margin; it is not the schedule interval or Lambda timeout.
+path that can reach Neo4j before deploying code that depends on new schema.
+Use [AWS Manual Updates](aws-manual-updates.md#initialize-and-verify-the-graph-schema)
+for exact checks and [Message Relay On AWS](message-relay-aws-testing.md) for
+relay-specific readiness gates.
 
 ## Verification
 

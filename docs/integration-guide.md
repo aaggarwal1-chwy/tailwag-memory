@@ -7,7 +7,9 @@ service. The calling system owns IDs, identity decisions, biometric embedding
 generation, raw media handling, runtime orchestration, and retention policy.
 Tailwag owns durable Neo4j memory storage, embeddings, memory
 extraction/consolidation, retrieval, person context, employee-directory row
-storage, and source adapters.
+storage, source adapters, and message-relay lifecycle enforcement. The caller
+owns relay recognition, sender confirmation, recipient permission, and
+controlled playback.
 
 This guide stays at the package setup and integration-boundary level. For detailed command syntax, endpoint signatures, payload shapes, and source-adapter operation, use the focused references below.
 
@@ -75,16 +77,18 @@ Manager mapping.
 
 Use a deployed Tailwag HTTP service instead of connecting directly to Neo4j or
 importing Tailwag's worker internals. Store the deployment-specific URL and
-token in the caller's runtime configuration or secret store:
+credentials in the caller's runtime configuration or secret store:
 
 ```text
 TAILWAG_BASE_URL=<deployment base URL>
-TAILWAG_BEARER_TOKEN=<secret value>
+TAILWAG_API_BEARER_TOKEN=<administrative token for memory routes>
+TAILWAG_ROBOT_API_BEARER_TOKEN=<active robot token for relay routes>
 ```
 
 The variable names are recommended examples; an existing Argos configuration
-layer may use different names. The requirements are the same base URL and an
-`Authorization: Bearer <token>` header. Never commit the token.
+layer may use different names. Memory requests use the administrative token;
+relay requests use the token mapped to the active stable robot ID. Never commit
+either token.
 
 An HTTP-only caller does not need to install the Tailwag package. The sample
 adapter below uses `httpx`, which the caller must provide as its own dependency
@@ -92,9 +96,9 @@ adapter below uses `httpx`, which the caller must provide as its own dependency
 
 ### Minimal provider adapter
 
-The following synchronous adapter shows the caller boundary. A real Argos
-provider can place equivalent code in its memory-provider package and register
-it through Argos's existing provider factory:
+The following synchronous, memory-only adapter uses the administrative token.
+A real Argos provider can place equivalent code in its memory-provider package
+and register it through Argos's existing provider factory:
 
 ```python
 from __future__ import annotations
@@ -186,6 +190,9 @@ Argos should:
   response lists
 - use the people, identity, profile, biometric, and turn-owner routes when
   those existing Argos workflows require them
+- use a robot-scoped bearer token for message relay, explicitly confirm the
+  exact recipient and body with the recognized sender before `create`, and
+  obtain permission from the recognized recipient before requesting the body
 - treat Tailwag memory-item IDs as opaque
 - retry the same logical episode with the same episode ID
 
@@ -226,7 +233,8 @@ person node.
 ### Caller rollout checklist
 
 1. Confirm the caller can resolve and reach the configured Tailwag base URL.
-2. Load the bearer token from the caller's secret store.
+2. Load `TAILWAG_API_BEARER_TOKEN`; for relay, also load the active robot's
+   `TAILWAG_ROBOT_API_BEARER_TOKEN`.
 3. Check unauthenticated `/health` for process liveness.
 4. Check unauthenticated `/ready` for robot-token configuration, OpenAI relay
    policy configuration, Neo4j connectivity, and required online relay schema.
@@ -240,15 +248,16 @@ person node.
 `/health` intentionally does not prove dependency readiness. A failed `/ready`
 returns `503`; do not send relay traffic until readiness succeeds.
 
-For copyable curl commands and discovery of the current endpoint, token secret,
+For copyable curl commands and discovery of the current endpoint, token secrets,
 and source-polling ownership, see
 [Connect A Caller Such As Argos](aws-deployment.md#connect-a-caller-such-as-argos).
 
 ## Runtime Configuration
 
 The following direct runtime configuration applies when the consuming process
-imports the Tailwag Python package or runs the Tailwag API. An HTTP-only caller
-such as Argos needs only its Tailwag base URL and bearer token.
+imports the Tailwag Python package or runs the Tailwag API. An HTTP-only
+memory caller needs the base URL and administrative token; a relay-enabled
+caller also needs its robot-scoped token.
 
 Set package/runtime configuration in the consuming process or its environment:
 
@@ -293,6 +302,10 @@ Configuration notes:
 - `TAILWAG_ROBOT_API_TOKENS_JSON` configures unique robot-bound bearer tokens
   for relay routes. `GET /ready` validates this mapping, OpenAI relay policy
   configuration, Neo4j connectivity, and the required online relay schema.
+- `TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS`, `TAILWAG_RELAY_MAX_BODY_CHARACTERS`,
+  `TAILWAG_RELAY_MAX_PENDING_PER_PAIR`, and
+  `TAILWAG_RELAY_MAX_SENDS_PER_SENDER_PER_DAY` default to `30`, `500`, `3`,
+  and `5`.
 - Relay safety requests default to an 8-second timeout, allow a configured
   timeout from 1 through 10 seconds, and allow at most one retry. HTTP callers
   receive `503` for timeout, unavailability, or invalid provider configuration,
@@ -347,6 +360,13 @@ from tailwag_memory import TailwagMemoryClient
 ```
 
 `TailwagMemoryClient` exposes the high-level calls for person profile updates, archiving, email-based rekeying, directory sync and identity resolution, biometric reference enrollment/search/update, turn-owner resolution, episode recording, memory extraction/backfill, memory consolidation, prompt-ready person context, and structured semantic search across a person's episodes and memory items. Detailed method signatures and return shapes live in [Memory Endpoints Reference](memory-endpoints.md#high-level-client-endpoints).
+
+It also exposes the message-relay lifecycle: policy check, confirmed create,
+body-free claim, recipient permission/decline/snooze, delivery start/completion,
+playback failure, and sender-visible body-free statuses. See
+[Robot Message Relay](message-relay.md#package-example) for a representative
+flow. Tailwag does not implement sender confirmation, recipient recognition,
+permission dialogue, TTS, or receipt acknowledgement.
 
 Lower-level services are public for advanced cases such as test fakes, custom embedding providers, source adapters, direct memory item operations, or robot-filtered episode retrieval through `EpisodeRetrievalService.by_robot(...)` and `SearchQuery.robot_id`. Their constructor and method details also live in the endpoint reference.
 

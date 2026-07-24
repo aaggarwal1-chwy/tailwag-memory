@@ -16,7 +16,7 @@ The focused docs are the source of truth:
 - [CLI reference](docs/cli-reference.md): local schema setup, ingestion, retrieval, memory maintenance, inspect, and Slack command examples.
 - [Inspect reference](docs/inspect-reference.md): read-only report behavior, generated assets, filters, and affect report requirements.
 - [Slack ingestion guide](docs/slack-ingestion.md): Slack app setup, polling, state handling, and inspection queries.
-- [Robot message relay](docs/message-relay.md): canonical-email identity, confirmation and permission gates, permanent body retention, local tests, and AWS rollout.
+- [Robot message relay](docs/message-relay.md): sender confirmation, recipient permission, delivery lifecycle, retention, and verification.
 - [Repository agent instructions](AGENTS.md) and [agent trigger matrix](docs/agent-trigger-matrix.md): contributor agent workflow.
 
 ## Current Scope
@@ -46,7 +46,6 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 For optional API contract tests and runtime-specific verification, see the [Python package integration guide](docs/integration-guide.md) and [Memory endpoints reference](docs/memory-endpoints.md).
 
-For message relay, the mock/unit suite is only the first verification gate.
-Real Neo4j concurrency tests, an AWS development-environment smoke test, and a
-real Ubuntu robot hardware/audio run are separate gates; see
-[Robot message relay](docs/message-relay.md#verification-gates).
+Message relay also requires real Neo4j concurrency, AWS development, and Ubuntu
+robot hardware/audio gates; see
+[Robot message relay](docs/message-relay.md#verification).

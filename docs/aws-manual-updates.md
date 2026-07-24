@@ -483,6 +483,111 @@ secret is present in that revision, an authenticated read-only relay request
 with a robot-scoped token succeeds, and one manual `relay_maintenance` job
 completes without Lambda errors or a DLQ message.
 
+## Manage The Relay Maintenance Schedule
+
+Render the
+[schedule example](../deploy/aws/scheduler/relay-maintenance-schedule.example.json)
+with the confirmed group, queue, DLQ, role, account, and region. Keep
+`State: DISABLED`, save it as `/tmp/relay-maintenance-schedule.json`, and
+validate the intended target:
+
+```bash
+jq -e \
+  --arg name "$RELAY_MAINTENANCE_SCHEDULE" \
+  --arg group "$SCHEDULER_GROUP" \
+  '.Name == $name
+   and .GroupName == $group
+   and .State == "DISABLED"
+   and (.Target.Input | fromjson | .job_type == "relay_maintenance")' \
+  /tmp/relay-maintenance-schedule.json >/dev/null
+```
+
+Get the existing schedule, then update it to the disabled definition or create
+it disabled when it does not exist:
+
+```bash
+if aws scheduler get-schedule \
+  --region "$AWS_REGION" \
+  --group-name "$SCHEDULER_GROUP" \
+  --name "$RELAY_MAINTENANCE_SCHEDULE" \
+  >/tmp/relay-maintenance-schedule-before.json \
+  2>/tmp/relay-maintenance-schedule-get.err
+then
+  aws scheduler update-schedule \
+    --region "$AWS_REGION" \
+    --cli-input-json file:///tmp/relay-maintenance-schedule.json
+elif grep -q 'ResourceNotFoundException' \
+  /tmp/relay-maintenance-schedule-get.err
+then
+  aws scheduler create-schedule \
+    --region "$AWS_REGION" \
+    --cli-input-json file:///tmp/relay-maintenance-schedule.json
+else
+  cat /tmp/relay-maintenance-schedule-get.err >&2
+  false
+fi
+
+aws scheduler get-schedule \
+  --region "$AWS_REGION" \
+  --group-name "$SCHEDULER_GROUP" \
+  --name "$RELAY_MAINTENANCE_SCHEDULE" \
+  --query '{state:State,target:Target.Arn,role:Target.RoleArn,dlq:Target.DeadLetterConfig.Arn}'
+```
+
+After the manual maintenance job and alarm gates pass, round-trip the deployed
+schedule and change only its state:
+
+```bash
+aws scheduler get-schedule \
+  --region "$AWS_REGION" \
+  --group-name "$SCHEDULER_GROUP" \
+  --name "$RELAY_MAINTENANCE_SCHEDULE" \
+  --output json \
+| jq '
+    del(.Arn, .CreationDate, .LastModificationDate)
+    | .State = "ENABLED"
+  ' \
+> /tmp/relay-maintenance-schedule-enable.json
+
+aws scheduler update-schedule \
+  --region "$AWS_REGION" \
+  --cli-input-json file:///tmp/relay-maintenance-schedule-enable.json
+
+aws scheduler get-schedule \
+  --region "$AWS_REGION" \
+  --group-name "$SCHEDULER_GROUP" \
+  --name "$RELAY_MAINTENANCE_SCHEDULE" \
+  --query '{state:State,retry:Target.RetryPolicy,dlq:Target.DeadLetterConfig.Arn}'
+```
+
+Rollback disables only this schedule. Round-trip the current definition so its
+target, retry policy, and DLQ remain unchanged:
+
+```bash
+aws scheduler get-schedule \
+  --region "$AWS_REGION" \
+  --group-name "$SCHEDULER_GROUP" \
+  --name "$RELAY_MAINTENANCE_SCHEDULE" \
+  --output json \
+| jq '
+    del(.Arn, .CreationDate, .LastModificationDate)
+    | .State = "DISABLED"
+  ' \
+> /tmp/relay-maintenance-schedule-disable.json
+
+aws scheduler update-schedule \
+  --region "$AWS_REGION" \
+  --cli-input-json file:///tmp/relay-maintenance-schedule-disable.json
+
+aws scheduler get-schedule \
+  --region "$AWS_REGION" \
+  --group-name "$SCHEDULER_GROUP" \
+  --name "$RELAY_MAINTENANCE_SCHEDULE" \
+  --query 'State'
+```
+
+Remove the temporary rendered files when the run is complete.
+
 ## Rollback
 
 Roll back the API to the task definition recorded before deployment:
