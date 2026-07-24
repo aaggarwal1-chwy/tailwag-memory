@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
 from typing import Callable
@@ -29,6 +29,10 @@ from .relay_message_validation import (
     validate_input,
 )
 from .relay_policy import OpenAIRelaySafetyProvider, RelaySafetyProvider
+from .relay_policy_attestation import (
+    RelayPolicyAttestationError,
+    RelayPolicyAttestor,
+)
 
 
 class RelayPolicyRejectedError(ValueError):
@@ -68,12 +72,39 @@ class RelayMessageService:
             max_retries=self.settings.relay_policy_max_retries,
         )
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self._policy_attestor = None
+        if self.settings.relay_attestation_secret or self.settings.relay_attestation_key_id:
+            self._policy_attestor = RelayPolicyAttestor(
+                secret=self.settings.relay_attestation_secret or "",
+                key_id=self.settings.relay_attestation_key_id,
+                policy_model=self.settings.relay_policy_model,
+                clock=self._now,
+            )
         self._transitions = RelayMessageTransitions(runner, clock=self._now)
 
     def check_policy(self, message: RelayMessageInput, *, robot_id: str) -> RelayPolicyResult:
         """Resolve both people and screen the exact proposed message without storing it."""
         normalized = self._validate_input(message, robot_id=robot_id)
-        return self._check_normalized_policy(normalized, robot_id=robot_id)
+        policy = self._check_normalized_policy(normalized, robot_id=robot_id)
+        if not policy.allowed:
+            return policy
+        if self._policy_attestor is None:
+            return policy
+        token, expires_at = self._policy_attestor.issue(
+            message,
+            robot_id=_required(robot_id, "robot_id"),
+            identities={
+                "sender_person_id": policy.sender_person_id,
+                "recipient_person_id": policy.recipient_person_id,
+                "sender_email": policy.sender_email,
+                "recipient_email": policy.recipient_email,
+            },
+        )
+        return replace(
+            policy,
+            policy_attestation=token,
+            policy_attestation_expires_at=expires_at,
+        )
 
     def _check_normalized_policy(
         self,
@@ -101,10 +132,43 @@ class RelayMessageService:
             **identities,
         )
 
-    def create_confirmed(self, message: RelayMessageInput, *, robot_id: str) -> RelayMessageStatus:
+    def create_confirmed(
+        self,
+        message: RelayMessageInput,
+        *,
+        robot_id: str,
+        policy_attestation: str = "",
+    ) -> RelayMessageStatus:
         """Persist only an already-confirmed message after repeating all server checks."""
         normalized = self._validate_input(message, robot_id=robot_id)
-        policy = self._check_normalized_policy(normalized, robot_id=robot_id)
+        attestation_jti = ""
+        attested_digest = ""
+        if policy_attestation:
+            if self._policy_attestor is None:
+                raise RelayPolicyAttestationError(
+                    "relay policy attestation is invalid or expired"
+                )
+            identities = resolve_identities(
+                self.runner,
+                sender_email=normalized.sender_email,
+                recipient_email=normalized.recipient_email,
+                robot_id=robot_id,
+            )
+            if identities is None:
+                raise RelayPolicyAttestationError(
+                    "relay policy attestation is invalid or expired"
+                )
+            verified = self._policy_attestor.verify(
+                policy_attestation,
+                message,
+                robot_id=_required(robot_id, "robot_id"),
+                identities=identities,
+            )
+            attestation_jti = verified.jti
+            attested_digest = verified.payload_digest
+            policy = RelayPolicyResult(allowed=True, **identities)
+        else:
+            policy = self._check_normalized_policy(normalized, robot_id=robot_id)
         if not policy.allowed:
             raise RelayPolicyRejectedError(
                 policy.reason or "relay message was rejected by policy"
@@ -144,6 +208,8 @@ class RelayMessageService:
                 deliver_after: $deliver_after,
                 expires_at: $expires_at,
                 attempt_count: 0,
+                policy_payload_digest: $policy_payload_digest,
+                policy_attestation_jti: $policy_attestation_jti,
                 _relay_create_token: $lock_token
               })
               CREATE (sender)-[:SENT_RELAY]->(created)
@@ -190,6 +256,8 @@ class RelayMessageService:
                 "expires_at": normalized.expires_at,
                 "max_pending_per_pair": self.settings.relay_max_pending_per_pair,
                 "max_sends_per_day": self.settings.relay_max_sends_per_sender_per_day,
+                "policy_payload_digest": attested_digest,
+                "policy_attestation_jti": attestation_jti,
             },
         )
         if not rows:
@@ -380,6 +448,20 @@ class RelayMessageService:
             status_from="permission_granted",
             status_to="delivering",
             timestamp_property="delivery_started_at",
+        )
+
+    def release_before_playback(
+        self,
+        message_id: str,
+        *,
+        claim_token: str,
+        robot_id: str,
+    ) -> RelayTransitionResult:
+        """Return a claimed or permission-granted message to pending."""
+        return self._transitions.release_before_playback(
+            message_id,
+            claim_token=claim_token,
+            robot_id=robot_id,
         )
 
     def complete_delivery(

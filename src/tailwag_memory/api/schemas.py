@@ -356,6 +356,7 @@ class RelayCreateRequest(StrictRequest):
     """Request body for creating one sender-confirmed relay message."""
 
     message: RelayMessagePayload
+    policy_attestation: str = Field(default="", max_length=4096)
 
 
 class RelayClaimRequest(StrictRequest):
@@ -410,6 +411,8 @@ class RelayPolicyResponse(StrictRequest):
     recipient_email: str = ""
     sender_display_name: str = ""
     recipient_display_name: str = ""
+    policy_attestation: str = ""
+    policy_attestation_expires_at: str = ""
 
 
 class RelayEnvelopeResponse(StrictRequest):

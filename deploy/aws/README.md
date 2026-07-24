@@ -110,6 +110,7 @@ The examples use one Secrets Manager namespace for all Tailwag runtime secrets:
 - `aaggarwal1-tailwag/neo4j-user`
 - `aaggarwal1-tailwag/neo4j-password`
 - `aaggarwal1-tailwag/openai-api-key`
+- `aaggarwal1-tailwag/relay-attestation-secret`
 - `aaggarwal1-tailwag/slack-bot-token`
 - `aaggarwal1-tailwag/api-bearer-token`
 - `aaggarwal1-tailwag/robot-api-tokens-json` (a JSON object from stable robot ID to opaque token)

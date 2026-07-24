@@ -30,6 +30,7 @@
         {"name": "TAILWAG_VOICE_EMBEDDING_MODEL", "value": "speechbrain_ecapa"},
         {"name": "TAILWAG_SYNTHESIS_MODEL", "value": "gpt-5.5"},
         {"name": "TAILWAG_RELAY_POLICY_MODEL", "value": "gpt-5.5"},
+        {"name": "TAILWAG_RELAY_ATTESTATION_KEY_ID", "value": "relay-signing-2026-07"},
         {"name": "TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS", "value": "30"},
         {"name": "TAILWAG_RELAY_MAX_BODY_CHARACTERS", "value": "500"},
         {"name": "TAILWAG_RELAY_MAX_PENDING_PER_PAIR", "value": "3"},
@@ -40,6 +41,7 @@
         {"name": "NEO4J_USER", "valueFrom": "<complete-neo4j-user-secret-arn-from-describe-secret>"},
         {"name": "NEO4J_PASSWORD", "valueFrom": "<complete-neo4j-password-secret-arn-from-describe-secret>"},
         {"name": "OPENAI_API_KEY", "valueFrom": "<complete-openai-api-key-secret-arn-from-describe-secret>"},
+        {"name": "TAILWAG_RELAY_ATTESTATION_SECRET", "valueFrom": "<complete-relay-attestation-secret-arn-from-describe-secret>"},
         {"name": "TAILWAG_API_BEARER_TOKEN", "valueFrom": "<complete-api-bearer-token-secret-arn-from-describe-secret>"},
         {"name": "TAILWAG_ROBOT_API_TOKENS_JSON", "valueFrom": "<complete-robot-api-tokens-json-secret-arn-from-describe-secret>"}
       ],

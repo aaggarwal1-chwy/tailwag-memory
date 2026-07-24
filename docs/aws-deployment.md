@@ -237,11 +237,18 @@ Runtime values are stored in Secrets Manager under:
 - `aaggarwal1-tailwag/slack-bot-token`
 - `aaggarwal1-tailwag/api-bearer-token`
 
-Message relay rollout additionally uses
-`aaggarwal1-tailwag/robot-api-tokens-json`, whose `SecretString` is a JSON
-object from stable robot ID to an independently generated opaque token. Resolve
-its complete ARN with `aws secretsmanager describe-secret`; never construct the
-ARN from the secret name because the generated suffix is part of the ARN.
+Message relay rollout additionally uses:
+
+- `aaggarwal1-tailwag/robot-api-tokens-json`, whose `SecretString` is a JSON
+  object from stable robot ID to independently generated opaque tokens
+- `aaggarwal1-tailwag/relay-attestation-secret`, whose `SecretString` is
+  high-entropy HMAC signing material of at least 32 UTF-8 bytes
+- the non-secret `TAILWAG_RELAY_ATTESTATION_KEY_ID`, which identifies the
+  active signing key
+
+Resolve both secrets' complete ARNs with `aws secretsmanager describe-secret`;
+never construct an ARN from a secret name because the generated suffix is part
+of the ARN.
 
 The Neo4j password is read from Secrets Manager by the API and workers. Secret
 values must never be committed, copied into documentation, or
@@ -458,6 +465,15 @@ token serves memory routes; the robot-scoped token serves relay routes and must
 match the active robot's stable ID. Do not copy either token into source
 control.
 
+The ECS API task also resolves `TAILWAG_RELAY_ATTESTATION_SECRET` from its
+dedicated Secrets Manager value and sets the non-secret
+`TAILWAG_RELAY_ATTESTATION_KEY_ID`. Rotate them together across API tasks and
+use a coordinated relay maintenance window: pause new policy checks, drain
+outstanding proofs for 125 seconds, update every task, and only then resume
+relay traffic. Do not mix old-key and new-key tasks behind the same endpoint.
+The deployment examples configure both values to avoid a second OpenAI screen;
+package and local deployments may leave both unset for legacy re-screening.
+
 ### Health checks
 
 The load-balancer health route is unauthenticated:
@@ -655,15 +671,19 @@ deployment.
 1. Run tests.
 2. Build an immutable image tag, preferably the Git commit SHA.
 3. Push the image to `aaggarwal1-tailwag-dev-api` in ECR.
-4. Resolve the complete robot-token secret ARN with `describe-secret`.
-5. Render the current task definition with the new image and upsert exactly one
-   `TAILWAG_ROBOT_API_TOKENS_JSON` secret entry using that complete ARN.
+4. Resolve the complete robot-token and relay-attestation secret ARNs with
+   `describe-secret`; validate the signing secret length without printing it.
+5. Render the current task definition with the new image; upsert exactly one
+   `TAILWAG_ROBOT_API_TOKENS_JSON` secret entry, one
+   `TAILWAG_RELAY_ATTESTATION_SECRET` secret entry, and one non-secret
+   `TAILWAG_RELAY_ATTESTATION_KEY_ID` environment entry.
 6. Verify `secretsmanager:GetSecretValue` for the deployed ECS
-   `executionRoleArn` and exact secret ARN with IAM policy simulation.
+   `executionRoleArn` and both exact secret ARNs with IAM policy simulation.
 7. Register a new `aaggarwal1-tailwag-api-task` revision.
 8. Update `aaggarwal1-tailwag-api-service` to that revision.
 9. Wait for ECS stability and a healthy ALB target.
-10. Run open, administrative, and robot-authenticated readiness checks.
+10. Run open, administrative, and robot-authenticated readiness checks. Stop
+    relay traffic if `/ready` rejects the signing secret or key ID.
 
 The helper is [`deploy/aws/scripts/build-push-api-image.sh`](../deploy/aws/scripts/build-push-api-image.sh).
 The complete upserting and IAM-verification procedure is in

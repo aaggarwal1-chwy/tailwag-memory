@@ -1,6 +1,8 @@
 # Message Relay On AWS
 
-This guide owns relay-specific rollout gates and smoke tests. Use
+This guide owns relay-specific rollout gates and smoke tests. Use the canonical
+[Linux And Robot Message Relay Qualification](message-relay-linux-robot-qualification.md)
+runbook for the complete cross-environment pass/fail sequence. Use
 [AWS Deployment And Operations](aws-deployment.md) for topology and
 [AWS Manual Updates](aws-manual-updates.md) for command-by-command deployment,
 schema, verification, and rollback procedures.

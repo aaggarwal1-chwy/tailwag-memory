@@ -59,6 +59,8 @@ class RelayPolicyResult:
     recipient_email: str = ""
     sender_display_name: str = ""
     recipient_display_name: str = ""
+    policy_attestation: str = ""
+    policy_attestation_expires_at: str = ""
 
 
 @dataclass(frozen=True)

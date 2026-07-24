@@ -12,6 +12,7 @@ from tailwag_memory.models import (
     RelayMessageEnvelope,
     RelayMessageInput,
     RelayMessageStatus,
+    RelayPolicyResult,
     RelayTransitionResult,
     RobotInput,
 )
@@ -264,6 +265,19 @@ class RelayMessageModelTest(unittest.TestCase):
         self.assertNotIn("body", status_names)
         self.assertIn("claim_token", envelope_names)
         self.assertNotIn("claim_token", status_names)
+
+    def test_policy_result_additively_exposes_short_lived_attestation(self) -> None:
+        result = RelayPolicyResult(
+            allowed=True,
+            policy_attestation="opaque-proof",
+            policy_attestation_expires_at="2026-07-24T12:02:00+00:00",
+        )
+
+        self.assertEqual(result.policy_attestation, "opaque-proof")
+        self.assertEqual(
+            result.policy_attestation_expires_at,
+            "2026-07-24T12:02:00+00:00",
+        )
 
     def test_only_transition_result_can_release_optional_body(self) -> None:
         result = RelayTransitionResult(

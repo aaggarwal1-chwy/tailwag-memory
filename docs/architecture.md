@@ -568,6 +568,8 @@ Core runtime settings are loaded from environment variables or `.env`:
 | `TAILWAG_RELAY_POLICY_MODEL` | `gpt-5.5` | OpenAI model used for relay workplace-safety screening. |
 | `TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS` | `8` | Safety request timeout; must be from 1 through 10 seconds. |
 | `TAILWAG_RELAY_POLICY_MAX_RETRIES` | `1` | Safety request retries; must be 0 or 1. |
+| `TAILWAG_RELAY_ATTESTATION_SECRET` | unset | Optional high-entropy HMAC key of at least 32 UTF-8 bytes for short-lived exact-payload policy proofs; configure it with the key ID or leave both unset for legacy re-screening. |
+| `TAILWAG_RELAY_ATTESTATION_KEY_ID` | unset | Optional identifier for the active relay policy signing key; configure and rotate it with the secret. |
 | `TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS` | `30` | Default and maximum relay delivery window in days. |
 | `TAILWAG_RELAY_MAX_BODY_CHARACTERS` | `500` | Maximum exact relay body length. |
 | `TAILWAG_RELAY_MAX_PENDING_PER_PAIR` | `3` | Maximum active messages for one sender-recipient pair. |

@@ -10,6 +10,7 @@
         "<complete-neo4j-user-secret-arn-from-describe-secret>",
         "<complete-neo4j-password-secret-arn-from-describe-secret>",
         "<complete-openai-api-key-secret-arn-from-describe-secret>",
+        "<complete-relay-attestation-secret-arn-from-describe-secret>",
         "<complete-api-bearer-token-secret-arn-from-describe-secret>",
         "<complete-robot-api-tokens-json-secret-arn-from-describe-secret>"
       ]

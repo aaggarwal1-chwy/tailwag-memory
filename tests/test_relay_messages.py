@@ -8,6 +8,7 @@ from tailwag_memory.models import RelayMessageInput
 from tailwag_memory.relay_message_validation import validate_input
 from tailwag_memory.relay_messages import RelayMessageService
 from tailwag_memory.relay_policy import RelaySafetyDecision
+from tailwag_memory.relay_policy_attestation import RelayPolicyAttestationError
 from tests.helpers import RecordingQueryRunner, test_settings
 
 
@@ -72,6 +73,151 @@ class RelayMessageServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters["sender_email"], "alice@example.com")
         self.assertIn("size(senders) = 1", runner.queries[0].query)
         self.assertIn("sender <> recipient", runner.queries[0].query)
+        self.assertTrue(result.policy_attestation)
+        self.assertEqual(
+            result.policy_attestation_expires_at,
+            "2026-07-23T15:02:00+00:00",
+        )
+
+    def test_attested_create_screens_once_and_stores_digest_and_jti(self) -> None:
+        status_row = {
+            **_identity_row(),
+            "message_id": "relay-1",
+            "assigned_robot_id": "robot-1",
+            "status": "pending",
+            "created_at": NOW.isoformat(),
+            "deliver_after": NOW.isoformat(),
+            "expires_at": "2026-08-22T15:00:00+00:00",
+            "updated_at": NOW.isoformat(),
+        }
+        runner = RecordingQueryRunner(
+            results=[[_identity_row()], [_identity_row()], [status_row]]
+        )
+        safety = _Safety()
+        service = _service(runner, safety)
+        message = _message()
+
+        policy = service.check_policy(message, robot_id="robot-1")
+        result = service.create_confirmed(
+            message,
+            robot_id="robot-1",
+            policy_attestation=policy.policy_attestation,
+        )
+
+        self.assertEqual(result.status, "pending")
+        self.assertEqual(safety.bodies, [message.body])
+        create = runner.queries[2]
+        self.assertRegex(create.parameters["policy_payload_digest"], r"^[0-9a-f]{64}$")
+        self.assertTrue(create.parameters["policy_attestation_jti"])
+        self.assertIn("policy_payload_digest: $policy_payload_digest", create.query)
+        self.assertIn("policy_attestation_jti: $policy_attestation_jti", create.query)
+
+    def test_invalid_supplied_attestation_fails_without_openai_fallback(self) -> None:
+        runner = RecordingQueryRunner(results=[[_identity_row()]])
+        safety = _Safety()
+
+        with self.assertRaises(RelayPolicyAttestationError):
+            _service(runner, safety).create_confirmed(
+                _message(),
+                robot_id="robot-1",
+                policy_attestation="invalid-token",
+            )
+
+        self.assertEqual(safety.bodies, [])
+        self.assertEqual(len(runner.queries), 1)
+
+    def test_attestation_revalidates_canonical_identity(self) -> None:
+        changed_identity = {
+            **_identity_row(),
+            "recipient_person_id": "person-charlie",
+        }
+        runner = RecordingQueryRunner(
+            results=[[_identity_row()], [changed_identity]]
+        )
+        safety = _Safety()
+        service = _service(runner, safety)
+        message = _message()
+        policy = service.check_policy(message, robot_id="robot-1")
+
+        with self.assertRaises(RelayPolicyAttestationError):
+            service.create_confirmed(
+                message,
+                robot_id="robot-1",
+                policy_attestation=policy.policy_attestation,
+            )
+
+        self.assertEqual(safety.bodies, [message.body])
+        self.assertEqual(len(runner.queries), 2)
+
+    def test_denied_policy_has_no_attestation(self) -> None:
+        runner = RecordingQueryRunner(results=[[_identity_row()]])
+        policy = _service(
+            runner,
+            _Safety(allowed=False, reason="Not allowed."),
+        ).check_policy(_message(), robot_id="robot-1")
+
+        self.assertFalse(policy.allowed)
+        self.assertEqual(policy.policy_attestation, "")
+        self.assertEqual(policy.policy_attestation_expires_at, "")
+
+    def test_unconfigured_attestation_preserves_legacy_rescreening(self) -> None:
+        status_row = {
+            **_identity_row(),
+            "message_id": "relay-1",
+            "assigned_robot_id": "robot-1",
+            "status": "pending",
+            "created_at": NOW.isoformat(),
+            "deliver_after": NOW.isoformat(),
+            "expires_at": "2026-08-22T15:00:00+00:00",
+            "updated_at": NOW.isoformat(),
+        }
+        runner = RecordingQueryRunner(
+            results=[[_identity_row()], [_identity_row()], [status_row]]
+        )
+        safety = _Safety()
+        service = RelayMessageService(
+            runner,
+            settings=test_settings(
+                relay_attestation_secret=None,
+                relay_attestation_key_id="",
+            ),
+            safety_provider=safety,
+            clock=lambda: NOW,
+        )
+        message = _message()
+
+        policy = service.check_policy(message, robot_id="robot-1")
+        result = service.create_confirmed(message, robot_id="robot-1")
+
+        self.assertTrue(policy.allowed)
+        self.assertEqual(policy.policy_attestation, "")
+        self.assertEqual(result.status, "pending")
+        self.assertEqual(safety.bodies, [message.body, message.body])
+        self.assertEqual(runner.queries[2].parameters["policy_payload_digest"], "")
+        self.assertEqual(runner.queries[2].parameters["policy_attestation_jti"], "")
+
+    def test_supplied_attestation_fails_closed_when_attestor_is_disabled(self) -> None:
+        runner = RecordingQueryRunner()
+        safety = _Safety()
+        service = RelayMessageService(
+            runner,
+            settings=test_settings(
+                relay_attestation_secret=None,
+                relay_attestation_key_id="",
+            ),
+            safety_provider=safety,
+            clock=lambda: NOW,
+        )
+
+        with self.assertRaises(RelayPolicyAttestationError):
+            service.create_confirmed(
+                _message(),
+                robot_id="robot-1",
+                policy_attestation="unusable-proof",
+            )
+
+        self.assertEqual(safety.bodies, [])
+        self.assertEqual(runner.queries, [])
 
     def test_rejected_policy_is_not_persisted(self) -> None:
         runner = RecordingQueryRunner(results=[[_identity_row()]])
@@ -278,6 +424,55 @@ class RelayMessageServiceTest(unittest.TestCase):
         self.assertEqual(runner.queries[0].parameters["status_from"], "permission_granted")
         self.assertEqual(runner.queries[1].parameters["status_from"], "delivering")
 
+    def test_release_before_playback_accepts_claimed_or_permission_granted(self) -> None:
+        runner = RecordingQueryRunner(
+            results=[[{"message_id": "relay-1", "status": "pending"}]]
+        )
+
+        result = _service(runner).release_before_playback(
+            "relay-1",
+            claim_token="claim-1",
+            robot_id="robot-1",
+        )
+
+        self.assertEqual(result.status, "pending")
+        recorded = runner.queries[0]
+        query = recorded.query
+        self.assertEqual(recorded.parameters["now"], NOW.isoformat())
+        self.assertIn(
+            "message.status IN ['claimed', 'permission_granted']",
+            query,
+        )
+        self.assertIn("message.assigned_robot_id = $robot_id", query)
+        self.assertIn("message.claim_token = $claim_token", query)
+        self.assertIn("SET message.status = 'pending'", query)
+        self.assertIn("message.deliver_after = $now", query)
+        self.assertIn(
+            "REMOVE message.claim_token, message.claimed_at,\n"
+            "                     message.permission_granted_at, "
+            "message.delivery_started_at",
+            query,
+        )
+        self.assertLess(
+            query.index("SET message._relay_write_lock"),
+            query.index("message.status IN ['claimed', 'permission_granted']"),
+        )
+        self.assertIn("REMOVE message._relay_write_lock", query)
+        self.assertNotIn("REMOVE message.body", query)
+        self.assertNotIn("REMOVE message.failed_at", query)
+        self.assertNotIn("REMOVE message.last_failure_reason", query)
+
+    def test_release_before_playback_conflicts_outside_pre_audio_states(self) -> None:
+        runner = RecordingQueryRunner(results=[[]])
+
+        result = _service(runner).release_before_playback(
+            "relay-1",
+            claim_token="claim-1",
+            robot_id="robot-1",
+        )
+
+        self.assertEqual(result.status, "conflict")
+
     def test_failure_after_audio_start_is_terminal_uncertain(self) -> None:
         runner = RecordingQueryRunner(
             results=[[{"message_id": "relay-1", "status": "delivery_uncertain"}]]
@@ -294,8 +489,13 @@ class RelayMessageServiceTest(unittest.TestCase):
         self.assertEqual(result.status, "delivery_uncertain")
         self.assertEqual(runner.queries[0].parameters["status"], "delivery_uncertain")
         self.assertTrue(runner.queries[0].parameters["audio_started"])
+        query = runner.queries[0].query
+        self.assertIn(
+            "$audio_started AND message.status = 'delivering'",
+            query,
+        )
 
-    def test_failure_before_audio_start_returns_to_pending(self) -> None:
+    def test_failure_before_audio_start_handles_permission_or_delivery_ordering(self) -> None:
         runner = RecordingQueryRunner(results=[[{"message_id": "relay-1", "status": "pending"}]])
 
         result = _service(runner).record_playback_failure(
@@ -308,6 +508,20 @@ class RelayMessageServiceTest(unittest.TestCase):
 
         self.assertEqual(result.status, "pending")
         self.assertEqual(runner.queries[0].parameters["status"], "pending")
+        query = runner.queries[0].query
+        self.assertIn(
+            "NOT $audio_started\n"
+            "                       AND message.status IN "
+            "['permission_granted', 'delivering']",
+            query,
+        )
+        self.assertIn(
+            "REMOVE message.claim_token, message.claimed_at,\n"
+            "                       message.permission_granted_at, "
+            "message.delivery_started_at",
+            query,
+        )
+        self.assertNotIn("REMOVE message.body", query)
 
     def test_sender_status_never_projects_body_and_includes_failures(self) -> None:
         runner = RecordingQueryRunner(
@@ -377,6 +591,7 @@ class RelayMessageServiceTest(unittest.TestCase):
                 [{"message_id": "relay-1", "status": "declined"}],
                 [{"message_id": "relay-1", "status": "pending"}],
                 [{"message_id": "relay-1", "status": "delivering"}],
+                [{"message_id": "relay-1", "status": "pending"}],
                 [{"message_id": "relay-1", "status": "delivered"}],
                 [{"message_id": "relay-1", "status": "pending"}],
             ]
@@ -403,6 +618,11 @@ class RelayMessageServiceTest(unittest.TestCase):
             deliver_after="2026-07-23T16:00:00+00:00",
         )
         service.begin_delivery("relay-1", claim_token="claim-1", robot_id="robot-1")
+        service.release_before_playback(
+            "relay-1",
+            claim_token="claim-1",
+            robot_id="robot-1",
+        )
         service.complete_delivery("relay-1", claim_token="claim-1", robot_id="robot-1")
         service.record_playback_failure(
             "relay-1",
@@ -412,7 +632,7 @@ class RelayMessageServiceTest(unittest.TestCase):
             audio_started=False,
         )
 
-        self.assertEqual(len(runner.queries), 6)
+        self.assertEqual(len(runner.queries), 7)
         for recorded in runner.queries:
             with self.subTest(query=recorded.query):
                 self.assertIn("SET message._relay_write_lock", recorded.query)

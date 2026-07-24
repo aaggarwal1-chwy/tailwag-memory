@@ -42,6 +42,8 @@ def test_settings(**overrides: Any) -> Settings:
         "neo4j_password": "password",
         "embedding_dimension": 8,
         "openai_api_key": "test-key",
+        "relay_attestation_secret": "test-relay-attestation-secret-32-bytes-minimum",
+        "relay_attestation_key_id": "test-2026-07",
     }
     values.update(overrides)
     return Settings(**values)

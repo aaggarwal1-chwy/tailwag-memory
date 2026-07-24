@@ -110,8 +110,15 @@ class TailwagMemoryClient:
         message: RelayMessageInput,
         *,
         robot_id: str,
+        policy_attestation: str = "",
     ) -> RelayMessageStatus:
         """Create one sender-confirmed relay message."""
+        if policy_attestation:
+            return self._relay_messages().create_confirmed(
+                message,
+                robot_id=robot_id,
+                policy_attestation=policy_attestation,
+            )
         return self._relay_messages().create_confirmed(message, robot_id=robot_id)
 
     def claim_next_relay_envelope(
@@ -185,6 +192,20 @@ class TailwagMemoryClient:
     ) -> RelayTransitionResult:
         """Mark a permission-granted message immediately before playback."""
         return self._relay_messages().begin_delivery(
+            message_id,
+            claim_token=claim_token,
+            robot_id=robot_id,
+        )
+
+    def release_relay_before_playback(
+        self,
+        message_id: str,
+        *,
+        claim_token: str,
+        robot_id: str,
+    ) -> RelayTransitionResult:
+        """Return a claimed or permission-granted message to pending."""
+        return self._relay_messages().release_before_playback(
             message_id,
             claim_token=claim_token,
             robot_id=robot_id,

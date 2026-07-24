@@ -38,6 +38,8 @@ export ECS_TASK_FAMILY=<ecs-task-family>
 export ECS_CONTAINER_NAME=tailwag-memory-api
 export TAILWAG_API_BEARER_TOKEN_SECRET_ID=<bearer-token-secret-id>
 export TAILWAG_ROBOT_API_TOKENS_SECRET_ID=<robot-api-tokens-secret-id>
+export TAILWAG_RELAY_ATTESTATION_SECRET_ID=<relay-attestation-secret-id>
+export TAILWAG_RELAY_ATTESTATION_KEY_ID=<relay-attestation-key-id>
 export RELAY_SMOKE_ROBOT_ID=<stable-robot-id>
 export RELAY_SMOKE_SENDER_EMAIL=<synthetic-sender-email>
 export SCHEDULER_GROUP=<scheduler-group-name>
@@ -187,10 +189,11 @@ export IMAGE_URI="$(deploy/aws/scripts/build-push-api-image.sh)"
 printf 'Pushed image: %s\n' "$IMAGE_URI"
 ```
 
-Resolve the robot-token secret's complete ARN. Do not construct an ARN from the
-secret name: Secrets Manager appends a generated suffix that is part of the
-complete ARN returned by `describe-secret`. Validate the `SecretString` shape
-without displaying it:
+Resolve the robot-token and relay-attestation secrets' complete ARNs. Do not
+construct ARNs from secret names: Secrets Manager appends generated suffixes
+that are part of the complete ARNs returned by `describe-secret`. Validate both
+secret values without displaying them. The attestation secret must contain at
+least 32 UTF-8 bytes, and its key ID is non-secret but must be nonempty.
 
 ```bash
 export TAILWAG_ROBOT_API_TOKENS_SECRET_ARN="$(aws secretsmanager describe-secret \
@@ -201,6 +204,16 @@ export TAILWAG_ROBOT_API_TOKENS_SECRET_ARN="$(aws secretsmanager describe-secret
 
 test -n "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN"
 test "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" != "None"
+
+export TAILWAG_RELAY_ATTESTATION_SECRET_ARN="$(aws secretsmanager describe-secret \
+  --region "$AWS_REGION" \
+  --secret-id "$TAILWAG_RELAY_ATTESTATION_SECRET_ID" \
+  --query ARN \
+  --output text)"
+
+test -n "$TAILWAG_RELAY_ATTESTATION_SECRET_ARN"
+test "$TAILWAG_RELAY_ATTESTATION_SECRET_ARN" != "None"
+test -n "$TAILWAG_RELAY_ATTESTATION_KEY_ID"
 
 aws secretsmanager get-secret-value \
   --region "$AWS_REGION" \
@@ -220,13 +233,24 @@ aws secretsmanager get-secret-value \
       | length == (unique | length)
     )
   ' >/dev/null
+
+aws secretsmanager get-secret-value \
+  --region "$AWS_REGION" \
+  --secret-id "$TAILWAG_RELAY_ATTESTATION_SECRET_ARN" \
+  --output json \
+| jq -e '
+    .SecretString
+    | type == "string"
+      and utf8bytelength >= 32
+  ' >/dev/null
 ```
 
 Render a new task definition from the currently deployed revision. The
 transformation preserves the existing roles, logging, health check, CPU,
 memory, network contract, and unrelated settings; it updates the selected
-container image and upserts exactly one
-`TAILWAG_ROBOT_API_TOKENS_JSON` secret entry.
+container image, upserts exactly one `TAILWAG_ROBOT_API_TOKENS_JSON` secret
+entry and one `TAILWAG_RELAY_ATTESTATION_SECRET` secret entry, and sets exactly
+one non-secret `TAILWAG_RELAY_ATTESTATION_KEY_ID` environment entry.
 
 ```bash
 aws ecs describe-task-definition \
@@ -238,11 +262,19 @@ aws ecs describe-task-definition \
     --arg container "$ECS_CONTAINER_NAME" \
     --arg image "$IMAGE_URI" \
     --arg robot_tokens_secret_arn "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" \
+    --arg attestation_secret_arn "$TAILWAG_RELAY_ATTESTATION_SECRET_ARN" \
+    --arg attestation_key_id "$TAILWAG_RELAY_ATTESTATION_KEY_ID" \
     '
     def upsert_secret($name; $value_from):
       .secrets = (
         ((.secrets // []) | map(select(.name != $name)))
         + [{"name": $name, "valueFrom": $value_from}]
+      );
+
+    def upsert_environment($name; $value):
+      .environment = (
+        ((.environment // []) | map(select(.name != $name)))
+        + [{"name": $name, "value": $value}]
       );
 
     if (
@@ -267,6 +299,14 @@ aws ecs describe-task-definition \
                 "TAILWAG_ROBOT_API_TOKENS_JSON";
                 $robot_tokens_secret_arn
               )
+            | upsert_secret(
+                "TAILWAG_RELAY_ATTESTATION_SECRET";
+                $attestation_secret_arn
+              )
+            | upsert_environment(
+                "TAILWAG_RELAY_ATTESTATION_KEY_ID";
+                $attestation_key_id
+              )
           else
             .
           end
@@ -277,7 +317,7 @@ aws ecs describe-task-definition \
 ```
 
 Before registering the revision, resolve its ECS execution role and verify that
-IAM allows that role to fetch the exact secret ARN. The application task role
+IAM allows that role to fetch both exact secret ARNs. The application task role
 is not used for ECS secret injection.
 
 ```bash
@@ -290,21 +330,45 @@ test "$ECS_EXECUTION_ROLE_ARN" != "null"
 test "$(aws iam simulate-principal-policy \
   --policy-source-arn "$ECS_EXECUTION_ROLE_ARN" \
   --action-names secretsmanager:GetSecretValue \
-  --resource-arns "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" \
-  --query 'EvaluationResults[0].EvalDecision' \
-  --output text)" = "allowed"
+  --resource-arns \
+    "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" \
+    "$TAILWAG_RELAY_ATTESTATION_SECRET_ARN" \
+  --query 'length(EvaluationResults[?EvalDecision==`allowed`])' \
+  --output text)" = "2"
 
 jq -e \
   --arg container "$ECS_CONTAINER_NAME" \
-  --arg secret_arn "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" \
+  --arg robot_secret_arn "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" \
+  --arg attestation_secret_arn "$TAILWAG_RELAY_ATTESTATION_SECRET_ARN" \
+  --arg attestation_key_id "$TAILWAG_RELAY_ATTESTATION_KEY_ID" \
   '
-  [
-    .containerDefinitions[]
-    | select(.name == $container)
-    | .secrets[]
-    | select(.name == "TAILWAG_ROBOT_API_TOKENS_JSON")
-    | .valueFrom
-  ] == [$secret_arn]
+  (
+    [
+      .containerDefinitions[]
+      | select(.name == $container)
+      | .secrets[]
+      | select(.name == "TAILWAG_ROBOT_API_TOKENS_JSON")
+      | .valueFrom
+    ] == [$robot_secret_arn]
+  )
+  and (
+    [
+      .containerDefinitions[]
+      | select(.name == $container)
+      | .secrets[]
+      | select(.name == "TAILWAG_RELAY_ATTESTATION_SECRET")
+      | .valueFrom
+    ] == [$attestation_secret_arn]
+  )
+  and (
+    [
+      .containerDefinitions[]
+      | select(.name == $container)
+      | .environment[]
+      | select(.name == "TAILWAG_RELAY_ATTESTATION_KEY_ID")
+      | .value
+    ] == [$attestation_key_id]
+  )
   ' \
   /tmp/tailwag-task-definition.json >/dev/null
 
@@ -329,8 +393,8 @@ aws ecs wait services-stable \
 ```
 
 If the caller cannot run `iam:SimulatePrincipalPolicy`, stop and have an
-authorized IAM reviewer verify the exact role, action, and complete secret ARN;
-do not treat a partial ARN or a successful `describe-secret` call by the
+authorized IAM reviewer verify the exact role, action, and both complete secret
+ARNs; do not treat a partial ARN or a successful `describe-secret` call by the
 operator as proof that the ECS execution role has access.
 
 Delete `/tmp/tailwag-task-definition.json` after verification. Do not commit a
@@ -476,12 +540,16 @@ For worker changes, confirm all Lambda functions report the expected
 queues remain empty. Run write smoke jobs only when the operator explicitly
 accepts changes to the development memory store or report bucket.
 
-The open `/health` route proves process liveness only. A relay revision is
+The open `/health` route proves process liveness only. `/ready` must succeed
+after ECS stabilizes; it fails closed when only one attestation setting is
+present or the configured secret/key ID is invalid. Both settings may be absent
+for the legacy re-screening path, but this deployment procedure configures both
+to avoid a second OpenAI call. A relay revision is
 ready for schedule activation only after the relay constraint and indexes are
-online, ECS is stable on the expected task revision, the exact robot-token
-secret is present in that revision, an authenticated read-only relay request
-with a robot-scoped token succeeds, and one manual `relay_maintenance` job
-completes without Lambda errors or a DLQ message.
+online, ECS is stable on the expected task revision, the exact robot-token and
+attestation secrets plus key ID are present in that revision, an authenticated
+read-only relay request with a robot-scoped token succeeds, and one manual
+`relay_maintenance` job completes without Lambda errors or a DLQ message.
 
 ## Manage The Relay Maintenance Schedule
 
@@ -622,5 +690,9 @@ aws cloudformation deploy \
     WorkerCodeS3Key="$PREVIOUS_WORKER_CODE_S3_KEY"
 ```
 
-Rerun all read-only health and service checks after rollback. API and worker
-rollback do not modify Neo4j identities, episodes, memories, or biometrics.
+Keep the prior attestation secret available through the rollback window; do not
+delete or overwrite it while the recorded task revision may be restored. Rerun
+`/ready` and all read-only health and service checks after rollback. If
+readiness reports relay configuration failure, keep relay traffic stopped and
+restore the prior secret/key-ID pairing before retrying. API and worker rollback
+do not modify Neo4j identities, episodes, memories, or biometrics.

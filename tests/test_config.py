@@ -101,6 +101,10 @@ class ConfigTest(unittest.TestCase):
             "TAILWAG_RELAY_MAX_SENDS_PER_SENDER_PER_DAY": "4",
             "TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS": "7",
             "TAILWAG_RELAY_POLICY_MAX_RETRIES": "0",
+            "TAILWAG_RELAY_ATTESTATION_SECRET": (
+                "test-relay-attestation-secret-32-bytes-minimum"
+            ),
+            "TAILWAG_RELAY_ATTESTATION_KEY_ID": "test-2026-07",
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -122,6 +126,11 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(settings.relay_max_sends_per_sender_per_day, 4)
         self.assertEqual(settings.relay_policy_timeout_seconds, 7)
         self.assertEqual(settings.relay_policy_max_retries, 0)
+        self.assertEqual(
+            settings.relay_attestation_secret,
+            "test-relay-attestation-secret-32-bytes-minimum",
+        )
+        self.assertEqual(settings.relay_attestation_key_id, "test-2026-07")
         validate_relay_settings(settings)
 
     def test_relay_settings_preflight_requires_openai_key(self) -> None:
@@ -130,6 +139,31 @@ class ConfigTest(unittest.TestCase):
         settings = test_settings(openai_api_key=None)
         with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
             validate_relay_settings(settings)
+
+    def test_relay_settings_preflight_requires_attestation_key_material(self) -> None:
+        from tests.helpers import test_settings
+
+        cases = (
+            (
+                test_settings(relay_attestation_secret="too-short"),
+                "TAILWAG_RELAY_ATTESTATION_SECRET",
+            ),
+            (
+                test_settings(relay_attestation_key_id=""),
+                "TAILWAG_RELAY_ATTESTATION_KEY_ID",
+            ),
+        )
+        for settings, expected in cases:
+            with self.subTest(expected=expected):
+                with self.assertRaisesRegex(ValueError, expected):
+                    validate_relay_settings(settings)
+
+        validate_relay_settings(
+            test_settings(
+                relay_attestation_secret=None,
+                relay_attestation_key_id="",
+            )
+        )
 
     def test_load_settings_treats_blank_affect_model_env_as_missing(self) -> None:
         with patch.dict(

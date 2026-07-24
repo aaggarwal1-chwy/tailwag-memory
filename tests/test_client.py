@@ -597,6 +597,10 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 calls.append(("begin_delivery", message_id, kwargs))
                 return RelayTransitionResult(message_id=message_id, status="delivering")
 
+            def release_before_playback(self, message_id, **kwargs):
+                calls.append(("release_before_playback", message_id, kwargs))
+                return RelayTransitionResult(message_id=message_id, status="pending")
+
             def complete_delivery(self, message_id, **kwargs):
                 calls.append(("complete_delivery", message_id, kwargs))
                 return RelayTransitionResult(message_id=message_id, status="delivered")
@@ -652,6 +656,16 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 robot_id="cody",
                 limit=25,
             )
+            client.create_relay_message(
+                message,
+                robot_id="cody",
+                policy_attestation="policy-proof",
+            )
+            client.release_relay_before_playback(
+                "relay_1",
+                claim_token="claim_1",
+                robot_id="cody",
+            )
 
         self.assertEqual(calls[0], ("check_policy", message, {"robot_id": "cody"}))
         self.assertEqual(calls[1], ("create_confirmed", message, {"robot_id": "cody"}))
@@ -698,6 +712,22 @@ class TailwagMemoryClientTest(unittest.TestCase):
             (
                 "list_sender_statuses",
                 {"sender_email": "sender@example.com", "robot_id": "cody", "limit": 25},
+            ),
+        )
+        self.assertEqual(
+            calls[10],
+            (
+                "create_confirmed",
+                message,
+                {"robot_id": "cody", "policy_attestation": "policy-proof"},
+            ),
+        )
+        self.assertEqual(
+            calls[11],
+            (
+                "release_before_playback",
+                "relay_1",
+                {"claim_token": "claim_1", "robot_id": "cody"},
             ),
         )
 

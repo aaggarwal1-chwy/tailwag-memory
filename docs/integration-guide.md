@@ -279,6 +279,8 @@ export TAILWAG_ROBOT_API_TOKENS_JSON='{"robot-bos3-01":"replace-with-an-opaque-s
 export TAILWAG_RELAY_POLICY_MODEL=gpt-5.5
 export TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS=8
 export TAILWAG_RELAY_POLICY_MAX_RETRIES=1
+export TAILWAG_RELAY_ATTESTATION_SECRET='<random secret of at least 32 bytes>'
+export TAILWAG_RELAY_ATTESTATION_KEY_ID=relay-signing-2026-07
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 export SNOWFLAKE_ACCOUNT=CHEWY-CHEWY
 export SNOWFLAKE_USER=<username>@CHEWY.COM
@@ -302,6 +304,18 @@ Configuration notes:
 - `TAILWAG_ROBOT_API_TOKENS_JSON` configures unique robot-bound bearer tokens
   for relay routes. `GET /ready` validates this mapping, OpenAI relay policy
   configuration, Neo4j connectivity, and the required online relay schema.
+- `TAILWAG_RELAY_ATTESTATION_SECRET` is optional, separate high-entropy signing
+  material of at least 32 UTF-8 bytes.
+  `TAILWAG_RELAY_ATTESTATION_KEY_ID` identifies the active key in issued
+  proofs. Configure both or neither; a partial or weak configuration fails
+  relay readiness. With neither set, allowed policy checks return no proof and
+  confirmed creates retain legacy OpenAI re-screening. Production relay
+  deployments should configure both to avoid that second external call. Keep
+  the secret in the deployment secret store.
+  Rotation is coordinated because one key is active: pause new relay policy
+  checks, allow 125 seconds for outstanding proofs and bounded clock skew to
+  drain, update both values together across all API tasks, then resume relay
+  traffic. Do not mix old-key and new-key tasks behind the same endpoint.
 - `TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS`, `TAILWAG_RELAY_MAX_BODY_CHARACTERS`,
   `TAILWAG_RELAY_MAX_PENDING_PER_PAIR`, and
   `TAILWAG_RELAY_MAX_SENDS_PER_SENDER_PER_DAY` default to `30`, `500`, `3`,
@@ -363,7 +377,11 @@ from tailwag_memory import TailwagMemoryClient
 
 It also exposes the message-relay lifecycle: policy check, confirmed create,
 body-free claim, recipient permission/decline/snooze, delivery start/completion,
-playback failure, and sender-visible body-free statuses. See
+pre-playback release, playback failure, and sender-visible body-free statuses.
+When signing is configured, allowed policy checks return a 120-second
+exact-payload attestation; pass it to
+`create_relay_message(..., policy_attestation=...)` to avoid a second OpenAI
+screen. An omitted attestation preserves the legacy re-screening path. See
 [Robot Message Relay](message-relay.md#package-example) for a representative
 flow. Tailwag does not implement sender confirmation, recipient recognition,
 permission dialogue, TTS, or receipt acknowledgement.

@@ -60,6 +60,7 @@ from tailwag_memory.relay_policy import (
     RelaySafetyTimeoutError,
     RelaySafetyUnavailableError,
 )
+from tailwag_memory.relay_policy_attestation import RelayPolicyAttestationError
 
 ARGOS_MEMORY_REQUEST_PREFIX = "/argos/providers/memory/resources/memory/request"
 ARGOS_RELAY_REQUEST_PREFIX = "/argos/providers/message-relay/resources/messages/request"
@@ -422,10 +423,13 @@ def _relay_router() -> APIRouter:
         principal: ApiPrincipal = Depends(require_robot_principal),
         client: TailwagMemoryClient = Depends(get_client),
     ) -> dict[str, Any]:
+        create_kwargs = {"robot_id": principal.robot_id}
+        if payload.policy_attestation:
+            create_kwargs["policy_attestation"] = payload.policy_attestation
         return _relay_invoke(
             lambda: client.create_relay_message(
                 payload.message.as_input(),
-                robot_id=principal.robot_id,
+                **create_kwargs,
             )
         )
 
@@ -505,6 +509,21 @@ def _relay_router() -> APIRouter:
             body_free=True,
         )
 
+    @router.post("/release_before_playback", response_model=RelayTransitionResponse)
+    def release_before_playback(
+        payload: RelayMachineTransitionRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any]:
+        return _relay_invoke(
+            lambda: client.release_relay_before_playback(
+                payload.message_id,
+                claim_token=payload.claim_token,
+                robot_id=principal.robot_id,
+            ),
+            body_free=True,
+        )
+
     @router.post("/complete", response_model=RelayTransitionResponse)
     def complete_delivery(
         payload: RelayMachineTransitionRequest,
@@ -572,6 +591,8 @@ def _relay_invoke(call: Any, *, body_free: bool = False) -> Any:
     try:
         result = call()
     except RelayPolicyRejectedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RelayPolicyAttestationError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except RelayRateLimitError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc

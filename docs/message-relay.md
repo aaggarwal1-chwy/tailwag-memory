@@ -36,15 +36,27 @@ exposure.
 1. Recognize the sender and collect the exact recipient, body, delivery time,
    and optional expiry.
 2. Call `policy_check`. It resolves both people and screens the exact body
-   without creating a message.
+   without creating a message. An allowed response includes a
+   `policy_attestation` and `policy_attestation_expires_at` when signing is
+   configured.
 3. Read back the exact recipient and body.
 4. Require explicit confirmation from the same recognized sender.
-5. Call `create` with the unchanged payload.
+5. When the response contains an attestation, call `create` within 120 seconds
+   with the unchanged payload and proof. Otherwise call `create` without a
+   proof and use the legacy re-screening path.
 
-Tailwag repeats identity, validation, and policy checks during `create`. Safety
-screening uses the configured OpenAI Responses API and fails closed if the
-provider is unavailable or returns an invalid decision. Deployment approval
-must cover this external processing boundary.
+Tailwag repeats identity, time-window, rate-limit, and message-ID checks during
+`create`. A valid HMAC-SHA256 attestation skips only the duplicate OpenAI call.
+It binds the exact caller payload, including metadata and explicit omission
+markers for defaulted delivery times, to the authenticated robot and canonical
+sender/recipient identities. A supplied invalid, expired, or mismatched
+attestation fails closed without an OpenAI fallback. The payload fingerprint is
+keyed with the signing secret, so the proof and stored audit value do not expose
+an unkeyed body-derived digest. Omitting the attestation—or leaving both signing
+settings unconfigured—retains the legacy behavior and screens the body again.
+Duplicate message IDs
+retain their existing conflict semantics, including retries with the same
+attestation.
 
 By default, a message is deliverable immediately and expires after
 `TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS` (30 by default). A sender can specify an
@@ -66,6 +78,10 @@ and three active messages per sender-recipient pair.
    then call `complete`.
 6. If playback fails, call `playback_failure` with accurate `audio_started`
    evidence.
+
+If shutdown or another safe abort happens before audio starts, call
+`release_before_playback` with the same machine-transition payload to return a
+claimed or permission-granted message to `pending`.
 
 A failure before audio starts returns the message to `pending` and is visible
 to the sender through `last_failure_reason` and `last_failure_at`. A failure
@@ -125,7 +141,22 @@ include timezone-aware ISO-8601 values where `deliver_after < expires_at` and
 `expires_at` is within the configured maximum.
 
 After the same sender explicitly confirms the exact read-back, send the
-unchanged payload to `/create`. Then claim a body-free envelope:
+unchanged payload plus the returned `policy_attestation` to `/create`:
+
+```json
+{
+  "message": {
+    "id": "relay-20260724-001",
+    "sender_email": "alice@example.com",
+    "recipient_email": "bob@example.com",
+    "body": "Please meet me by the reception desk at 3 PM.",
+    "metadata": {"source": "argos"}
+  },
+  "policy_attestation": "<policy-attestation>"
+}
+```
+
+Then claim a body-free envelope:
 
 ```bash
 curl -fsS "$RELAY_API/claim" \
@@ -154,7 +185,8 @@ Call `/begin_delivery` and `/complete` with:
 {"message_id":"relay-20260724-001","claim_token":"<claim-token>"}
 ```
 
-Other operations are `decline`, `snooze`, `playback_failure`, and
+Other operations are `decline`, `snooze`, `release_before_playback`,
+`playback_failure`, and
 `sender_statuses`. The request models and response fields are defined in
 [`src/tailwag_memory/api/schemas.py`](../src/tailwag_memory/api/schemas.py).
 The API derives the robot ID from the bearer token; an
@@ -195,7 +227,11 @@ with TailwagMemoryClient.from_env() as client:
 # Stop here. Read back policy.recipient_display_name and the exact message.body.
 # After the same recognized sender explicitly confirms:
 with TailwagMemoryClient.from_env() as client:
-    client.create_relay_message(message, robot_id="robot-bos3-01")
+    client.create_relay_message(
+        message,
+        robot_id="robot-bos3-01",
+        policy_attestation=policy.policy_attestation,
+    )
     envelope = client.claim_next_relay_envelope(
         recipient_email="bob@example.com",
         robot_id="robot-bos3-01",
@@ -244,8 +280,10 @@ accurate `audio_started` evidence.
 
 `RelayMessage` stores the exact body, identity snapshots, assigned robot,
 delivery window, status, claim and playback state, bounded failure details, and
-JSON metadata. Schema initialization creates the `relay_message_id` constraint
-and the `relay_message_status`, `relay_message_delivery`, and
+JSON metadata. Attested creates also store the keyed payload fingerprint and
+attestation ID for audit correlation, but never the signing secret. Schema
+initialization creates the `relay_message_id` constraint and the
+`relay_message_status`, `relay_message_delivery`, and
 `relay_message_expires_at` indexes.
 
 Expiry ends delivery eligibility only. It never deletes, redacts, or overwrites
@@ -274,6 +312,8 @@ Seed two uniquely emailed people and the configured robot. Verify:
 
 - `policy_check` writes nothing and `create` occurs only after explicit sender
   confirmation
+- attested create performs one OpenAI screening total; tampered, expired, or
+  wrong-robot attestations fail without fallback screening
 - claim and sender-status responses never contain `body`
 - only the correct recipient, robot, token, and state release the body
 - decline requires no receipt acknowledgement and is visible to the sender
@@ -285,8 +325,8 @@ Seed two uniquely emailed people and the configured robot. Verify:
   `relay_message_status` for maintenance
 - adding terminal history does not increase claim or maintenance candidate rows
 
-Mock tests do not prove Neo4j contention behavior. AWS readiness, worker, queue,
-and alarm checks are a separate gate documented in
-[Message Relay On AWS](message-relay-aws-testing.md). Controlled TTS,
-recognition ownership, and the Linux audio path require a real Ubuntu robot
-hardware test.
+Mock tests do not prove Neo4j contention behavior. Use the canonical
+[Linux And Robot Message Relay Qualification](message-relay-linux-robot-qualification.md)
+runbook for the real-Neo4j, retained-volume, AWS, and Ubuntu hardware gates.
+Relay-specific AWS details are also documented in
+[Message Relay On AWS](message-relay-aws-testing.md).

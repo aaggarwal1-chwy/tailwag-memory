@@ -332,6 +332,21 @@ class TailwagApiAppTest(unittest.TestCase):
         )
         self.assertEqual(duplicate.status_code, 409)
 
+        from tailwag_memory.relay_policy_attestation import RelayPolicyAttestationError
+
+        fake.create_relay_message = lambda *args, **kwargs: (_ for _ in ()).throw(
+            RelayPolicyAttestationError("relay policy attestation is invalid or expired")
+        )
+        invalid_attestation = client.post(
+            f"{RELAY_API_BASE}/create",
+            headers=_robot_auth_header(),
+            json={
+                "message": message,
+                "policy_attestation": "invalid-token",
+            },
+        )
+        self.assertEqual(invalid_attestation.status_code, 403)
+
     def test_relay_upstream_safety_failures_are_not_caller_validation_errors(self) -> None:
         from tailwag_memory.api.app import create_app
         from tailwag_memory.api.dependencies import get_client
@@ -400,6 +415,14 @@ class TailwagApiAppTest(unittest.TestCase):
             headers=_robot_auth_header(),
             json={"message": message},
         )
+        attested_created = client.post(
+            f"{RELAY_API_BASE}/create",
+            headers=_robot_auth_header(),
+            json={
+                "message": message,
+                "policy_attestation": "policy-proof",
+            },
+        )
         injected_robot = client.post(
             f"{RELAY_API_BASE}/create",
             headers=_robot_auth_header(),
@@ -409,12 +432,22 @@ class TailwagApiAppTest(unittest.TestCase):
         self.assertEqual(policy.status_code, 200)
         self.assertTrue(policy.json()["allowed"])
         self.assertEqual(policy.json()["recipient_person_id"], "person_recipient")
+        self.assertEqual(policy.json()["policy_attestation"], "policy-proof")
+        self.assertEqual(
+            policy.json()["policy_attestation_expires_at"],
+            "2026-07-24T12:02:00+00:00",
+        )
         self.assertEqual(created.status_code, 200)
         self.assertEqual(created.json()["status"], "pending")
         self.assertNotIn("body", created.json())
+        self.assertEqual(attested_created.status_code, 200)
         self.assertEqual(injected_robot.status_code, 422)
         self.assertEqual(fake.calls[0][2], {"robot_id": "cody"})
         self.assertEqual(fake.calls[1][2], {"robot_id": "cody"})
+        self.assertEqual(
+            fake.calls[2][2],
+            {"robot_id": "cody", "policy_attestation": "policy-proof"},
+        )
 
     def test_relay_claim_is_body_free_and_permission_is_recipient_bound(self) -> None:
         from tailwag_memory.api.app import create_app
@@ -506,6 +539,11 @@ class TailwagApiAppTest(unittest.TestCase):
             ),
             client.post(
                 f"{RELAY_API_BASE}/begin_delivery",
+                headers=_robot_auth_header(),
+                json=machine_transition,
+            ),
+            client.post(
+                f"{RELAY_API_BASE}/release_before_playback",
                 headers=_robot_auth_header(),
                 json=machine_transition,
             ),
@@ -1122,6 +1160,7 @@ class TailwagApiAppTest(unittest.TestCase):
             "decline",
             "snooze",
             "begin_delivery",
+            "release_before_playback",
             "complete",
             "playback_failure",
             "sender_statuses",
@@ -1402,6 +1441,8 @@ class _FakeClient:
             recipient_email="recipient@example.com",
             sender_display_name="Sender",
             recipient_display_name="Recipient",
+            policy_attestation="policy-proof",
+            policy_attestation_expires_at="2026-07-24T12:02:00+00:00",
         )
 
     def create_relay_message(self, message, **kwargs) -> RelayMessageStatus:
@@ -1463,6 +1504,18 @@ class _FakeClient:
         return RelayTransitionResult(
             message_id=message_id,
             status="delivering",
+            claim_token=kwargs["claim_token"],
+        )
+
+    def release_relay_before_playback(
+        self,
+        message_id: str,
+        **kwargs,
+    ) -> RelayTransitionResult:
+        self.calls.append(("release_relay_before_playback", message_id, kwargs))
+        return RelayTransitionResult(
+            message_id=message_id,
+            status="pending",
             claim_token=kwargs["claim_token"],
         )
 

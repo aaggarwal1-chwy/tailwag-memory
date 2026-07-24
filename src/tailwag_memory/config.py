@@ -30,6 +30,8 @@ class Settings:
     relay_policy_model: str = "gpt-5.5"
     relay_policy_timeout_seconds: int = 8
     relay_policy_max_retries: int = 1
+    relay_attestation_secret: str | None = None
+    relay_attestation_key_id: str = ""
 
 
 def parse_positive_int_env(name: str, default: int) -> int:
@@ -106,6 +108,10 @@ def load_settings() -> Settings:
             minimum=0,
             maximum=1,
         ),
+        relay_attestation_secret=_optional_env("TAILWAG_RELAY_ATTESTATION_SECRET"),
+        relay_attestation_key_id=(
+            _optional_env("TAILWAG_RELAY_ATTESTATION_KEY_ID") or ""
+        ),
     )
 
 
@@ -130,6 +136,23 @@ def validate_relay_settings(settings: Settings) -> None:
         raise ValueError("TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS must be between 1 and 10")
     if settings.relay_policy_max_retries < 0 or settings.relay_policy_max_retries > 1:
         raise ValueError("TAILWAG_RELAY_POLICY_MAX_RETRIES must be between 0 and 1")
+    attestation_secret = str(settings.relay_attestation_secret or "")
+    attestation_key_id = str(settings.relay_attestation_key_id or "").strip()
+    if not attestation_secret and not attestation_key_id:
+        return
+    if not attestation_secret or not attestation_key_id:
+        raise ValueError(
+            "TAILWAG_RELAY_ATTESTATION_SECRET and "
+            "TAILWAG_RELAY_ATTESTATION_KEY_ID must be configured together"
+        )
+    if len(attestation_secret.encode("utf-8")) < 32:
+        raise ValueError(
+            "TAILWAG_RELAY_ATTESTATION_SECRET must contain at least 32 UTF-8 bytes"
+        )
+    if len(attestation_key_id) > 128:
+        raise ValueError(
+            "TAILWAG_RELAY_ATTESTATION_KEY_ID must contain at most 128 characters"
+        )
 
 
 def load_env_file(path: Path = Path(".env")) -> None:

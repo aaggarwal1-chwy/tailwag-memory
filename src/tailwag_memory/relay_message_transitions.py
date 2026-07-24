@@ -80,6 +80,45 @@ class RelayMessageTransitions:
         )
         return transition_or_conflict(message_id, rows)
 
+    def release_before_playback(
+        self,
+        message_id: str,
+        *,
+        claim_token: str,
+        robot_id: str,
+    ) -> RelayTransitionResult:
+        """Release a matching claim while playback is still impossible."""
+        now = self.clock().isoformat()
+        rows = self.runner.run(
+            """
+            MATCH (message:RelayMessage {id: $message_id})
+            SET message._relay_write_lock = randomUUID()
+            WITH message,
+                 message.assigned_robot_id = $robot_id
+                   AND message.status IN ['claimed', 'permission_granted']
+                   AND message.claim_token = $claim_token AS can_transition
+            FOREACH (_ IN CASE WHEN can_transition THEN [1] ELSE [] END |
+              SET message.status = 'pending',
+                  message.deliver_after = $now,
+                  message.updated_at = $now
+              REMOVE message.claim_token, message.claimed_at,
+                     message.permission_granted_at, message.delivery_started_at
+            )
+            WITH message, can_transition
+            REMOVE message._relay_write_lock
+            WITH message, can_transition
+            WHERE can_transition
+            RETURN message.id AS message_id, message.status AS status
+            """,
+            {
+                "message_id": required(message_id, "message_id"),
+                "claim_token": required(claim_token, "claim_token"),
+                "robot_id": required(robot_id, "robot_id"),
+                "now": now,
+            },
+        )
+        return transition_or_conflict(message_id, rows)
+
     def record_playback_failure(
         self,
         message_id: str,
@@ -97,8 +136,14 @@ class RelayMessageTransitions:
             SET message._relay_write_lock = randomUUID()
             WITH message,
                  message.assigned_robot_id = $robot_id
-                   AND message.status = 'delivering'
-                   AND message.claim_token = $claim_token AS can_transition
+                   AND message.claim_token = $claim_token
+                   AND (
+                     ($audio_started AND message.status = 'delivering')
+                     OR (
+                       NOT $audio_started
+                       AND message.status IN ['permission_granted', 'delivering']
+                     )
+                   ) AS can_transition
             FOREACH (_ IN CASE WHEN can_transition THEN [1] ELSE [] END |
               SET message.status = $status,
                   message.failed_at = $now,
