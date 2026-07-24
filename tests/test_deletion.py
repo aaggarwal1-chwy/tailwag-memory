@@ -112,8 +112,10 @@ class NodeDeletionServiceTest(unittest.TestCase):
     def test_rejects_unsupported_label(self) -> None:
         runner = RecordingQueryRunner()
 
-        with self.assertRaises(ValueError):
-            NodeDeletionService(runner).delete_node(label="Event", node_id="event_1")
+        for label in ("Event", "RelayMessage"):
+            with self.subTest(label=label):
+                with self.assertRaises(ValueError):
+                    NodeDeletionService(runner).delete_node(label=label, node_id="node_1")
 
         self.assertEqual(runner.queries, [])
 

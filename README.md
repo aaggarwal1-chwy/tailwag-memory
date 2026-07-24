@@ -16,11 +16,12 @@ The focused docs are the source of truth:
 - [CLI reference](docs/cli-reference.md): local schema setup, ingestion, retrieval, memory maintenance, inspect, and Slack command examples.
 - [Inspect reference](docs/inspect-reference.md): read-only report behavior, generated assets, filters, and affect report requirements.
 - [Slack ingestion guide](docs/slack-ingestion.md): Slack app setup, polling, state handling, and inspection queries.
+- [Robot message relay](docs/message-relay.md): canonical-email identity, confirmation and permission gates, permanent body retention, local tests, and AWS rollout.
 - [Repository agent instructions](AGENTS.md) and [agent trigger matrix](docs/agent-trigger-matrix.md): contributor agent workflow.
 
 ## Current Scope
 
-Tailwag stores caller-owned people, narrow robot identities and episode provenance, places, episodes, events, directory rows, biometric references, and transcript-derived memory items in Neo4j. Robot storage is intentionally limited to a stable ID, current display name, and per-episode name/role/source provenance; capabilities, sensors, software, live state, maintenance, and fleet modeling remain outside Tailwag. For the complete runtime scope and explicit boundaries, see [Architecture](docs/architecture.md).
+Tailwag stores caller-owned people, narrow robot identities and episode provenance, places, episodes, events, directory rows, biometric references, transcript-derived memory items, and permission-gated `RelayMessage` records in Neo4j. Robot storage is intentionally limited to a stable ID, current display name, and per-episode name/role/source provenance; capabilities, sensors, software, live state, maintenance, and fleet modeling remain outside Tailwag. For the complete runtime scope and explicit boundaries, see [Architecture](docs/architecture.md).
 
 ## Local Setup
 
@@ -44,3 +45,8 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
 For optional API contract tests and runtime-specific verification, see the [Python package integration guide](docs/integration-guide.md) and [Memory endpoints reference](docs/memory-endpoints.md).
+
+For message relay, the mock/unit suite is only the first verification gate.
+Real Neo4j concurrency tests, an AWS development-environment smoke test, and a
+real Ubuntu robot hardware/audio run are separate gates; see
+[Robot message relay](docs/message-relay.md#verification-gates).

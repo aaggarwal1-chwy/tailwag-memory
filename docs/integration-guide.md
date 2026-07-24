@@ -19,6 +19,7 @@ This guide stays at the package setup and integration-boundary level. For detail
 - Local command examples and CLI workflow: [CLI Reference](cli-reference.md)
 - Read-only local inspection reports and generated report assets: [Inspect Reference](inspect-reference.md)
 - Slack app setup, CLI polling, package-level polling, and Slack state behavior: [Slack Ingestion Guide](slack-ingestion.md)
+- Permission-gated exact robot message delivery, identity, state machine, retention, and tests: [Robot Message Relay](message-relay.md)
 
 ## Install From Another Local Repo
 
@@ -226,13 +227,18 @@ person node.
 
 1. Confirm the caller can resolve and reach the configured Tailwag base URL.
 2. Load the bearer token from the caller's secret store.
-3. Check unauthenticated `/health`.
-4. Check authenticated
+3. Check unauthenticated `/health` for process liveness.
+4. Check unauthenticated `/ready` for robot-token configuration, OpenAI relay
+   policy configuration, Neo4j connectivity, and required online relay schema.
+5. Check authenticated
    `/argos/providers/memory/resources/memory/health`.
-5. Request context for a known test person and consume `context_markdown`.
-6. Record an idempotent test episode.
-7. Confirm that subsequent context or semantic search includes the episode.
-8. Run the caller's provider/factory and prompt-mapping tests.
+6. Request context for a known test person and consume `context_markdown`.
+7. Record an idempotent test episode.
+8. Confirm that subsequent context or semantic search includes the episode.
+9. Run the caller's provider/factory and prompt-mapping tests.
+
+`/health` intentionally does not prove dependency readiness. A failed `/ready`
+returns `503`; do not send relay traffic until readiness succeeds.
 
 For copyable curl commands and discovery of the current endpoint, token secret,
 and source-polling ownership, see
@@ -260,6 +266,10 @@ export TAILWAG_VOICE_EMBEDDING_MODEL=speechbrain_ecapa
 export TAILWAG_SYNTHESIS_MODEL=gpt-5.5
 export TAILWAG_API_BEARER_TOKEN=replace-with-a-private-token
 export TAILWAG_API_DOCS_ENABLED=false
+export TAILWAG_ROBOT_API_TOKENS_JSON='{"robot-bos3-01":"replace-with-an-opaque-secret"}'
+export TAILWAG_RELAY_POLICY_MODEL=gpt-5.5
+export TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS=8
+export TAILWAG_RELAY_POLICY_MAX_RETRIES=1
 export SLACK_BOT_TOKEN=xoxb-your-token-here
 export SNOWFLAKE_ACCOUNT=CHEWY-CHEWY
 export SNOWFLAKE_USER=<username>@CHEWY.COM
@@ -280,6 +290,13 @@ Configuration notes:
 - `TAILWAG_FACE_EMBEDDING_MODEL` and `TAILWAG_VOICE_EMBEDDING_MODEL` identify the one supported upstream biometric model per modality. Tailwag stores those names on references and rejects adaptive updates when stored references were created with a different configured model.
 - `TAILWAG_SYNTHESIS_MODEL` controls the OpenAI model used by memory extraction and consolidation providers.
 - `TAILWAG_API_BEARER_TOKEN` is required for the FastAPI memory routes. `GET /health` is unauthenticated for container and load-balancer health checks.
+- `TAILWAG_ROBOT_API_TOKENS_JSON` configures unique robot-bound bearer tokens
+  for relay routes. `GET /ready` validates this mapping, OpenAI relay policy
+  configuration, Neo4j connectivity, and the required online relay schema.
+- Relay safety requests default to an 8-second timeout, allow a configured
+  timeout from 1 through 10 seconds, and allow at most one retry. HTTP callers
+  receive `503` for timeout, unavailability, or invalid provider configuration,
+  and `502` for a malformed provider decision.
 - `TAILWAG_API_DOCS_ENABLED=true` exposes `/docs`, `/redoc`, and `/openapi.json`; leave it false or unset in production unless schema docs are intentionally exposed behind a trusted boundary.
 - `SLACK_BOT_TOKEN` is only required when polling Slack.
 - `SNOWFLAKE_*` variables are only required when using `sync_directory_from_snowflake()` or `tailwag directory sync` without `--file`. The Snowflake connector is currently a base package dependency because directory sync is part of the current CLI/API surface.

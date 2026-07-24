@@ -28,14 +28,20 @@
         {"name": "TAILWAG_VOICE_EMBEDDING_DIMENSION", "value": "192"},
         {"name": "TAILWAG_FACE_EMBEDDING_MODEL", "value": "facenet"},
         {"name": "TAILWAG_VOICE_EMBEDDING_MODEL", "value": "speechbrain_ecapa"},
-        {"name": "TAILWAG_SYNTHESIS_MODEL", "value": "gpt-5.5"}
+        {"name": "TAILWAG_SYNTHESIS_MODEL", "value": "gpt-5.5"},
+        {"name": "TAILWAG_RELAY_POLICY_MODEL", "value": "gpt-5.5"},
+        {"name": "TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS", "value": "30"},
+        {"name": "TAILWAG_RELAY_MAX_BODY_CHARACTERS", "value": "500"},
+        {"name": "TAILWAG_RELAY_MAX_PENDING_PER_PAIR", "value": "3"},
+        {"name": "TAILWAG_RELAY_MAX_SENDS_PER_SENDER_PER_DAY", "value": "5"}
       ],
       "secrets": [
-        {"name": "NEO4J_URI", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/neo4j-uri"},
-        {"name": "NEO4J_USER", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/neo4j-user"},
-        {"name": "NEO4J_PASSWORD", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/neo4j-password"},
-        {"name": "OPENAI_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/openai-api-key"},
-        {"name": "TAILWAG_API_BEARER_TOKEN", "valueFrom": "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/api-bearer-token"}
+        {"name": "NEO4J_URI", "valueFrom": "<complete-neo4j-uri-secret-arn-from-describe-secret>"},
+        {"name": "NEO4J_USER", "valueFrom": "<complete-neo4j-user-secret-arn-from-describe-secret>"},
+        {"name": "NEO4J_PASSWORD", "valueFrom": "<complete-neo4j-password-secret-arn-from-describe-secret>"},
+        {"name": "OPENAI_API_KEY", "valueFrom": "<complete-openai-api-key-secret-arn-from-describe-secret>"},
+        {"name": "TAILWAG_API_BEARER_TOKEN", "valueFrom": "<complete-api-bearer-token-secret-arn-from-describe-secret>"},
+        {"name": "TAILWAG_ROBOT_API_TOKENS_JSON", "valueFrom": "<complete-robot-api-tokens-json-secret-arn-from-describe-secret>"}
       ],
       "healthCheck": {
         "command": [

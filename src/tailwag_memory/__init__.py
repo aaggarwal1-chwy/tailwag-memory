@@ -44,6 +44,12 @@ from .models import (
     PersonProfile,
     PersonRecognitionResult,
     PlaceInput,
+    RelayDeliveryAttempt,
+    RelayMessageEnvelope,
+    RelayMessageInput,
+    RelayMessageStatus,
+    RelayPolicyResult,
+    RelayTransitionResult,
     RobotInput,
     RobotParticipationResult,
     SearchQuery,
@@ -54,6 +60,7 @@ from .retrieval import (
     EventRetrievalService,
     PersonContextRetrievalService,
 )
+from .relay_messages import RelayMaintenanceResult, RelayMessageService
 from .schema import initialize_schema
 
 __all__ = [
@@ -105,6 +112,14 @@ __all__ = [
     "PersonRecognitionResult",
     "PlaceInput",
     "QueryRunner",
+    "RelayDeliveryAttempt",
+    "RelayMessageEnvelope",
+    "RelayMessageInput",
+    "RelayMessageStatus",
+    "RelayMessageService",
+    "RelayMaintenanceResult",
+    "RelayPolicyResult",
+    "RelayTransitionResult",
     "RobotInput",
     "RobotParticipationResult",
     "SearchQuery",

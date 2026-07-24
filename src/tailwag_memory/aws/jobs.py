@@ -9,6 +9,7 @@ JobType = Literal[
     "memory_extract_episode",
     "memory_consolidate_person",
     "memory_consolidate_all",
+    "relay_maintenance",
     "report_generate",
 ]
 
@@ -74,6 +75,16 @@ class MemoryConsolidateAllJob:
 
 
 @dataclass(frozen=True)
+class RelayMaintenanceJob:
+    """Expire stale relay messages and release abandoned claims."""
+
+    job_id: str
+    job_type: Literal["relay_maintenance"] = "relay_maintenance"
+    now: str = ""
+    claim_timeout_seconds: int = 120
+
+
+@dataclass(frozen=True)
 class ReportGenerateJob:
     """Describe static report generation and publishing."""
 
@@ -91,6 +102,7 @@ WorkerJob = (
     | MemoryExtractEpisodeJob
     | MemoryConsolidatePersonJob
     | MemoryConsolidateAllJob
+    | RelayMaintenanceJob
     | ReportGenerateJob
 )
 
@@ -140,6 +152,16 @@ def parse_job_payload(payload: str | bytes | dict[str, Any]) -> WorkerJob:
             neighbor_limit=_optional_positive_int(raw.get("neighbor_limit"), "neighbor_limit"),
             cluster_limit=_optional_positive_int(raw.get("cluster_limit"), "cluster_limit"),
             episode_text_limit=_optional_positive_int(raw.get("episode_text_limit"), "episode_text_limit"),
+        )
+    if job_type == "relay_maintenance":
+        return RelayMaintenanceJob(
+            job_id=job_id,
+            now=_optional_str(raw.get("now"), default="") or "",
+            claim_timeout_seconds=_positive_int(
+                raw.get("claim_timeout_seconds"),
+                "claim_timeout_seconds",
+                default=120,
+            ),
         )
     if job_type == "report_generate":
         reports = raw.get("reports", ["memory_items", "person_timeline", "followup_validity"])

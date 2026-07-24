@@ -18,6 +18,7 @@ workflow are documented in
 - `scheduler/slack-poll-schedule.example.json`: EventBridge Scheduler payload for recurring Slack poll jobs.
 - `scheduler/report-generate-schedule.example.json`: EventBridge Scheduler payload for daily report jobs.
 - `scheduler/memory-consolidate-all-schedule.example.json`: EventBridge Scheduler payload for daily bounded memory consolidation.
+- `scheduler/relay-maintenance-schedule.example.json`: EventBridge Scheduler payload for expiring messages and safely recovering abandoned claims.
 - `scripts/build-push-api-image.sh`: builds the Tailwag API container and pushes it to ECR.
 - `scripts/package-worker-zip.sh`: packages the Tailwag worker Lambda zip locally.
 - `../ecs-task-definition.example.json`: ECS task definition example for the FastAPI container.
@@ -111,6 +112,13 @@ The examples use one Secrets Manager namespace for all Tailwag runtime secrets:
 - `aaggarwal1-tailwag/openai-api-key`
 - `aaggarwal1-tailwag/slack-bot-token`
 - `aaggarwal1-tailwag/api-bearer-token`
+- `aaggarwal1-tailwag/robot-api-tokens-json` (a JSON object from stable robot ID to opaque token)
+
+Resolve complete secret ARNs with `aws secretsmanager describe-secret`; do not
+construct them from the names above because the Secrets Manager-generated
+suffix is part of the ARN. The placeholders in
+`deploy/ecs-task-definition.example.json` must be replaced with those complete
+ARNs.
 
 ## Edge Stack
 
@@ -250,11 +258,20 @@ workers. Worker entrypoints should use:
 - Secrets Manager for Neo4j, OpenAI, Slack, and API tokens
 
 Attach `iam/tailwag-api-execution-role-policy.example.json` to the `executionRoleArn` role and `iam/tailwag-api-task-policy.example.json` to the `taskRoleArn` role in the ECS task definition.
+Replace every execution-policy secret placeholder with the corresponding
+complete ARN returned by `describe-secret`; do not substitute a partial secret
+ARN.
 
 EventBridge Scheduler uses the application schedule group for Slack polling,
-daily report generation, and daily memory consolidation. The examples cover all three job types, including `memory_consolidate_all` for the memory worker. The JSON examples in
-`scheduler/` cover Slack, report, and bounded memory-consolidation payloads. Replace channel IDs,
-ARNs, schedule expressions, and job payload fields before creating schedules.
+daily report generation, daily memory consolidation, and relay maintenance.
+Every example is disabled by default and includes a bounded retry policy plus a
+queue-specific DLQ. The scheduler execution role policy must permit
+`sqs:SendMessage` to both each target queue and its configured DLQ. The JSON
+examples in `scheduler/` cover Slack, report, bounded memory consolidation, and
+relay maintenance. Replace group names, channel IDs, complete ARNs, schedule
+expressions, and job payload fields before creating schedules. Enable a
+schedule only after its manual smoke job succeeds and the worker, queue-age,
+and DLQ alarms are present with actions enabled.
 
 ## Updating The Deployed Application
 

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import os
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 try:
     from fastapi.testclient import TestClient
@@ -20,10 +21,15 @@ from tailwag_memory.models import (
     PersonInput,
     PersonMemoryExtractionResult,
     PersonProfile,
+    RelayMessageEnvelope,
+    RelayMessageStatus,
+    RelayPolicyResult,
+    RelayTransitionResult,
     VerifiedProfile,
 )
 
 API_BASE = "/argos/providers/memory/resources/memory/request"
+RELAY_API_BASE = "/argos/providers/message-relay/resources/messages/request"
 
 
 @unittest.skipIf(TestClient is None, "Install tailwag-memory[api] to run API tests.")
@@ -35,6 +41,8 @@ class TailwagApiAppTest(unittest.TestCase):
     def tearDown(self) -> None:
         os.environ.pop("TAILWAG_API_BEARER_TOKEN", None)
         os.environ.pop("TAILWAG_API_DOCS_ENABLED", None)
+        os.environ.pop("TAILWAG_ROBOT_API_TOKENS_JSON", None)
+        os.environ.pop("OPENAI_API_KEY", None)
 
     def test_health_is_open_and_does_not_create_client(self) -> None:
         from tailwag_memory.api.app import create_app
@@ -81,6 +89,138 @@ class TailwagApiAppTest(unittest.TestCase):
             },
         )
 
+    def test_readiness_runs_relay_auth_config_connectivity_and_schema_preflight(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tests.helpers import RecordingQueryRunner, test_settings
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        os.environ["OPENAI_API_KEY"] = "test-key"
+        runner = RecordingQueryRunner(
+            results=[
+                [{"ok": 1}],
+                [{
+                    "name": "relay_message_id",
+                    "type": "UNIQUENESS",
+                    "labelsOrTypes": ["RelayMessage"],
+                    "properties": ["id"],
+                }],
+                _relay_index_rows(),
+            ]
+        )
+        ready_client = _ReadyClient(runner=runner, settings=test_settings())
+
+        with patch(
+            "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+            return_value=ready_client,
+        ):
+            response = TestClient(create_app()).get("/ready")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ready")
+        self.assertEqual(len(runner.queries), 3)
+        self.assertIn("RETURN 1 AS ok", runner.queries[0].query)
+        self.assertIn("SHOW CONSTRAINTS", runner.queries[1].query)
+        self.assertIn("SHOW INDEXES", runner.queries[2].query)
+
+    def test_readiness_fails_closed_when_relay_schema_is_missing(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tests.helpers import RecordingQueryRunner, test_settings
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        os.environ["OPENAI_API_KEY"] = "test-key"
+        runner = RecordingQueryRunner(results=[[{"ok": 1}], [], []])
+        ready_client = _ReadyClient(runner=runner, settings=test_settings())
+
+        with patch(
+            "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+            return_value=ready_client,
+        ):
+            response = TestClient(create_app()).get("/ready")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Tailwag relay preflight failed")
+
+    def test_readiness_rejects_non_online_or_wrong_shape_relay_schema(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tests.helpers import RecordingQueryRunner, test_settings
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        os.environ["OPENAI_API_KEY"] = "test-key"
+        constraint = {
+            "name": "relay_message_id",
+            "type": "UNIQUENESS",
+            "labelsOrTypes": ["RelayMessage"],
+            "properties": ["id"],
+        }
+        cases = {
+            "populating": _relay_index_rows(
+                relay_message_delivery={"state": "POPULATING"}
+            ),
+            "wrong_label": _relay_index_rows(
+                relay_message_status={"labelsOrTypes": ["Person"]}
+            ),
+            "wrong_properties": _relay_index_rows(
+                relay_message_delivery={"properties": ["status"]}
+            ),
+        }
+
+        for name, index_rows in cases.items():
+            with self.subTest(name=name):
+                runner = RecordingQueryRunner(
+                    results=[[{"ok": 1}], [constraint], index_rows]
+                )
+                ready_client = _ReadyClient(runner=runner, settings=test_settings())
+                with patch(
+                    "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+                    return_value=ready_client,
+                ):
+                    response = TestClient(create_app()).get("/ready")
+                self.assertEqual(response.status_code, 503)
+
+        wrong_constraint_runner = RecordingQueryRunner(
+            results=[
+                [{"ok": 1}],
+                [{
+                    "name": "relay_message_id",
+                    "type": "UNIQUENESS",
+                    "labelsOrTypes": ["Person"],
+                    "properties": ["id"],
+                }],
+                _relay_index_rows(),
+            ]
+        )
+        with patch(
+            "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+            return_value=_ReadyClient(
+                runner=wrong_constraint_runner,
+                settings=test_settings(),
+            ),
+        ):
+            wrong_constraint = TestClient(create_app()).get("/ready")
+        self.assertEqual(wrong_constraint.status_code, 503)
+
+        wrong_type_runner = RecordingQueryRunner(
+            results=[
+                [{"ok": 1}],
+                [{
+                    "name": "relay_message_id",
+                    "type": "NODE_KEY",
+                    "labelsOrTypes": ["RelayMessage"],
+                    "properties": ["id"],
+                }],
+                _relay_index_rows(),
+            ]
+        )
+        with patch(
+            "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+            return_value=_ReadyClient(
+                runner=wrong_type_runner,
+                settings=test_settings(),
+            ),
+        ):
+            wrong_type = TestClient(create_app()).get("/ready")
+        self.assertEqual(wrong_type.status_code, 503)
+
     def test_memory_routes_require_bearer_token(self) -> None:
         from tailwag_memory.api.app import create_app
 
@@ -88,6 +228,300 @@ class TailwagApiAppTest(unittest.TestCase):
         response = client.post(f"{API_BASE}/person_context", json={"person_id": "person_jamie"})
 
         self.assertEqual(response.status_code, 401)
+
+    def test_relay_routes_require_robot_bound_bearer_token(self) -> None:
+        from tailwag_memory.api.app import create_app
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        client = TestClient(create_app())
+        payload = {"recipient_email": "recipient@example.com"}
+
+        unauthenticated = client.post(f"{RELAY_API_BASE}/claim", json=payload)
+        admin = client.post(
+            f"{RELAY_API_BASE}/claim",
+            headers=_auth_header(),
+            json=payload,
+        )
+
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(admin.status_code, 403)
+
+    def test_robot_token_cannot_access_memory_or_biometric_routes(self) -> None:
+        from tailwag_memory.api.app import create_app
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        client = TestClient(create_app())
+
+        memory = client.post(
+            f"{API_BASE}/people_profile",
+            headers=_robot_auth_header(),
+            json={"person_id": "person_sender"},
+        )
+        biometric = client.post(
+            f"{API_BASE}/biometrics_face_references_exists",
+            headers=_robot_auth_header(),
+            json={"person_id": "person_sender"},
+        )
+
+        self.assertEqual(memory.status_code, 403)
+        self.assertEqual(biometric.status_code, 403)
+
+    def test_relay_validation_and_state_conflicts_use_stable_4xx(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+        from tailwag_memory.relay_messages import RelayRateLimitError
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        fake = _FakeClient()
+        fake.create_relay_message = lambda *args, **kwargs: (_ for _ in ()).throw(
+            RelayRateLimitError("relay rate limit reached")
+        )
+        fake.begin_relay_delivery = lambda *args, **kwargs: RelayTransitionResult(
+            message_id="relay_1",
+            status="conflict",
+            reason="wrong state",
+        )
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+        message = {
+            "id": "relay_1",
+            "sender_email": "sender@example.com",
+            "recipient_email": "recipient@example.com",
+            "body": "Please call Jamie.",
+        }
+
+        invalid = client.post(
+            f"{RELAY_API_BASE}/create",
+            headers=_robot_auth_header(),
+            json={"message": message},
+        )
+        conflict = client.post(
+            f"{RELAY_API_BASE}/begin_delivery",
+            headers=_robot_auth_header(),
+            json={"message_id": "relay_1", "claim_token": "claim_1"},
+        )
+
+        self.assertEqual(invalid.status_code, 429)
+        self.assertEqual(conflict.status_code, 409)
+
+        from neo4j.exceptions import ConstraintError
+
+        fake.create_relay_message = lambda *args, **kwargs: (_ for _ in ()).throw(
+            ConstraintError("duplicate RelayMessage.id")
+        )
+        duplicate = client.post(
+            f"{RELAY_API_BASE}/create",
+            headers=_robot_auth_header(),
+            json={"message": message},
+        )
+        self.assertEqual(duplicate.status_code, 409)
+
+    def test_relay_upstream_safety_failures_are_not_caller_validation_errors(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+        from tailwag_memory.relay_policy import (
+            RelaySafetyMalformedResponseError,
+            RelaySafetyTimeoutError,
+            RelaySafetyUnavailableError,
+        )
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+        payload = {
+            "message": {
+                "id": "relay_1",
+                "sender_email": "sender@example.com",
+                "recipient_email": "recipient@example.com",
+                "body": "Please call Jamie.",
+            }
+        }
+        cases = (
+            (RelaySafetyMalformedResponseError("bad response"), 502),
+            (RelaySafetyTimeoutError("timed out"), 503),
+            (RelaySafetyUnavailableError("unavailable"), 503),
+            (ValueError("invalid caller input"), 422),
+        )
+
+        for error, expected_status in cases:
+            with self.subTest(error=type(error).__name__):
+                fake.check_relay_policy = lambda *args, _error=error, **kwargs: (
+                    _ for _ in ()
+                ).throw(_error)
+                response = client.post(
+                    f"{RELAY_API_BASE}/policy_check",
+                    headers=_robot_auth_header(),
+                    json=payload,
+                )
+                self.assertEqual(response.status_code, expected_status)
+
+    def test_relay_policy_and_create_derive_robot_from_principal(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+        message = {
+            "id": "relay_1",
+            "sender_email": "Sender@Example.com",
+            "recipient_email": "Recipient@Example.com",
+            "body": "Please call Jamie.",
+            "metadata": {"source": "argos"},
+        }
+
+        policy = client.post(
+            f"{RELAY_API_BASE}/policy_check",
+            headers=_robot_auth_header(),
+            json={"message": message},
+        )
+        created = client.post(
+            f"{RELAY_API_BASE}/create",
+            headers=_robot_auth_header(),
+            json={"message": message},
+        )
+        injected_robot = client.post(
+            f"{RELAY_API_BASE}/create",
+            headers=_robot_auth_header(),
+            json={"message": {**message, "assigned_robot_id": "puffle"}},
+        )
+
+        self.assertEqual(policy.status_code, 200)
+        self.assertTrue(policy.json()["allowed"])
+        self.assertEqual(policy.json()["recipient_person_id"], "person_recipient")
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()["status"], "pending")
+        self.assertNotIn("body", created.json())
+        self.assertEqual(injected_robot.status_code, 422)
+        self.assertEqual(fake.calls[0][2], {"robot_id": "cody"})
+        self.assertEqual(fake.calls[1][2], {"robot_id": "cody"})
+
+    def test_relay_claim_is_body_free_and_permission_is_recipient_bound(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+
+        claimed = client.post(
+            f"{RELAY_API_BASE}/claim",
+            headers=_robot_auth_header(),
+            json={"recipient_email": "recipient@example.com"},
+        )
+        permission = client.post(
+            f"{RELAY_API_BASE}/permission",
+            headers=_robot_auth_header(),
+            json={
+                "message_id": "relay_1",
+                "claim_token": "claim_1",
+                "recipient_email": "recipient@example.com",
+            },
+        )
+        missing_recipient = client.post(
+            f"{RELAY_API_BASE}/decline",
+            headers=_robot_auth_header(),
+            json={"message_id": "relay_1", "claim_token": "claim_1"},
+        )
+
+        self.assertEqual(claimed.status_code, 200)
+        self.assertEqual(claimed.json()["claim_token"], "claim_1")
+        self.assertNotIn("body", claimed.json())
+        self.assertEqual(permission.status_code, 200)
+        self.assertEqual(permission.json()["body"], "Please call Jamie.")
+        self.assertEqual(missing_recipient.status_code, 422)
+        self.assertEqual(
+            fake.calls[:2],
+            [
+                (
+                    "claim_next_relay_envelope",
+                    {
+                        "recipient_email": "recipient@example.com",
+                        "robot_id": "cody",
+                    },
+                ),
+                (
+                    "grant_relay_permission",
+                    "relay_1",
+                    {
+                        "claim_token": "claim_1",
+                        "recipient_email": "recipient@example.com",
+                        "robot_id": "cody",
+                    },
+                ),
+            ],
+        )
+
+    def test_relay_delivery_lifecycle_and_sender_statuses_use_claim_token(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        fake = _FakeClient()
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: fake
+        client = TestClient(app)
+        recipient_transition = {
+            "message_id": "relay_1",
+            "claim_token": "claim_1",
+            "recipient_email": "recipient@example.com",
+        }
+        machine_transition = {"message_id": "relay_1", "claim_token": "claim_1"}
+
+        responses = [
+            client.post(
+                f"{RELAY_API_BASE}/decline",
+                headers=_robot_auth_header(),
+                json=recipient_transition,
+            ),
+            client.post(
+                f"{RELAY_API_BASE}/snooze",
+                headers=_robot_auth_header(),
+                json={
+                    **recipient_transition,
+                    "deliver_after": "2026-07-24T12:00:00+00:00",
+                },
+            ),
+            client.post(
+                f"{RELAY_API_BASE}/begin_delivery",
+                headers=_robot_auth_header(),
+                json=machine_transition,
+            ),
+            client.post(
+                f"{RELAY_API_BASE}/complete",
+                headers=_robot_auth_header(),
+                json=machine_transition,
+            ),
+            client.post(
+                f"{RELAY_API_BASE}/playback_failure",
+                headers=_robot_auth_header(),
+                json={
+                    **machine_transition,
+                    "reason": "speaker unavailable",
+                    "audio_started": True,
+                },
+            ),
+        ]
+        statuses = client.post(
+            f"{RELAY_API_BASE}/sender_statuses",
+            headers=_robot_auth_header(),
+            json={"sender_email": "sender@example.com", "limit": 25},
+        )
+
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertEqual(responses[-1].json()["status"], "delivery_uncertain")
+        self.assertTrue(all("body" not in response.json() for response in responses))
+        self.assertEqual(statuses.status_code, 200)
+        self.assertEqual(statuses.json()[0]["status"], "delivered")
+        self.assertNotIn("body", statuses.json()[0])
+        self.assertEqual(fake.calls[-1][1]["robot_id"], "cody")
 
     def test_memory_routes_require_memory_provider_and_resource(self) -> None:
         from tailwag_memory.api.app import create_app
@@ -658,6 +1092,21 @@ class TailwagApiAppTest(unittest.TestCase):
         self.assertIn(f"{API_BASE}/biometrics_face_references_exists", paths)
         self.assertIn(f"{API_BASE}/person_context", paths)
         self.assertIn(f"{API_BASE}/turn_owner_resolve", paths)
+        for operation in {
+            "policy_check",
+            "create",
+            "claim",
+            "permission",
+            "decline",
+            "snooze",
+            "begin_delivery",
+            "complete",
+            "playback_failure",
+            "sender_statuses",
+        }:
+            self.assertIn(f"{RELAY_API_BASE}/{operation}", paths)
+        for unsupported in {"ack", "edit", "cancel"}:
+            self.assertNotIn(f"{RELAY_API_BASE}/{unsupported}", paths)
         rendered = str(document)
         self.assertIn("embedding", rendered)
         self.assertNotIn("raw_image", rendered)
@@ -666,6 +1115,49 @@ class TailwagApiAppTest(unittest.TestCase):
 
 def _auth_header() -> dict[str, str]:
     return {"Authorization": "Bearer test-token"}
+
+
+def _robot_auth_header() -> dict[str, str]:
+    return {"Authorization": "Bearer robot-token"}
+
+
+def _relay_index_rows(
+    **overrides: dict[str, object],
+) -> list[dict[str, object]]:
+    properties = {
+        "relay_message_status": ["status"],
+        "relay_message_delivery": [
+            "assigned_robot_id",
+            "status",
+            "deliver_after",
+            "created_at",
+        ],
+        "relay_message_expires_at": ["expires_at"],
+    }
+    rows = []
+    for name, index_properties in properties.items():
+        row: dict[str, object] = {
+            "name": name,
+            "type": "RANGE",
+            "state": "ONLINE",
+            "labelsOrTypes": ["RelayMessage"],
+            "properties": index_properties,
+        }
+        row.update(overrides.get(name, {}))
+        rows.append(row)
+    return rows
+
+
+@dataclass
+class _ReadyClient:
+    runner: object
+    settings: object
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
 
 
 @dataclass
@@ -866,6 +1358,109 @@ class _FakeClient:
             owner_source="audio_face_agree",
             owner_confidence=0.87,
         )
+
+    def check_relay_policy(self, message, **kwargs) -> RelayPolicyResult:
+        self.calls.append(("check_relay_policy", message, kwargs))
+        return RelayPolicyResult(
+            allowed=True,
+            sender_person_id="person_sender",
+            recipient_person_id="person_recipient",
+            sender_email="sender@example.com",
+            recipient_email="recipient@example.com",
+            sender_display_name="Sender",
+            recipient_display_name="Recipient",
+        )
+
+    def create_relay_message(self, message, **kwargs) -> RelayMessageStatus:
+        self.calls.append(("create_relay_message", message, kwargs))
+        return RelayMessageStatus(
+            message_id=message.id,
+            sender_person_id="person_sender",
+            recipient_person_id="person_recipient",
+            sender_email="sender@example.com",
+            recipient_email="recipient@example.com",
+            sender_display_name="Sender",
+            recipient_display_name="Recipient",
+            assigned_robot_id=kwargs["robot_id"],
+            status="pending",
+        )
+
+    def claim_next_relay_envelope(self, **kwargs) -> RelayMessageEnvelope:
+        self.calls.append(("claim_next_relay_envelope", kwargs))
+        return RelayMessageEnvelope(
+            message_id="relay_1",
+            sender_person_id="person_sender",
+            recipient_person_id="person_recipient",
+            sender_email="sender@example.com",
+            recipient_email="recipient@example.com",
+            sender_display_name="Sender",
+            recipient_display_name="Recipient",
+            assigned_robot_id=kwargs["robot_id"],
+            status="claimed",
+            claim_token="claim_1",
+        )
+
+    def grant_relay_permission(self, message_id: str, **kwargs) -> RelayTransitionResult:
+        self.calls.append(("grant_relay_permission", message_id, kwargs))
+        return RelayTransitionResult(
+            message_id=message_id,
+            status="permission_granted",
+            claim_token=kwargs["claim_token"],
+            body="Please call Jamie.",
+        )
+
+    def decline_relay_message(self, message_id: str, **kwargs) -> RelayTransitionResult:
+        self.calls.append(("decline_relay_message", message_id, kwargs))
+        return RelayTransitionResult(
+            message_id=message_id,
+            status="declined",
+            claim_token=kwargs["claim_token"],
+        )
+
+    def snooze_relay_message(self, message_id: str, **kwargs) -> RelayTransitionResult:
+        self.calls.append(("snooze_relay_message", message_id, kwargs))
+        return RelayTransitionResult(
+            message_id=message_id,
+            status="snoozed",
+            claim_token=kwargs["claim_token"],
+        )
+
+    def begin_relay_delivery(self, message_id: str, **kwargs) -> RelayTransitionResult:
+        self.calls.append(("begin_relay_delivery", message_id, kwargs))
+        return RelayTransitionResult(
+            message_id=message_id,
+            status="delivering",
+            claim_token=kwargs["claim_token"],
+        )
+
+    def complete_relay_delivery(self, message_id: str, **kwargs) -> RelayTransitionResult:
+        self.calls.append(("complete_relay_delivery", message_id, kwargs))
+        return RelayTransitionResult(
+            message_id=message_id,
+            status="delivered",
+            claim_token=kwargs["claim_token"],
+        )
+
+    def record_relay_playback_failure(self, message_id: str, **kwargs) -> RelayTransitionResult:
+        self.calls.append(("record_relay_playback_failure", message_id, kwargs))
+        return RelayTransitionResult(
+            message_id=message_id,
+            status="delivery_uncertain" if kwargs["audio_started"] else "pending",
+            claim_token=kwargs["claim_token"],
+            reason=kwargs["reason"],
+        )
+
+    def relay_sender_statuses(self, **kwargs) -> list[RelayMessageStatus]:
+        self.calls.append(("relay_sender_statuses", kwargs))
+        return [
+            RelayMessageStatus(
+                message_id="relay_1",
+                sender_email=kwargs["sender_email"],
+                recipient_email="recipient@example.com",
+                assigned_robot_id=kwargs["robot_id"],
+                status="delivered",
+            )
+        ]
 
 
 if __name__ == "__main__":

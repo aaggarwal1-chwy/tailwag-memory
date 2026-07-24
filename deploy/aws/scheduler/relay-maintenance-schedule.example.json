@@ -1,9 +1,8 @@
 {
-  "Name": "aaggarwal1-tailwag-dev-daily-memory-consolidation",
+  "Name": "aaggarwal1-tailwag-dev-relay-maintenance",
   "GroupName": "aaggarwal1-tailwag-dev",
-  "Description": "Send one daily Tailwag memory consolidation job to SQS.",
-  "ScheduleExpression": "cron(0 9 * * ? *)",
-  "ScheduleExpressionTimezone": "UTC",
+  "Description": "Expire relay messages and recover abandoned claims through the existing memory worker.",
+  "ScheduleExpression": "rate(5 minutes)",
   "State": "DISABLED",
   "FlexibleTimeWindow": {
     "Mode": "OFF"
@@ -18,6 +17,6 @@
     "DeadLetterConfig": {
       "Arn": "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-memory-jobs-dlq"
     },
-    "Input": "{\"job_type\":\"memory_consolidate_all\",\"job_id\":\"daily-memory-consolidation-<aws.scheduler.execution-id>\",\"person_limit\":100}"
+    "Input": "{\"job_type\":\"relay_maintenance\",\"job_id\":\"relay-maintenance-<aws.scheduler.execution-id>\",\"claim_timeout_seconds\":120}"
   }
 }

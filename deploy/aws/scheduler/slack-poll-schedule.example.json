@@ -1,13 +1,22 @@
 {
   "Name": "aaggarwal1-tailwag-dev-slack-poll-C0123456789",
+  "GroupName": "aaggarwal1-tailwag-dev",
   "Description": "Send one recurring Tailwag Slack poll job to SQS.",
   "ScheduleExpression": "rate(30 minutes)",
+  "State": "DISABLED",
   "FlexibleTimeWindow": {
     "Mode": "OFF"
   },
   "Target": {
     "Arn": "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-poll-jobs",
     "RoleArn": "arn:aws:iam::<account-id>:role/aaggarwal1-tailwag-dev-scheduler-role",
+    "RetryPolicy": {
+      "MaximumEventAgeInSeconds": 900,
+      "MaximumRetryAttempts": 2
+    },
+    "DeadLetterConfig": {
+      "Arn": "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-poll-jobs-dlq"
+    },
     "Input": "{\"job_type\":\"slack_poll\",\"job_id\":\"slack-poll-C0123456789-<aws.scheduler.execution-id>\",\"channel\":\"C0123456789\",\"history_limit\":200,\"reply_limit\":200,\"extract_memory\":false,\"enqueue_memory_extraction\":true}"
   }
 }

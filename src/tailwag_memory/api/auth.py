@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hmac
+import json
 import os
+from typing import Literal
 
-from fastapi import HTTPException, Security, status
+from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from tailwag_memory.config import load_env_file
@@ -15,22 +18,91 @@ _bearer_scheme = HTTPBearer(
 )
 
 
+@dataclass(frozen=True)
+class ApiPrincipal:
+    """Authenticated Tailwag API caller."""
+
+    kind: Literal["admin", "robot"]
+    robot_id: str = ""
+
+
+class RelayAuthConfigurationError(ValueError):
+    """Relay authentication configuration is missing or ambiguous."""
+
+
 def _configured_token() -> str:
     """Return the configured API bearer token."""
     load_env_file()
     return str(os.getenv("TAILWAG_API_BEARER_TOKEN") or "").strip()
 
 
+def _configured_robot_tokens() -> dict[str, str]:
+    """Return stable robot IDs keyed by their configured opaque tokens."""
+    load_env_file()
+    raw = str(os.getenv("TAILWAG_ROBOT_API_TOKENS_JSON") or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RelayAuthConfigurationError(
+            "TAILWAG_ROBOT_API_TOKENS_JSON is invalid"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RelayAuthConfigurationError(
+            "TAILWAG_ROBOT_API_TOKENS_JSON must be an object"
+        )
+    tokens: dict[str, str] = {}
+    for robot_id, token in payload.items():
+        rendered_robot_id = str(robot_id or "").strip()
+        rendered_token = str(token or "").strip()
+        if not rendered_robot_id or not rendered_token:
+            raise RelayAuthConfigurationError(
+                "TAILWAG_ROBOT_API_TOKENS_JSON contains an invalid entry"
+            )
+        if rendered_token in tokens:
+            raise RelayAuthConfigurationError(
+                "TAILWAG_ROBOT_API_TOKENS_JSON contains duplicate tokens"
+            )
+        tokens[rendered_token] = rendered_robot_id
+    return tokens
+
+
+def validate_relay_auth_configuration() -> dict[str, str]:
+    """Return configured robot tokens or raise a readiness-safe error."""
+    admin_token = _configured_token()
+    robot_tokens = _configured_robot_tokens()
+    if not robot_tokens:
+        raise RelayAuthConfigurationError(
+            "TAILWAG_ROBOT_API_TOKENS_JSON must configure at least one robot"
+        )
+    if admin_token and admin_token in robot_tokens:
+        raise RelayAuthConfigurationError(
+            "Tailwag API authentication scopes contain a duplicate token"
+        )
+    return robot_tokens
+
+
 def require_bearer_token(
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
-) -> None:
+) -> ApiPrincipal:
     """Require a configured bearer token for private API routes."""
-    token = _configured_token()
-    if not token:
+    try:
+        token = _configured_token()
+        robot_tokens = _configured_robot_tokens()
+        if token and token in robot_tokens:
+            raise RelayAuthConfigurationError(
+                "Tailwag API authentication scopes contain a duplicate token"
+            )
+        if not token and not robot_tokens:
+            raise RelayAuthConfigurationError(
+                "Tailwag API bearer authentication is not configured"
+            )
+    except RelayAuthConfigurationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="TAILWAG_API_BEARER_TOKEN is not configured",
-        )
+            detail=str(exc),
+        ) from exc
 
     if credentials is None or not credentials.credentials:
         raise HTTPException(
@@ -39,9 +111,38 @@ def require_bearer_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not hmac.compare_digest(credentials.credentials, token):
+    presented = credentials.credentials
+    if token and hmac.compare_digest(presented, token):
+        return ApiPrincipal(kind="admin")
+    for robot_token, robot_id in robot_tokens.items():
+        if hmac.compare_digest(presented, robot_token):
+            return ApiPrincipal(kind="robot", robot_id=robot_id)
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid bearer token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def require_robot_principal(
+    principal: ApiPrincipal = Depends(require_bearer_token),
+) -> ApiPrincipal:
+    """Require a robot-bound credential for relay operations."""
+    if principal.kind != "robot" or not principal.robot_id:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid bearer token",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Robot-bound bearer token required",
         )
+    return principal
+
+
+def require_admin_principal(
+    principal: ApiPrincipal = Depends(require_bearer_token),
+) -> ApiPrincipal:
+    """Keep robot-scoped credentials out of memory and biometric operations."""
+    if principal.kind != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrative bearer token required",
+        )
+    return principal

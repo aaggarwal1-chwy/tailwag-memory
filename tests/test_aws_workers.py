@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import MagicMock, patch
 
-from tailwag_memory.aws.handlers import _handle_sqs_jobs
+from tailwag_memory.aws.handlers import _handle_sqs_jobs, _process_memory_job, memory_worker_handler
 from tailwag_memory.aws.idempotency import DynamoDBJobIdempotencyStore, InMemoryJobIdempotencyStore
-from tailwag_memory.aws.jobs import MemoryExtractEpisodeJob
+from tailwag_memory.aws.jobs import MemoryExtractEpisodeJob, RelayMaintenanceJob
 from tailwag_memory.aws.reports import publish_report_files
 from tailwag_memory.aws.sqs import send_job
+from tailwag_memory.relay_messages import RelayMaintenanceResult
 
 
 class ConditionalCheckFailedException(Exception):
@@ -197,6 +199,81 @@ class AwsWorkerHelpersTest(unittest.TestCase):
         self.assertEqual(calls, ["extract-1", "extract-1", "extract-1"])
         self.assertEqual(store.items["extract-1"]["attempt_count"], 3)
         self.assertEqual(store.items["extract-1"]["status"], "failed")
+
+    def test_memory_worker_runs_relay_maintenance_with_requested_safety_window(self) -> None:
+        client = MagicMock()
+        client.__enter__.return_value = client
+        service = MagicMock()
+        service.run_maintenance.return_value = RelayMaintenanceResult(
+            expired_count=2,
+            claims_released_count=3,
+            uncertain_count=1,
+        )
+        job = RelayMaintenanceJob(
+            job_id="relay-maintenance-1",
+            now="2026-07-23T12:00:00+00:00",
+            claim_timeout_seconds=300,
+        )
+
+        with (
+            patch("tailwag_memory.aws.handlers.TailwagMemoryClient.from_env", return_value=client),
+            patch("tailwag_memory.aws.handlers._relay_message_service", return_value=service),
+        ):
+            result = _process_memory_job(job)
+
+        service.run_maintenance.assert_called_once_with(
+            now="2026-07-23T12:00:00+00:00",
+            claim_timeout_seconds=300,
+        )
+        self.assertEqual(
+            result,
+            {
+                "expired_count": 2,
+                "claims_released_count": 3,
+                "uncertain_count": 1,
+            },
+        )
+
+    def test_memory_worker_handler_routes_relay_maintenance_sqs_job(self) -> None:
+        store = InMemoryJobIdempotencyStore()
+        client = MagicMock()
+        client.__enter__.return_value = client
+        service = MagicMock()
+        service.run_maintenance.return_value = {
+            "expired_count": 1,
+            "claims_released_count": 1,
+            "uncertain_count": 0,
+        }
+        event = {
+            "Records": [
+                {
+                    "messageId": "msg-relay-maintenance-1",
+                    "body": (
+                        '{"job_type":"relay_maintenance","job_id":"relay-maintenance-1",'
+                        '"claim_timeout_seconds":180}'
+                    ),
+                }
+            ]
+        }
+
+        with (
+            patch("tailwag_memory.aws.handlers._job_idempotency_store", return_value=store),
+            patch("tailwag_memory.aws.handlers.TailwagMemoryClient.from_env", return_value=client),
+            patch("tailwag_memory.aws.handlers._relay_message_service", return_value=service),
+        ):
+            response = memory_worker_handler(event, object())
+
+        self.assertEqual(response, {"batchItemFailures": []})
+        service.run_maintenance.assert_called_once_with(now="", claim_timeout_seconds=180)
+        self.assertEqual(store.items["relay-maintenance-1"]["status"], "succeeded")
+        self.assertEqual(
+            store.items["relay-maintenance-1"]["result"],
+            {
+                "expired_count": 1,
+                "claims_released_count": 1,
+                "uncertain_count": 0,
+            },
+        )
 
     def test_running_job_is_reclaimed_after_its_lease_expires(self) -> None:
         now = [100]

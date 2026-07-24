@@ -6,7 +6,12 @@
       "Effect": "Allow",
       "Action": "secretsmanager:GetSecretValue",
       "Resource": [
-        "arn:aws:secretsmanager:us-east-2:<account-id>:secret:aaggarwal1-tailwag/*"
+        "<complete-neo4j-uri-secret-arn-from-describe-secret>",
+        "<complete-neo4j-user-secret-arn-from-describe-secret>",
+        "<complete-neo4j-password-secret-arn-from-describe-secret>",
+        "<complete-openai-api-key-secret-arn-from-describe-secret>",
+        "<complete-api-bearer-token-secret-arn-from-describe-secret>",
+        "<complete-robot-api-tokens-json-secret-arn-from-describe-secret>"
       ]
     }
   ]

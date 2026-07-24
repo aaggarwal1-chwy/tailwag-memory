@@ -290,7 +290,6 @@ class NodeDeletionService:
         )
         return _counts_from_row(rows)
 
-
 def _counts_from_row(rows: list[dict[str, Any]]) -> dict[str, int]:
     if not rows:
         return {}

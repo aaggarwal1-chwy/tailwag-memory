@@ -34,6 +34,11 @@ from .models import (
     OwnerResolutionResult,
     PersonInput,
     PersonProfile,
+    RelayMessageEnvelope,
+    RelayMessageInput,
+    RelayMessageStatus,
+    RelayPolicyResult,
+    RelayTransitionResult,
     SearchQuery,
     VerifiedProfile,
 )
@@ -87,6 +92,146 @@ class TailwagMemoryClient:
     def canonical_person_id_by_email(self, email: str) -> str | None:
         """Return one caller-owned canonical person id for an email when unambiguous."""
         return PersonIngestionService(self.runner).canonical_id_by_email(email)
+
+    def check_relay_policy(
+        self,
+        message: RelayMessageInput,
+        *,
+        robot_id: str,
+    ) -> RelayPolicyResult:
+        """Check relay policy without creating or exposing a stored message."""
+        return self._relay_messages().check_policy(message, robot_id=robot_id)
+
+    def create_relay_message(
+        self,
+        message: RelayMessageInput,
+        *,
+        robot_id: str,
+    ) -> RelayMessageStatus:
+        """Create one sender-confirmed relay message."""
+        return self._relay_messages().create_confirmed(message, robot_id=robot_id)
+
+    def claim_next_relay_envelope(
+        self,
+        *,
+        recipient_email: str,
+        robot_id: str,
+    ) -> RelayMessageEnvelope | None:
+        """Claim the next eligible body-free envelope for a recipient."""
+        return self._relay_messages().claim_next_envelope(
+            recipient_email=recipient_email,
+            robot_id=robot_id,
+        )
+
+    def grant_relay_permission(
+        self,
+        message_id: str,
+        *,
+        claim_token: str,
+        recipient_email: str,
+        robot_id: str,
+    ) -> RelayTransitionResult:
+        """Grant recipient permission and release message content."""
+        return self._relay_messages().grant_permission(
+            message_id,
+            claim_token=claim_token,
+            recipient_email=recipient_email,
+            robot_id=robot_id,
+        )
+
+    def decline_relay_message(
+        self,
+        message_id: str,
+        *,
+        claim_token: str,
+        recipient_email: str,
+        robot_id: str,
+    ) -> RelayTransitionResult:
+        """Decline a claimed message as its canonical recipient."""
+        return self._relay_messages().decline(
+            message_id,
+            claim_token=claim_token,
+            recipient_email=recipient_email,
+            robot_id=robot_id,
+        )
+
+    def snooze_relay_message(
+        self,
+        message_id: str,
+        *,
+        claim_token: str,
+        recipient_email: str,
+        robot_id: str,
+        deliver_after: str,
+    ) -> RelayTransitionResult:
+        """Defer a claimed message until a later delivery time."""
+        return self._relay_messages().snooze(
+            message_id,
+            claim_token=claim_token,
+            recipient_email=recipient_email,
+            robot_id=robot_id,
+            deliver_after=deliver_after,
+        )
+
+    def begin_relay_delivery(
+        self,
+        message_id: str,
+        *,
+        claim_token: str,
+        robot_id: str,
+    ) -> RelayTransitionResult:
+        """Mark a permission-granted message immediately before playback."""
+        return self._relay_messages().begin_delivery(
+            message_id,
+            claim_token=claim_token,
+            robot_id=robot_id,
+        )
+
+    def complete_relay_delivery(
+        self,
+        message_id: str,
+        *,
+        claim_token: str,
+        robot_id: str,
+    ) -> RelayTransitionResult:
+        """Mark a claimed relay message delivered after playback."""
+        return self._relay_messages().complete_delivery(
+            message_id,
+            claim_token=claim_token,
+            robot_id=robot_id,
+        )
+
+    def record_relay_playback_failure(
+        self,
+        message_id: str,
+        *,
+        claim_token: str,
+        robot_id: str,
+        reason: str,
+        audio_started: bool,
+    ) -> RelayTransitionResult:
+        """Record playback failure without assuming whether audio was heard."""
+        return self._relay_messages().record_playback_failure(
+            message_id,
+            claim_token=claim_token,
+            robot_id=robot_id,
+            reason=reason,
+            audio_started=audio_started,
+        )
+
+    def relay_sender_statuses(
+        self,
+        *,
+        sender_email: str,
+        robot_id: str,
+        limit: int = 50,
+    ) -> list[RelayMessageStatus]:
+        """Return body-free relay statuses visible to one sender."""
+        return self._relay_messages().list_sender_statuses(
+            sender_email=sender_email,
+            robot_id=robot_id,
+            limit=limit,
+        )
 
     def sync_directory_people(
         self,
@@ -461,6 +606,12 @@ class TailwagMemoryClient:
             face_embedding_model=self.settings.face_embedding_model,
             voice_embedding_model=self.settings.voice_embedding_model,
         )
+
+    def _relay_messages(self):
+        """Build the relay service without making it a client construction dependency."""
+        from .relay_messages import RelayMessageService
+
+        return RelayMessageService(self.runner, settings=self.settings)
 
 
 def _memory_queue_url() -> str:

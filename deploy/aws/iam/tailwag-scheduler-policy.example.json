@@ -7,8 +7,11 @@
       "Action": "sqs:SendMessage",
       "Resource": [
         "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-poll-jobs",
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-poll-jobs-dlq",
         "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-memory-jobs",
-        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-report-jobs"
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-memory-jobs-dlq",
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-report-jobs",
+        "arn:aws:sqs:us-east-2:<account-id>:aaggarwal1-tailwag-dev-report-jobs-dlq"
       ]
     }
   ]

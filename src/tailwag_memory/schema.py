@@ -43,6 +43,10 @@ def schema_statements(
         FOR (m:MemoryItem) REQUIRE m.id IS UNIQUE
         """,
         """
+        CREATE CONSTRAINT relay_message_id IF NOT EXISTS
+        FOR (m:RelayMessage) REQUIRE m.id IS UNIQUE
+        """,
+        """
         CREATE CONSTRAINT employee_directory_record_key IF NOT EXISTS
         FOR (d:EmployeeDirectoryRecord) REQUIRE (d.site_code, d.username) IS UNIQUE
         """,
@@ -57,6 +61,19 @@ def schema_statements(
         """
         CREATE CONSTRAINT place_key IF NOT EXISTS
         FOR (p:Place) REQUIRE (p.building_code, p.room_id) IS UNIQUE
+        """,
+        """
+        CREATE RANGE INDEX relay_message_status IF NOT EXISTS
+        FOR (m:RelayMessage) ON (m.status)
+        """,
+        """
+        CREATE RANGE INDEX relay_message_delivery IF NOT EXISTS
+        FOR (m:RelayMessage)
+        ON (m.assigned_robot_id, m.status, m.deliver_after, m.created_at)
+        """,
+        """
+        CREATE RANGE INDEX relay_message_expires_at IF NOT EXISTS
+        FOR (m:RelayMessage) ON (m.expires_at)
         """,
         f"""
         CREATE VECTOR INDEX episode_transcript_embedding IF NOT EXISTS

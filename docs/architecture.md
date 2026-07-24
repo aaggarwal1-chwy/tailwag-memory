@@ -4,7 +4,7 @@
 
 Tailwag Memory is a compact Neo4j-only memory package. It accepts caller-owned people, narrow robot identity/provenance, places, episodes, and events; stores them as graph records; generates OpenAI-backed text embeddings in production; and returns deterministic/vector-derived person context for downstream agents.
 
-This document is the source of truth for current architecture and scope boundaries. For package API details, see [Memory Endpoints Reference](memory-endpoints.md). For package-consumer and Argos HTTP workflows, see [Python Package Integration Guide](integration-guide.md). For the live AWS topology and operations, see [AWS Deployment And Operations](aws-deployment.md). For local inspection reports, see [Inspect Reference](inspect-reference.md).
+This document is the source of truth for current architecture and scope boundaries. For package API details, see [Memory Endpoints Reference](memory-endpoints.md). For the permission-gated robot relay, see [Robot Message Relay](message-relay.md). For package-consumer and Argos HTTP workflows, see [Python Package Integration Guide](integration-guide.md). For the live AWS topology and operations, see [AWS Deployment And Operations](aws-deployment.md). For local inspection reports, see [Inspect Reference](inspect-reference.md).
 
 ## Current Scope
 
@@ -16,6 +16,7 @@ Runtime components:
 - `Event`
 - `Place`
 - `MemoryItem`
+- `RelayMessage`
 - `EmployeeDirectoryRecord`
 - `FaceReference`
 - `VoiceReference`
@@ -31,6 +32,9 @@ Runtime components:
 - `SUPPORTED_BY`
 - `ADDRESSED_BY`
 - `SUPERSEDED_BY`
+- `SENT_RELAY`
+- `FOR_RECIPIENT`
+- `ASSIGNED_TO`
 - OpenAI-backed episode embeddings
 - OpenAI-backed memory item embeddings
 - Neo4j 5.26 local Docker runtime
@@ -69,6 +73,13 @@ Excluded from the runtime:
 - `Place` identity is `(building_code, room_id)`.
 - A directory row with a nonblank `site_code` has exactly one canonical home-base link to `Place(building_code=<site_code>, room_id="__site__")`; Tailwag does not infer room-level employee locations.
 - `Robot` is a narrow identity/provenance record. It does not expand Tailwag into robot runtime, telemetry, maintenance, or fleet storage.
+- `RelayMessage` is an operational delivery record, not durable person memory.
+  Its body is retained permanently under the selected policy even after
+  delivery, decline, uncertainty, or expiry.
+- Relay concurrency uses explicit temporary Neo4j lock properties and
+  post-lock compare-and-set or rate-limit checks. Lock properties are removed
+  in the same transaction; there are no persistent relay counters on `Person`
+  or `Robot`.
 - Production text embeddings use the OpenAI-compatible provider; tests use deterministic mocks.
 - Face and voice embeddings are biometric identifiers supplied by the caller or an upstream recognition model. Tailwag stores vectors on `FaceReference` and `VoiceReference` nodes, not raw face images or raw audio.
 - `MemoryItem` is the approved narrow path for durable transcript-derived person memory. It is not a broad ontology, triple store, or open-ended semantic fact graph.
@@ -287,6 +298,35 @@ Follow-ups require `expires_at` and are visible when active and the current time
 
 Related or redundant memories can be merged into one active memory. Superseded source memories are retained only as developer audit records, marked `status = "superseded"`, linked through `SUPERSEDED_BY`, and excluded from normal endpoint/query results.
 
+### RelayMessage
+
+```cypher
+(:RelayMessage {
+  id,
+  body,
+  metadata_json,
+  status,
+  sender_email_snapshot,
+  recipient_email_snapshot,
+  sender_display_name_snapshot,
+  recipient_display_name_snapshot,
+  assigned_robot_id,
+  created_at,
+  updated_at,
+  deliver_after,
+  expires_at,
+  claim_token,
+  attempt_count
+})
+```
+
+Relay messages carry exact text for permission-gated robot delivery. Expiry
+only ends delivery eligibility; it does not delete or redact `body`. Claim,
+permission, playback, delivery, decline, and failure fields are added as the
+state machine advances. Temporary `_relay_*` lock/create-token properties are
+transaction implementation details and are removed before a successful write
+commits.
+
 ## Relationships
 
 ```cypher
@@ -333,6 +373,12 @@ Related or redundant memories can be merged into one active memory. Superseded s
 }]->(:Episode)
 
 (:MemoryItem)-[:SUPERSEDED_BY]->(:MemoryItem)
+
+(:Person)-[:SENT_RELAY]->(:RelayMessage)
+
+(:RelayMessage)-[:FOR_RECIPIENT]->(:Person)
+
+(:RelayMessage)-[:ASSIGNED_TO]->(:Robot)
 ```
 
 `PARTICIPATED_IN.source` records how the calling system decided the person participated in the episode. Example values include `face_recognition`, `speaker_recognition`, `manual`, `caller`, `demo`, `example`, and `slack`. It is relationship provenance, not a confidence score.
@@ -387,6 +433,9 @@ FOR (e:Event) REQUIRE e.id IS UNIQUE;
 CREATE CONSTRAINT memory_item_id IF NOT EXISTS
 FOR (m:MemoryItem) REQUIRE m.id IS UNIQUE;
 
+CREATE CONSTRAINT relay_message_id IF NOT EXISTS
+FOR (m:RelayMessage) REQUIRE m.id IS UNIQUE;
+
 CREATE CONSTRAINT employee_directory_record_key IF NOT EXISTS
 FOR (d:EmployeeDirectoryRecord) REQUIRE (d.site_code, d.username) IS UNIQUE;
 
@@ -409,6 +458,7 @@ Tailwag initializes vector indexes for:
 
 Text embedding dimensions must match the configured Neo4j text vector indexes.
 Biometric reference dimensions are model-specific and stored on each reference.
+Relay range indexes cover status, assigned-robot delivery ordering, and expiry.
 
 ## Write Paths
 
@@ -419,6 +469,15 @@ High-level episode recording uses episode ingestion and, by default, runs transc
 Event ingestion stores or updates the event, upserts the place, creates the event `OCCURRED_AT` relationship, upserts accepted attendees, updates attendee `last_seen`, and writes `ATTENDED` relationships.
 
 Person-only ingestion supports explicit identity/profile refreshes through `upsert_person()`, lifecycle archival through `archive_person()`, and Slack-to-canonical identity convergence through `rekey_person_by_email()`. Biometric writes use the reference APIs, not `PersonInput`.
+
+Relay writes resolve canonical person emails and the authenticated robot, apply
+the workplace-safety policy before creation, and enforce the delivery state
+machine with compare-and-set guards. Mutations acquire explicit temporary
+Neo4j write locks, then re-evaluate the expected state or rate limit while the
+lock is held. Create locks the sender; claim locks the assigned robot and
+candidate messages; subsequent transitions lock the message. The locks are
+removed in the same transaction, and rate limits are derived from relay records
+rather than persistent `Person` or `Robot` counters.
 
 ## CLI Targeted Deletes
 
@@ -500,6 +559,10 @@ Core runtime settings are loaded from environment variables or `.env`:
 | `TAILWAG_VOICE_EMBEDDING_MODEL` | `speechbrain_ecapa` | Upstream voice embedding model name stamped on voice references and adaptive updates. |
 | `TAILWAG_SYNTHESIS_MODEL` | `gpt-5.5` | OpenAI model used by memory extraction and consolidation providers. |
 | `TAILWAG_API_BEARER_TOKEN` | unset | Required for optional FastAPI memory routes. `GET /health` remains unauthenticated. |
+| `TAILWAG_ROBOT_API_TOKENS_JSON` | `{}` | Required robot-ID-to-bearer-token mapping for relay routes. Tokens must be unique. |
+| `TAILWAG_RELAY_POLICY_MODEL` | `gpt-5.5` | OpenAI model used for relay workplace-safety screening. |
+| `TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS` | `8` | Safety request timeout; must be from 1 through 10 seconds. |
+| `TAILWAG_RELAY_POLICY_MAX_RETRIES` | `1` | Safety request retries; must be 0 or 1. |
 | `TAILWAG_API_DOCS_ENABLED` | `false` | Enables `/docs`, `/redoc`, and `/openapi.json` when set to `1`, `true`, `yes`, or `on`. |
 | `SLACK_BOT_TOKEN` | unset | Required only when polling Slack. |
 | `SNOWFLAKE_ACCOUNT` | unset | Required by `tailwag directory sync` when reading directory rows from Snowflake. |
@@ -512,6 +575,11 @@ Core runtime settings are loaded from environment variables or `.env`:
 | `SNOWFLAKE_SCHEMA` | unset | Optional Snowflake schema. |
 | `TAILWAG_AFFECT_FOLD1_MODEL` | unset | Optional external XLM-RoBERTa-large fold 1 model directory for `tailwag inspect affect`. |
 | `TAILWAG_AFFECT_FOLD2_MODEL` | unset | Optional external XLM-RoBERTa-large fold 2 model directory for `tailwag inspect affect`. |
+
+`GET /health` is dependency-free liveness. `GET /ready` validates relay auth,
+OpenAI configuration, Neo4j connectivity, and the required online relay schema.
+Safety timeouts, unavailable providers, and invalid provider configuration map
+to HTTP `503`; malformed decisions map to `502`.
 
 ## Neo4j Browser IDs
 

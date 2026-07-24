@@ -9,6 +9,10 @@ from tailwag_memory.models import (
     MemoryItemMergeResult,
     PersonMemoryExtractionResult,
     PersonMemoryConsolidationResult,
+    RelayMessageEnvelope,
+    RelayMessageInput,
+    RelayMessageStatus,
+    RelayTransitionResult,
     RobotInput,
 )
 
@@ -230,6 +234,46 @@ class MemoryModelTest(unittest.TestCase):
 
         self.assertNotIn("memory_id", names)
         self.assertNotIn("status", names)
+
+
+class RelayMessageModelTest(unittest.TestCase):
+    def test_input_contains_only_sender_supplied_message_fields(self) -> None:
+        names = {field.name for field in fields(RelayMessageInput)}
+
+        self.assertEqual(
+            names,
+            {
+                "id",
+                "sender_email",
+                "recipient_email",
+                "body",
+                "deliver_after",
+                "expires_at",
+                "metadata",
+            },
+        )
+        self.assertNotIn("assigned_robot_id", names)
+        self.assertNotIn("claim_token", names)
+        self.assertNotIn("status", names)
+
+    def test_claim_envelope_and_sender_status_cannot_contain_body(self) -> None:
+        envelope_names = {field.name for field in fields(RelayMessageEnvelope)}
+        status_names = {field.name for field in fields(RelayMessageStatus)}
+
+        self.assertNotIn("body", envelope_names)
+        self.assertNotIn("body", status_names)
+        self.assertIn("claim_token", envelope_names)
+        self.assertNotIn("claim_token", status_names)
+
+    def test_only_transition_result_can_release_optional_body(self) -> None:
+        result = RelayTransitionResult(
+            message_id="relay_1",
+            status="permission_granted",
+            claim_token="claim_1",
+            body="Please call Jamie.",
+        )
+
+        self.assertEqual(result.body, "Please call Jamie.")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tailwag_memory.config import load_env_file, load_settings, parse_positive_int_env
+from tailwag_memory.config import (
+    load_env_file,
+    load_settings,
+    parse_bounded_int_env,
+    parse_positive_int_env,
+    validate_relay_settings,
+)
 
 
 class ConfigTest(unittest.TestCase):
@@ -44,6 +50,36 @@ class ConfigTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "positive integer"):
                         parse_positive_int_env("TAILWAG_EMBEDDING_DIMENSION", 64)
 
+    def test_parse_bounded_int_env_enforces_gateway_safe_range(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS": "8"},
+            clear=True,
+        ):
+            self.assertEqual(
+                parse_bounded_int_env(
+                    "TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS",
+                    5,
+                    minimum=1,
+                    maximum=10,
+                ),
+                8,
+            )
+        for value in ("0", "11", "invalid"):
+            with self.subTest(value=value):
+                with patch.dict(
+                    os.environ,
+                    {"TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS": value},
+                    clear=True,
+                ):
+                    with self.assertRaisesRegex(ValueError, "between 1 and 10"):
+                        parse_bounded_int_env(
+                            "TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS",
+                            5,
+                            minimum=1,
+                            maximum=10,
+                        )
+
     def test_load_settings_parses_supported_runtime_env(self) -> None:
         env = {
             "NEO4J_URI": "bolt://example.test:7687",
@@ -58,6 +94,13 @@ class ConfigTest(unittest.TestCase):
             "SLACK_BOT_TOKEN": "xoxb-test-token",
             "TAILWAG_AFFECT_FOLD1_MODEL": " /models/fold1 ",
             "TAILWAG_AFFECT_FOLD2_MODEL": "/models/fold2",
+            "TAILWAG_RELAY_POLICY_MODEL": "gpt-5.5-mini",
+            "TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS": "14",
+            "TAILWAG_RELAY_MAX_BODY_CHARACTERS": "400",
+            "TAILWAG_RELAY_MAX_PENDING_PER_PAIR": "2",
+            "TAILWAG_RELAY_MAX_SENDS_PER_SENDER_PER_DAY": "4",
+            "TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS": "7",
+            "TAILWAG_RELAY_POLICY_MAX_RETRIES": "0",
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -72,6 +115,21 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(settings.slack_bot_token, "xoxb-test-token")
         self.assertEqual(settings.affect_fold1_model, "/models/fold1")
         self.assertEqual(settings.affect_fold2_model, "/models/fold2")
+        self.assertEqual(settings.relay_policy_model, "gpt-5.5-mini")
+        self.assertEqual(settings.relay_default_expiry_days, 14)
+        self.assertEqual(settings.relay_max_body_characters, 400)
+        self.assertEqual(settings.relay_max_pending_per_pair, 2)
+        self.assertEqual(settings.relay_max_sends_per_sender_per_day, 4)
+        self.assertEqual(settings.relay_policy_timeout_seconds, 7)
+        self.assertEqual(settings.relay_policy_max_retries, 0)
+        validate_relay_settings(settings)
+
+    def test_relay_settings_preflight_requires_openai_key(self) -> None:
+        from tests.helpers import test_settings
+
+        settings = test_settings(openai_api_key=None)
+        with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
+            validate_relay_settings(settings)
 
     def test_load_settings_treats_blank_affect_model_env_as_missing(self) -> None:
         with patch.dict(

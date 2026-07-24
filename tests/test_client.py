@@ -16,6 +16,11 @@ from tailwag_memory.models import (
     PersonMemoryConsolidationResult,
     PersonMemoryExtractionResult,
     PlaceInput,
+    RelayMessageEnvelope,
+    RelayMessageInput,
+    RelayMessageStatus,
+    RelayPolicyResult,
+    RelayTransitionResult,
 )
 
 
@@ -552,6 +557,148 @@ class TailwagMemoryClientTest(unittest.TestCase):
     def test_consolidate_memory_requires_person_or_all_people(self) -> None:
         with self.assertRaisesRegex(ValueError, "person_id"):
             TailwagMemoryClient(RecordingQueryRunner(), _settings()).consolidate_memory()
+
+    def test_relay_methods_delegate_robot_and_claim_bound_identity(self) -> None:
+        calls = []
+        message = RelayMessageInput(
+            id="relay_1",
+            sender_email="sender@example.com",
+            recipient_email="recipient@example.com",
+            body="Please call Jamie.",
+        )
+
+        class FakeRelayService:
+            def check_policy(self, message_arg, **kwargs):
+                calls.append(("check_policy", message_arg, kwargs))
+                return RelayPolicyResult(allowed=True)
+
+            def create_confirmed(self, message_arg, **kwargs):
+                calls.append(("create_confirmed", message_arg, kwargs))
+                return RelayMessageStatus(message_id=message_arg.id, status="pending")
+
+            def claim_next_envelope(self, **kwargs):
+                calls.append(("claim_next_envelope", kwargs))
+                return RelayMessageEnvelope(message_id="relay_1", claim_token="claim_1")
+
+            def grant_permission(self, message_id, **kwargs):
+                calls.append(("grant_permission", message_id, kwargs))
+                return RelayTransitionResult(message_id=message_id, status="permission_granted")
+
+            def decline(self, message_id, **kwargs):
+                calls.append(("decline", message_id, kwargs))
+                return RelayTransitionResult(message_id=message_id, status="declined")
+
+            def snooze(self, message_id, **kwargs):
+                calls.append(("snooze", message_id, kwargs))
+                return RelayTransitionResult(message_id=message_id, status="snoozed")
+
+            def begin_delivery(self, message_id, **kwargs):
+                calls.append(("begin_delivery", message_id, kwargs))
+                return RelayTransitionResult(message_id=message_id, status="delivering")
+
+            def complete_delivery(self, message_id, **kwargs):
+                calls.append(("complete_delivery", message_id, kwargs))
+                return RelayTransitionResult(message_id=message_id, status="delivered")
+
+            def record_playback_failure(self, message_id, **kwargs):
+                calls.append(("record_playback_failure", message_id, kwargs))
+                return RelayTransitionResult(message_id=message_id, status="delivery_uncertain")
+
+            def list_sender_statuses(self, **kwargs):
+                calls.append(("list_sender_statuses", kwargs))
+                return [RelayMessageStatus(message_id="relay_1", status="delivered")]
+
+        client = TailwagMemoryClient(RecordingQueryRunner(), _settings())
+        with patch.object(client, "_relay_messages", return_value=FakeRelayService()):
+            self.assertTrue(client.check_relay_policy(message, robot_id="cody").allowed)
+            self.assertEqual(client.create_relay_message(message, robot_id="cody").status, "pending")
+            self.assertIsNotNone(
+                client.claim_next_relay_envelope(
+                    recipient_email="recipient@example.com",
+                    robot_id="cody",
+                )
+            )
+            client.grant_relay_permission(
+                "relay_1",
+                claim_token="claim_1",
+                recipient_email="recipient@example.com",
+                robot_id="cody",
+            )
+            client.decline_relay_message(
+                "relay_1",
+                claim_token="claim_1",
+                recipient_email="recipient@example.com",
+                robot_id="cody",
+            )
+            client.snooze_relay_message(
+                "relay_1",
+                claim_token="claim_1",
+                recipient_email="recipient@example.com",
+                robot_id="cody",
+                deliver_after="2026-07-24T12:00:00+00:00",
+            )
+            client.begin_relay_delivery("relay_1", claim_token="claim_1", robot_id="cody")
+            client.complete_relay_delivery("relay_1", claim_token="claim_1", robot_id="cody")
+            client.record_relay_playback_failure(
+                "relay_1",
+                claim_token="claim_1",
+                robot_id="cody",
+                reason="speaker unavailable",
+                audio_started=True,
+            )
+            client.relay_sender_statuses(
+                sender_email="sender@example.com",
+                robot_id="cody",
+                limit=25,
+            )
+
+        self.assertEqual(calls[0], ("check_policy", message, {"robot_id": "cody"}))
+        self.assertEqual(calls[1], ("create_confirmed", message, {"robot_id": "cody"}))
+        self.assertEqual(
+            calls[2],
+            (
+                "claim_next_envelope",
+                {"recipient_email": "recipient@example.com", "robot_id": "cody"},
+            ),
+        )
+        recipient_transition = {
+            "claim_token": "claim_1",
+            "recipient_email": "recipient@example.com",
+            "robot_id": "cody",
+        }
+        self.assertEqual(calls[3], ("grant_permission", "relay_1", recipient_transition))
+        self.assertEqual(calls[4], ("decline", "relay_1", recipient_transition))
+        self.assertEqual(
+            calls[5],
+            (
+                "snooze",
+                "relay_1",
+                {
+                    **recipient_transition,
+                    "deliver_after": "2026-07-24T12:00:00+00:00",
+                },
+            ),
+        )
+        self.assertEqual(
+            calls[8],
+            (
+                "record_playback_failure",
+                "relay_1",
+                {
+                    "claim_token": "claim_1",
+                    "robot_id": "cody",
+                    "reason": "speaker unavailable",
+                    "audio_started": True,
+                },
+            ),
+        )
+        self.assertEqual(
+            calls[9],
+            (
+                "list_sender_statuses",
+                {"sender_email": "sender@example.com", "robot_id": "cody", "limit": 25},
+            ),
+        )
 
     def test_context_manager_closes_runner(self) -> None:
         runner = RecordingQueryRunner()

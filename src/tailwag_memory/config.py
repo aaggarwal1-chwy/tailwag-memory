@@ -23,6 +23,13 @@ class Settings:
     slack_bot_token: str | None = None
     affect_fold1_model: str | None = None
     affect_fold2_model: str | None = None
+    relay_default_expiry_days: int = 30
+    relay_max_body_characters: int = 500
+    relay_max_pending_per_pair: int = 3
+    relay_max_sends_per_sender_per_day: int = 5
+    relay_policy_model: str = "gpt-5.5"
+    relay_policy_timeout_seconds: int = 8
+    relay_policy_max_retries: int = 1
 
 
 def parse_positive_int_env(name: str, default: int) -> int:
@@ -37,6 +44,26 @@ def parse_positive_int_env(name: str, default: int) -> int:
         raise ValueError(f"{name} must be a positive integer") from exc
     if value <= 0:
         raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def parse_bounded_int_env(
+    name: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Read an integer environment variable constrained to a safe range."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}") from exc
+    if value < minimum or value > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return value
 
 
@@ -59,7 +86,50 @@ def load_settings() -> Settings:
         slack_bot_token=os.getenv("SLACK_BOT_TOKEN"),
         affect_fold1_model=_optional_env("TAILWAG_AFFECT_FOLD1_MODEL"),
         affect_fold2_model=_optional_env("TAILWAG_AFFECT_FOLD2_MODEL"),
+        relay_default_expiry_days=parse_positive_int_env("TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS", 30),
+        relay_max_body_characters=parse_positive_int_env("TAILWAG_RELAY_MAX_BODY_CHARACTERS", 500),
+        relay_max_pending_per_pair=parse_positive_int_env("TAILWAG_RELAY_MAX_PENDING_PER_PAIR", 3),
+        relay_max_sends_per_sender_per_day=parse_positive_int_env(
+            "TAILWAG_RELAY_MAX_SENDS_PER_SENDER_PER_DAY",
+            5,
+        ),
+        relay_policy_model=os.getenv("TAILWAG_RELAY_POLICY_MODEL", "gpt-5.5"),
+        relay_policy_timeout_seconds=parse_bounded_int_env(
+            "TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS",
+            8,
+            minimum=1,
+            maximum=10,
+        ),
+        relay_policy_max_retries=parse_bounded_int_env(
+            "TAILWAG_RELAY_POLICY_MAX_RETRIES",
+            1,
+            minimum=0,
+            maximum=1,
+        ),
     )
+
+
+def validate_relay_settings(settings: Settings) -> None:
+    """Fail fast when relay policy configuration is incomplete or unsafe."""
+    positive_fields = {
+        "TAILWAG_RELAY_DEFAULT_EXPIRY_DAYS": settings.relay_default_expiry_days,
+        "TAILWAG_RELAY_MAX_BODY_CHARACTERS": settings.relay_max_body_characters,
+        "TAILWAG_RELAY_MAX_PENDING_PER_PAIR": settings.relay_max_pending_per_pair,
+        "TAILWAG_RELAY_MAX_SENDS_PER_SENDER_PER_DAY": (
+            settings.relay_max_sends_per_sender_per_day
+        ),
+    }
+    for name, value in positive_fields.items():
+        if value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if not str(settings.openai_api_key or "").strip():
+        raise ValueError("OPENAI_API_KEY is required for relay safety screening")
+    if not str(settings.relay_policy_model or "").strip():
+        raise ValueError("TAILWAG_RELAY_POLICY_MODEL is required")
+    if settings.relay_policy_timeout_seconds < 1 or settings.relay_policy_timeout_seconds > 10:
+        raise ValueError("TAILWAG_RELAY_POLICY_TIMEOUT_SECONDS must be between 1 and 10")
+    if settings.relay_policy_max_retries < 0 or settings.relay_policy_max_retries > 1:
+        raise ValueError("TAILWAG_RELAY_POLICY_MAX_RETRIES must be between 0 and 1")
 
 
 def load_env_file(path: Path = Path(".env")) -> None:

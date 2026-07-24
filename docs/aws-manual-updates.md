@@ -37,6 +37,11 @@ export ECS_SERVICE=<ecs-service-name>
 export ECS_TASK_FAMILY=<ecs-task-family>
 export ECS_CONTAINER_NAME=tailwag-memory-api
 export TAILWAG_API_BEARER_TOKEN_SECRET_ID=<bearer-token-secret-id>
+export TAILWAG_ROBOT_API_TOKENS_SECRET_ID=<robot-api-tokens-secret-id>
+export RELAY_SMOKE_ROBOT_ID=<stable-robot-id>
+export RELAY_SMOKE_SENDER_EMAIL=<synthetic-sender-email>
+export SCHEDULER_GROUP=<scheduler-group-name>
+export RELAY_MAINTENANCE_SCHEDULE=<relay-maintenance-schedule-name>
 
 export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 export IMAGE_TAG="$(git rev-parse HEAD)"
@@ -72,6 +77,19 @@ python3 -m json.tool deploy/aws/iam/tailwag-scheduler-policy.example.json >/dev/
 python3 -m json.tool deploy/aws/iam/tailwag-worker-policy.example.json >/dev/null
 python3 -m json.tool deploy/aws/scheduler/slack-poll-schedule.example.json >/dev/null
 python3 -m json.tool deploy/aws/scheduler/report-generate-schedule.example.json >/dev/null
+python3 -m json.tool deploy/aws/scheduler/memory-consolidate-all-schedule.example.json >/dev/null
+python3 -m json.tool deploy/aws/scheduler/relay-maintenance-schedule.example.json >/dev/null
+
+for schedule_file in deploy/aws/scheduler/*.json; do
+  jq -e '
+    (.Target.Input | fromjson | type == "object")
+    and (.GroupName | type == "string" and length > 0)
+    and .State == "DISABLED"
+    and (.Target.RetryPolicy.MaximumEventAgeInSeconds >= 60)
+    and (.Target.RetryPolicy.MaximumRetryAttempts >= 0)
+    and (.Target.DeadLetterConfig.Arn | type == "string" and length > 0)
+  ' "$schedule_file" >/dev/null
+done
 
 sh -n deploy/aws/scripts/build-push-api-image.sh
 sh -n deploy/aws/scripts/package-worker-zip.sh
@@ -124,6 +142,38 @@ printf 'Previous worker object: %s\n' "$PREVIOUS_WORKER_CODE_S3_KEY"
 
 Store these values in the operator's deployment notes, not in the repository.
 
+## Initialize And Verify The Graph Schema
+
+Initialize the idempotent schema from a trusted host or SSM tunnel that can
+reach Neo4j **before** deploying an API revision or enabling a schedule that
+uses a new schema. Load the Neo4j credentials into the process environment
+without printing them, then run:
+
+```bash
+tailwag schema init
+
+export NEO4J_USERNAME="$NEO4J_USER"
+cypher-shell \
+  "SHOW CONSTRAINTS YIELD name, labelsOrTypes, properties \
+   WHERE name = 'relay_message_id' \
+   RETURN name, labelsOrTypes, properties"
+
+cypher-shell \
+  "SHOW INDEXES YIELD name, type, state, labelsOrTypes, properties \
+   WHERE name IN [
+     'relay_message_status',
+     'relay_message_delivery',
+     'relay_message_expires_at'
+   ] \
+   RETURN name, type, state, labelsOrTypes, properties \
+   ORDER BY name"
+```
+
+The constraint query must return `relay_message_id`. The index query must
+return all three named range indexes in `ONLINE` state. Stop the rollout if any
+row is missing or not online. `cypher-shell` reads `NEO4J_PASSWORD` from the
+environment; do not pass the password as a command argument.
+
 ## Deploy API Changes
 
 Build and push the API image:
@@ -137,9 +187,46 @@ export IMAGE_URI="$(deploy/aws/scripts/build-push-api-image.sh)"
 printf 'Pushed image: %s\n' "$IMAGE_URI"
 ```
 
-Render a new task definition from the currently deployed revision. This keeps
-the existing roles, secrets, logging, health check, CPU, memory, and network
-contract while changing only the selected container image.
+Resolve the robot-token secret's complete ARN. Do not construct an ARN from the
+secret name: Secrets Manager appends a generated suffix that is part of the
+complete ARN returned by `describe-secret`. Validate the `SecretString` shape
+without displaying it:
+
+```bash
+export TAILWAG_ROBOT_API_TOKENS_SECRET_ARN="$(aws secretsmanager describe-secret \
+  --region "$AWS_REGION" \
+  --secret-id "$TAILWAG_ROBOT_API_TOKENS_SECRET_ID" \
+  --query ARN \
+  --output text)"
+
+test -n "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN"
+test "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" != "None"
+
+aws secretsmanager get-secret-value \
+  --region "$AWS_REGION" \
+  --secret-id "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" \
+  --query SecretString \
+  --output text \
+| jq -e '
+    type == "object"
+    and length > 0
+    and all(
+      to_entries[];
+      (.key | type == "string" and length > 0)
+      and (.value | type == "string" and length > 0)
+    )
+    and (
+      [to_entries[].value]
+      | length == (unique | length)
+    )
+  ' >/dev/null
+```
+
+Render a new task definition from the currently deployed revision. The
+transformation preserves the existing roles, logging, health check, CPU,
+memory, network contract, and unrelated settings; it updates the selected
+container image and upserts exactly one
+`TAILWAG_ROBOT_API_TOKENS_JSON` secret entry.
 
 ```bash
 aws ecs describe-task-definition \
@@ -150,19 +237,76 @@ aws ecs describe-task-definition \
 | jq \
     --arg container "$ECS_CONTAINER_NAME" \
     --arg image "$IMAGE_URI" \
-    'del(
-       .taskDefinitionArn,
-       .revision,
-       .status,
-       .requiresAttributes,
-       .compatibilities,
-       .registeredAt,
-       .registeredBy
-     )
-     | .containerDefinitions |= map(
-         if .name == $container then .image = $image else . end
-       )' \
+    --arg robot_tokens_secret_arn "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" \
+    '
+    def upsert_secret($name; $value_from):
+      .secrets = (
+        ((.secrets // []) | map(select(.name != $name)))
+        + [{"name": $name, "valueFrom": $value_from}]
+      );
+
+    if (
+      [.containerDefinitions[] | select(.name == $container)]
+      | length
+    ) != 1 then
+      error("expected exactly one selected ECS container")
+    else
+      del(
+        .taskDefinitionArn,
+        .revision,
+        .status,
+        .requiresAttributes,
+        .compatibilities,
+        .registeredAt,
+        .registeredBy
+      )
+      | .containerDefinitions |= map(
+          if .name == $container then
+            .image = $image
+            | upsert_secret(
+                "TAILWAG_ROBOT_API_TOKENS_JSON";
+                $robot_tokens_secret_arn
+              )
+          else
+            .
+          end
+        )
+    end
+    ' \
 > /tmp/tailwag-task-definition.json
+```
+
+Before registering the revision, resolve its ECS execution role and verify that
+IAM allows that role to fetch the exact secret ARN. The application task role
+is not used for ECS secret injection.
+
+```bash
+export ECS_EXECUTION_ROLE_ARN="$(jq -r '.executionRoleArn' \
+  /tmp/tailwag-task-definition.json)"
+
+test -n "$ECS_EXECUTION_ROLE_ARN"
+test "$ECS_EXECUTION_ROLE_ARN" != "null"
+
+test "$(aws iam simulate-principal-policy \
+  --policy-source-arn "$ECS_EXECUTION_ROLE_ARN" \
+  --action-names secretsmanager:GetSecretValue \
+  --resource-arns "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)" = "allowed"
+
+jq -e \
+  --arg container "$ECS_CONTAINER_NAME" \
+  --arg secret_arn "$TAILWAG_ROBOT_API_TOKENS_SECRET_ARN" \
+  '
+  [
+    .containerDefinitions[]
+    | select(.name == $container)
+    | .secrets[]
+    | select(.name == "TAILWAG_ROBOT_API_TOKENS_JSON")
+    | .valueFrom
+  ] == [$secret_arn]
+  ' \
+  /tmp/tailwag-task-definition.json >/dev/null
 
 export NEW_TASK_DEFINITION_ARN="$(aws ecs register-task-definition \
   --region "$AWS_REGION" \
@@ -183,6 +327,11 @@ aws ecs wait services-stable \
   --cluster "$ECS_CLUSTER" \
   --services "$ECS_SERVICE"
 ```
+
+If the caller cannot run `iam:SimulatePrincipalPolicy`, stop and have an
+authorized IAM reviewer verify the exact role, action, and complete secret ARN;
+do not treat a partial ARN or a successful `describe-secret` call by the
+operator as proof that the ECS execution role has access.
 
 Delete `/tmp/tailwag-task-definition.json` after verification. Do not commit a
 rendered task definition.
@@ -282,6 +431,7 @@ export TAILWAG_BASE_URL="$(aws cloudformation describe-stacks \
   --output text)"
 
 curl -fsS "${TAILWAG_BASE_URL%/}/health"
+curl -fsS "${TAILWAG_BASE_URL%/}/ready"
 
 export TAILWAG_API_BEARER_TOKEN="$(aws secretsmanager get-secret-value \
   --region "$AWS_REGION" \
@@ -294,12 +444,44 @@ curl -fsS \
   "${TAILWAG_BASE_URL%/}/argos/providers/memory/resources/memory/health"
 
 unset TAILWAG_API_BEARER_TOKEN
+
+export TAILWAG_ROBOT_API_BEARER_TOKEN="$(
+  aws secretsmanager get-secret-value \
+    --region "$AWS_REGION" \
+    --secret-id "$TAILWAG_ROBOT_API_TOKENS_SECRET_ID" \
+    --query SecretString \
+    --output text \
+  | jq -er --arg robot_id "$RELAY_SMOKE_ROBOT_ID" \
+      '.[$robot_id] | select(type == "string" and length > 0)'
+)"
+
+curl -fsS \
+  -X POST \
+  -H "Authorization: Bearer ${TAILWAG_ROBOT_API_BEARER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  --data "$(jq -nc \
+    --arg sender_email "$RELAY_SMOKE_SENDER_EMAIL" \
+    '{sender_email: $sender_email, limit: 1}')" \
+  "${TAILWAG_BASE_URL%/}/argos/providers/message-relay/resources/messages/request/sender_statuses" \
+| jq -e '
+    type == "array"
+    and all(.[]; has("body") | not)
+  ' >/dev/null
+
+unset TAILWAG_ROBOT_API_BEARER_TOKEN
 ```
 
 For worker changes, confirm all Lambda functions report the expected
 `LastUpdateStatus`, inspect recent CloudWatch logs, and verify SQS dead-letter
 queues remain empty. Run write smoke jobs only when the operator explicitly
 accepts changes to the development memory store or report bucket.
+
+The open `/health` route proves process liveness only. A relay revision is
+ready for schedule activation only after the relay constraint and indexes are
+online, ECS is stable on the expected task revision, the exact robot-token
+secret is present in that revision, an authenticated read-only relay request
+with a robot-scoped token succeeds, and one manual `relay_maintenance` job
+completes without Lambda errors or a DLQ message.
 
 ## Rollback
 

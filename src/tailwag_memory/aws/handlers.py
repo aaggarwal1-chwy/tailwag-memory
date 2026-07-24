@@ -13,6 +13,7 @@ from .jobs import (
     MemoryConsolidateAllJob,
     MemoryConsolidatePersonJob,
     MemoryExtractEpisodeJob,
+    RelayMaintenanceJob,
     ReportGenerateJob,
     SlackPollJob,
     WorkerJob,
@@ -108,7 +109,10 @@ def _process_slack_poll_job(job: WorkerJob) -> dict[str, Any]:
 
 
 def _process_memory_job(job: WorkerJob) -> dict[str, Any]:
-    if not isinstance(job, MemoryExtractEpisodeJob | MemoryConsolidatePersonJob | MemoryConsolidateAllJob):
+    if not isinstance(
+        job,
+        MemoryExtractEpisodeJob | MemoryConsolidatePersonJob | MemoryConsolidateAllJob | RelayMaintenanceJob,
+    ):
         raise TypeError(f"unsupported memory job: {job.job_type}")
     with TailwagMemoryClient.from_env() as client:
         if isinstance(job, MemoryExtractEpisodeJob):
@@ -118,11 +122,16 @@ def _process_memory_job(job: WorkerJob) -> dict[str, Any]:
                 person_id=job.person_id,
                 **_consolidation_kwargs(job),
             )
-        else:
+        elif isinstance(job, MemoryConsolidateAllJob):
             result = client.consolidate_memory(
                 all_people=True,
                 person_limit=job.person_limit,
                 **_consolidation_kwargs(job),
+            )
+        else:
+            result = _relay_message_service(client.runner).run_maintenance(
+                now=job.now,
+                claim_timeout_seconds=job.claim_timeout_seconds,
             )
     return _plain_result(result)
 
@@ -174,6 +183,12 @@ def _slack_state_store() -> Any:
     from .slack_state import SlackDynamoDBPollStateStore
 
     return SlackDynamoDBPollStateStore(_boto3_resource("dynamodb").Table(table_name))
+
+
+def _relay_message_service(runner: Any) -> Any:
+    from tailwag_memory.relay_messages import RelayMessageService
+
+    return RelayMessageService(runner)
 
 
 def _job_idempotency_store() -> DynamoDBJobIdempotencyStore:

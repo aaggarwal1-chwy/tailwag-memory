@@ -237,6 +237,12 @@ Runtime values are stored in Secrets Manager under:
 - `aaggarwal1-tailwag/slack-bot-token`
 - `aaggarwal1-tailwag/api-bearer-token`
 
+Message relay rollout additionally uses
+`aaggarwal1-tailwag/robot-api-tokens-json`, whose `SecretString` is a JSON
+object from stable robot ID to an independently generated opaque token. Resolve
+its complete ARN with `aws secretsmanager describe-secret`; never construct the
+ARN from the secret name because the generated suffix is part of the ARN.
+
 The Neo4j password is read from Secrets Manager by the API and workers. Secret
 values must never be committed, copied into documentation, or
 placed directly in shell history when a safer retrieval mechanism is available.
@@ -626,12 +632,19 @@ deployment.
 1. Run tests.
 2. Build an immutable image tag, preferably the Git commit SHA.
 3. Push the image to `aaggarwal1-tailwag-dev-api` in ECR.
-4. Register a new `aaggarwal1-tailwag-api-task` revision.
-5. Update `aaggarwal1-tailwag-api-service` to that revision.
-6. Wait for ECS stability and a healthy ALB target.
-7. Run open and authenticated health checks plus an API smoke test.
+4. Resolve the complete robot-token secret ARN with `describe-secret`.
+5. Render the current task definition with the new image and upsert exactly one
+   `TAILWAG_ROBOT_API_TOKENS_JSON` secret entry using that complete ARN.
+6. Verify `secretsmanager:GetSecretValue` for the deployed ECS
+   `executionRoleArn` and exact secret ARN with IAM policy simulation.
+7. Register a new `aaggarwal1-tailwag-api-task` revision.
+8. Update `aaggarwal1-tailwag-api-service` to that revision.
+9. Wait for ECS stability and a healthy ALB target.
+10. Run open, administrative, and robot-authenticated readiness checks.
 
 The helper is [`deploy/aws/scripts/build-push-api-image.sh`](../deploy/aws/scripts/build-push-api-image.sh).
+The complete upserting and IAM-verification procedure is in
+[AWS Manual Updates](aws-manual-updates.md#deploy-api-changes).
 
 ### Worker changes
 
@@ -643,10 +656,22 @@ The helper is [`deploy/aws/scripts/build-push-api-image.sh`](../deploy/aws/scrip
 4. Update `WorkerCodeS3Key` on `aaggarwal1-tailwag-core-dev` through
    CloudFormation.
 5. Verify all Lambda updates and SQS mappings.
-6. Run manual poll, memory, and report jobs before relying on schedules.
+6. Run manual poll, memory, report, and relay-maintenance jobs as applicable
+   before relying on schedules.
 
 Do not overwrite the active S3 object in place. A versioned key preserves a
 clear rollback target.
+
+### Relay schedule changes
+
+Render
+[`deploy/aws/scheduler/relay-maintenance-schedule.example.json`](../deploy/aws/scheduler/relay-maintenance-schedule.example.json)
+with confirmed ARNs and create or update it in `DISABLED` state. Its scheduler
+execution role must allow `sqs:SendMessage` to both the memory queue and the
+memory-jobs DLQ. Keep the bounded `RetryPolicy` and `DeadLetterConfig`, verify a
+manual maintenance job and the existing memory worker/queue/DLQ alarms, then
+enable the schedule with the explicit round-trip update in
+[Message Relay On AWS](message-relay-aws-testing.md#deployed-smoke-test).
 
 ### Infrastructure changes
 
@@ -660,8 +685,20 @@ applications.
 ### Schema changes
 
 Schema initialization is idempotent. Run `tailwag schema init` from a network
-path that can reach Neo4j, then verify the expected constraints and vector
-indexes before deploying code that depends on them.
+path that can reach Neo4j before deploying the API or enabling a schedule that
+depends on new schema. For message relay, use `SHOW CONSTRAINTS` to verify
+`relay_message_id` and `SHOW INDEXES` to verify
+`relay_message_status`, `relay_message_delivery`, and
+`relay_message_expires_at` are all `ONLINE`. The exact commands are in
+[AWS Manual Updates](aws-manual-updates.md#initialize-and-verify-the-graph-schema).
+
+For relay changes, `/health` proves process liveness only. Readiness also
+requires the schema gate, ECS convergence on the intended task revision,
+complete-ARN secret wiring, successful robot-scoped authentication, an enabled
+memory-worker event source mapping, and a successful manual maintenance job.
+The default `claim_timeout_seconds` value of 120 is a stale-claim recovery
+threshold. Tune it above measured high-percentile claim-to-playback-start
+latency plus margin; it is not the schedule interval or Lambda timeout.
 
 ## Verification
 
@@ -711,6 +748,17 @@ aws scheduler get-schedule \
   --group-name aaggarwal1-tailwag-dev \
   --name aaggarwal1-tailwag-dev-daily-memory-consolidation \
   --query '{state:State,expression:ScheduleExpression,timezone:ScheduleExpressionTimezone}'
+
+aws scheduler get-schedule \
+  --region us-east-2 \
+  --group-name aaggarwal1-tailwag-dev \
+  --name aaggarwal1-tailwag-dev-relay-maintenance \
+  --query '{
+    state:State,
+    expression:ScheduleExpression,
+    retry:Target.RetryPolicy,
+    dlq:Target.DeadLetterConfig.Arn
+  }'
 ```
 
 Check CloudWatch log groups:

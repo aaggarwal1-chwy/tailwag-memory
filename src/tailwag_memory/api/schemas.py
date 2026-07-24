@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from tailwag_memory.models import RelayMessageInput
+
 try:
     from pydantic import ConfigDict, field_validator
 except ImportError:  # pragma: no cover - Pydantic v1 compatibility
@@ -322,3 +324,142 @@ class TurnOwnerResolveRequest(StrictRequest):
     @field_validator("policy_context")
     def policy_context_has_no_raw_media(cls, value: dict[str, Any]) -> dict[str, Any]:
         return _reject_raw_media_keys(dict(value or {}))
+
+
+class RelayMessagePayload(StrictRequest):
+    """Strict caller shape for a message offered to the relay."""
+
+    id: str = Field(..., min_length=1)
+    sender_email: str = Field(..., min_length=1)
+    recipient_email: str = Field(..., min_length=1)
+    body: str = Field(..., min_length=1)
+    deliver_after: str = ""
+    expires_at: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    def metadata_has_no_raw_media(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _reject_raw_media_keys(dict(value or {}))
+
+    def as_input(self) -> RelayMessageInput:
+        """Return the package-level relay input dataclass."""
+        return RelayMessageInput(**_model_dump(self))
+
+
+class RelayPolicyCheckRequest(StrictRequest):
+    """Request body for checking relay policy before sender confirmation."""
+
+    message: RelayMessagePayload
+
+
+class RelayCreateRequest(StrictRequest):
+    """Request body for creating one sender-confirmed relay message."""
+
+    message: RelayMessagePayload
+
+
+class RelayClaimRequest(StrictRequest):
+    """Request body for claiming one recipient's next eligible envelope."""
+
+    recipient_email: str = Field(..., min_length=1)
+
+
+class RelayRecipientTransitionRequest(StrictRequest):
+    """Claim-bound transition that also verifies the recognized recipient."""
+
+    message_id: str = Field(..., min_length=1)
+    claim_token: str = Field(..., min_length=1)
+    recipient_email: str = Field(..., min_length=1)
+
+
+class RelaySnoozeRequest(RelayRecipientTransitionRequest):
+    """Claim-bound request to defer delivery until a later time."""
+
+    deliver_after: str = Field(..., min_length=1)
+
+
+class RelayMachineTransitionRequest(StrictRequest):
+    """Claim-bound machine transition after recipient permission."""
+
+    message_id: str = Field(..., min_length=1)
+    claim_token: str = Field(..., min_length=1)
+
+
+class RelayPlaybackFailureRequest(RelayMachineTransitionRequest):
+    """Playback failure with enough evidence to avoid duplicate delivery."""
+
+    reason: str = Field(..., min_length=1)
+    audio_started: bool
+
+
+class RelaySenderStatusesRequest(StrictRequest):
+    """Request body for sender-visible body-free message status."""
+
+    sender_email: str = Field(..., min_length=1)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class RelayPolicyResponse(StrictRequest):
+    """Canonical identity and policy outcome for a proposed message."""
+
+    allowed: bool
+    reason: str = ""
+    sender_person_id: str = ""
+    recipient_person_id: str = ""
+    sender_email: str = ""
+    recipient_email: str = ""
+    sender_display_name: str = ""
+    recipient_display_name: str = ""
+
+
+class RelayEnvelopeResponse(StrictRequest):
+    """Body-free claimed relay envelope."""
+
+    message_id: str
+    sender_person_id: str = ""
+    recipient_person_id: str = ""
+    sender_email: str = ""
+    recipient_email: str = ""
+    sender_display_name: str = ""
+    recipient_display_name: str = ""
+    assigned_robot_id: str = ""
+    created_at: str = ""
+    deliver_after: str = ""
+    expires_at: str = ""
+    status: str = ""
+    claim_token: str = ""
+
+
+class RelayMessageStatusResponse(StrictRequest):
+    """Sender-visible relay status that cannot serialize message content."""
+
+    message_id: str
+    sender_person_id: str = ""
+    recipient_person_id: str = ""
+    sender_email: str = ""
+    recipient_email: str = ""
+    sender_display_name: str = ""
+    recipient_display_name: str = ""
+    assigned_robot_id: str = ""
+    status: str = ""
+    created_at: str = ""
+    deliver_after: str = ""
+    expires_at: str = ""
+    updated_at: str = ""
+    last_failure_reason: str = ""
+    last_failure_at: str = ""
+
+
+class RelayTransitionResponse(StrictRequest):
+    """Body-free result of a claim-bound relay transition."""
+
+    message_id: str
+    status: str
+    claim_token: str = ""
+    reason: str = ""
+
+
+class RelayPermissionResponse(RelayTransitionResponse):
+    """Permission result that alone may release relay message content."""
+
+    body: str | None = None

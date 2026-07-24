@@ -5,8 +5,14 @@ import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from neo4j.exceptions import ConstraintError
 
-from tailwag_memory.api.auth import require_bearer_token
+from tailwag_memory.api.auth import (
+    ApiPrincipal,
+    require_admin_principal,
+    require_robot_principal,
+    validate_relay_auth_configuration,
+)
 from tailwag_memory.api.dependencies import get_client
 from tailwag_memory.api.schemas import (
     BiometricEnrollmentRequest,
@@ -21,16 +27,48 @@ from tailwag_memory.api.schemas import (
     PersonProfileRequest,
     PersonRekeyByEmailRequest,
     PersonUpsertRequest,
+    RelayClaimRequest,
+    RelayCreateRequest,
+    RelayEnvelopeResponse,
+    RelayMachineTransitionRequest,
+    RelayMessageStatusResponse,
+    RelayPlaybackFailureRequest,
+    RelayPermissionResponse,
+    RelayPolicyCheckRequest,
+    RelayPolicyResponse,
+    RelayRecipientTransitionRequest,
+    RelaySenderStatusesRequest,
+    RelaySnoozeRequest,
+    RelayTransitionResponse,
     SemanticSearchRequest,
     TurnOwnerResolveRequest,
     VerifiedProfileRequest,
     VoiceReferenceExistsRequest,
 )
 from tailwag_memory.client import TailwagMemoryClient
-from tailwag_memory.config import load_env_file
+from tailwag_memory.config import load_env_file, validate_relay_settings
+from tailwag_memory.embeddings import OpenAIConfigurationError
 from tailwag_memory.models import EpisodeInput, PersonInput, utc_now_iso
+from tailwag_memory.relay_messages import RelayPolicyRejectedError, RelayRateLimitError
+from tailwag_memory.relay_policy import (
+    RelaySafetyMalformedResponseError,
+    RelaySafetyTimeoutError,
+    RelaySafetyUnavailableError,
+)
 
 ARGOS_MEMORY_REQUEST_PREFIX = "/argos/providers/memory/resources/memory/request"
+ARGOS_RELAY_REQUEST_PREFIX = "/argos/providers/message-relay/resources/messages/request"
+RELAY_SCHEMA_CONSTRAINT = "relay_message_id"
+RELAY_SCHEMA_INDEXES = {
+    "relay_message_status": ("status",),
+    "relay_message_delivery": (
+        "assigned_robot_id",
+        "status",
+        "deliver_after",
+        "created_at",
+    ),
+    "relay_message_expires_at": ("expires_at",),
+}
 
 
 def create_app() -> FastAPI:
@@ -47,14 +85,34 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "tailwag-memory"}
 
+    @app.get("/ready")
+    def readiness() -> dict[str, object]:
+        """Run relay deployment preflight checks outside the lightweight liveness path."""
+        try:
+            validate_relay_auth_configuration()
+            with TailwagMemoryClient.from_env() as client:
+                validate_relay_settings(client.settings)
+                _validate_relay_database(client)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Tailwag relay preflight failed",
+            ) from exc
+        return {
+            "status": "ready",
+            "service": "tailwag-memory",
+            "relay": True,
+        }
+
     @app.get(
         "/argos/providers/memory/resources/memory/health",
-        dependencies=[Depends(require_bearer_token)],
+        dependencies=[Depends(require_admin_principal)],
     )
     def provider_health() -> dict[str, object]:
         return {"ok": True, "service": "tailwag-memory", "provider": "memory", "resource": "memory"}
 
     app.include_router(_memory_router())
+    app.include_router(_relay_router())
     return app
 
 
@@ -72,7 +130,7 @@ def _api_docs_enabled() -> bool:
 def _memory_router() -> APIRouter:
     router = APIRouter(
         prefix=ARGOS_MEMORY_REQUEST_PREFIX,
-        dependencies=[Depends(require_bearer_token)],
+        dependencies=[Depends(require_admin_principal)],
     )
 
     @router.post("/person_context", response_model=PersonContextResponse)
@@ -323,6 +381,162 @@ def _memory_router() -> APIRouter:
     return router
 
 
+def _relay_router() -> APIRouter:
+    """Return robot-authenticated message relay routes."""
+    router = APIRouter(prefix=ARGOS_RELAY_REQUEST_PREFIX)
+
+    @router.post("/policy_check", response_model=RelayPolicyResponse)
+    def check_policy(
+        payload: RelayPolicyCheckRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any]:
+        return _relay_invoke(
+            lambda: client.check_relay_policy(
+                payload.message.as_input(),
+                robot_id=principal.robot_id,
+            )
+        )
+
+    @router.post("/create", response_model=RelayMessageStatusResponse)
+    def create_message(
+        payload: RelayCreateRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any]:
+        return _relay_invoke(
+            lambda: client.create_relay_message(
+                payload.message.as_input(),
+                robot_id=principal.robot_id,
+            )
+        )
+
+    @router.post("/claim", response_model=RelayEnvelopeResponse | None)
+    def claim_message(
+        payload: RelayClaimRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any] | None:
+        return _relay_invoke(
+            lambda: client.claim_next_relay_envelope(
+                recipient_email=payload.recipient_email,
+                robot_id=principal.robot_id,
+            )
+        )
+
+    @router.post("/permission", response_model=RelayPermissionResponse)
+    def grant_permission(
+        payload: RelayRecipientTransitionRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any]:
+        return _relay_invoke(
+            lambda: client.grant_relay_permission(
+                payload.message_id,
+                claim_token=payload.claim_token,
+                recipient_email=payload.recipient_email,
+                robot_id=principal.robot_id,
+            )
+        )
+
+    @router.post("/decline", response_model=RelayTransitionResponse)
+    def decline_message(
+        payload: RelayRecipientTransitionRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any]:
+        return _relay_invoke(
+            lambda: client.decline_relay_message(
+                payload.message_id,
+                claim_token=payload.claim_token,
+                recipient_email=payload.recipient_email,
+                robot_id=principal.robot_id,
+            ),
+            body_free=True,
+        )
+
+    @router.post("/snooze", response_model=RelayTransitionResponse)
+    def snooze_message(
+        payload: RelaySnoozeRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any]:
+        return _relay_invoke(
+            lambda: client.snooze_relay_message(
+                payload.message_id,
+                claim_token=payload.claim_token,
+                recipient_email=payload.recipient_email,
+                robot_id=principal.robot_id,
+                deliver_after=payload.deliver_after,
+            ),
+            body_free=True,
+        )
+
+    @router.post("/begin_delivery", response_model=RelayTransitionResponse)
+    def begin_delivery(
+        payload: RelayMachineTransitionRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any]:
+        return _relay_invoke(
+            lambda: client.begin_relay_delivery(
+                payload.message_id,
+                claim_token=payload.claim_token,
+                robot_id=principal.robot_id,
+            ),
+            body_free=True,
+        )
+
+    @router.post("/complete", response_model=RelayTransitionResponse)
+    def complete_delivery(
+        payload: RelayMachineTransitionRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any]:
+        return _relay_invoke(
+            lambda: client.complete_relay_delivery(
+                payload.message_id,
+                claim_token=payload.claim_token,
+                robot_id=principal.robot_id,
+            ),
+            body_free=True,
+        )
+
+    @router.post("/playback_failure", response_model=RelayTransitionResponse)
+    def playback_failure(
+        payload: RelayPlaybackFailureRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> dict[str, Any]:
+        return _relay_invoke(
+            lambda: client.record_relay_playback_failure(
+                payload.message_id,
+                claim_token=payload.claim_token,
+                robot_id=principal.robot_id,
+                reason=payload.reason,
+                audio_started=payload.audio_started,
+            ),
+            body_free=True,
+        )
+
+    @router.post("/sender_statuses", response_model=list[RelayMessageStatusResponse])
+    def sender_statuses(
+        payload: RelaySenderStatusesRequest,
+        principal: ApiPrincipal = Depends(require_robot_principal),
+        client: TailwagMemoryClient = Depends(get_client),
+    ) -> list[dict[str, Any]]:
+        result = _relay_invoke(
+            lambda: client.relay_sender_statuses(
+                sender_email=payload.sender_email,
+                robot_id=principal.robot_id,
+                limit=payload.limit,
+            )
+        )
+        return list(result or [])
+
+    return router
+
+
 def _plain(value: Any) -> dict[str, Any]:
     """Return dataclass, Pydantic, or dict values as plain JSON-compatible dicts."""
     if isinstance(value, dict):
@@ -334,6 +548,103 @@ def _plain(value: Any) -> dict[str, Any]:
         return dict(dump())
     payload = getattr(value, "__dict__", None)
     return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _relay_invoke(call: Any, *, body_free: bool = False) -> Any:
+    """Map relay validation and compare-and-set failures to stable HTTP errors."""
+    try:
+        result = call()
+    except RelayPolicyRejectedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RelayRateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except ConstraintError as exc:
+        raise HTTPException(status_code=409, detail="relay message id already exists") from exc
+    except RelaySafetyMalformedResponseError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (RelaySafetyTimeoutError, RelaySafetyUnavailableError, OpenAIConfigurationError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        return None
+    if isinstance(result, list):
+        return [_plain(item) for item in result]
+    rendered = _plain(result)
+    if str(rendered.get("status") or "") == "conflict":
+        raise HTTPException(
+            status_code=409,
+            detail=str(rendered.get("reason") or "relay state conflict"),
+        )
+    if body_free:
+        rendered.pop("body", None)
+    return rendered
+
+
+def _validate_relay_database(client: TailwagMemoryClient) -> None:
+    """Validate Neo4j connectivity and the schema required by relay write paths."""
+    connectivity = client.runner.run("RETURN 1 AS ok")
+    if not connectivity or connectivity[0].get("ok") != 1:
+        raise RuntimeError("Neo4j connectivity check failed")
+    constraints = client.runner.run(
+        """
+        SHOW CONSTRAINTS YIELD name, type, labelsOrTypes, properties
+        WHERE name = $constraint_name
+        RETURN name, type, labelsOrTypes, properties
+        """,
+        {"constraint_name": RELAY_SCHEMA_CONSTRAINT},
+    )
+    if (
+        len(constraints) != 1
+        or str(constraints[0].get("type") or "").upper() != "UNIQUENESS"
+        or not _has_relay_schema_shape(
+            constraints[0],
+            name=RELAY_SCHEMA_CONSTRAINT,
+            properties=("id",),
+        )
+    ):
+        raise RuntimeError("RelayMessage id constraint is missing")
+    indexes = client.runner.run(
+        """
+        SHOW INDEXES YIELD name, type, state, labelsOrTypes, properties
+        WHERE name IN $index_names
+        RETURN name, type, state, labelsOrTypes, properties
+        """,
+        {"index_names": sorted(RELAY_SCHEMA_INDEXES)},
+    )
+    indexes_by_name = {str(row.get("name") or ""): row for row in indexes}
+    for name, properties in RELAY_SCHEMA_INDEXES.items():
+        row = indexes_by_name.get(name)
+        if (
+            row is None
+            or str(row.get("type") or "").upper() != "RANGE"
+            or str(row.get("state") or "").upper() != "ONLINE"
+            or not _has_relay_schema_shape(row, name=name, properties=properties)
+        ):
+            raise RuntimeError(f"relay message index {name} is missing or not online")
+
+
+def _has_relay_schema_shape(
+    row: dict[str, Any],
+    *,
+    name: str,
+    properties: tuple[str, ...],
+) -> bool:
+    """Return whether one schema row targets the expected RelayMessage fields."""
+    return (
+        str(row.get("name") or "") == name
+        and tuple(str(value) for value in (row.get("labelsOrTypes") or ()))
+        == ("RelayMessage",)
+        and tuple(str(value) for value in (row.get("properties") or ()))
+        == properties
+    )
+
+
+def _body_free_relay_transition(value: Any) -> dict[str, Any]:
+    """Serialize a relay transition without permitting message content."""
+    payload = _plain(value)
+    payload.pop("body", None)
+    return payload
 
 
 def _payload_dict(value: Any) -> dict[str, Any] | None:

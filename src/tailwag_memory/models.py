@@ -35,6 +35,98 @@ class RobotInput:
 
 
 @dataclass(frozen=True)
+class RelayMessageInput:
+    """Caller-supplied message content offered to the robot relay."""
+
+    id: str
+    sender_email: str
+    recipient_email: str
+    body: str
+    deliver_after: str = ""
+    expires_at: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RelayPolicyResult:
+    """Result of checking whether a message may enter the relay."""
+
+    allowed: bool
+    reason: str = ""
+    sender_person_id: str = ""
+    recipient_person_id: str = ""
+    sender_email: str = ""
+    recipient_email: str = ""
+    sender_display_name: str = ""
+    recipient_display_name: str = ""
+
+
+@dataclass(frozen=True)
+class RelayMessageEnvelope:
+    """Claimed relay metadata that intentionally excludes message content."""
+
+    message_id: str
+    sender_person_id: str = ""
+    recipient_person_id: str = ""
+    sender_email: str = ""
+    recipient_email: str = ""
+    sender_display_name: str = ""
+    recipient_display_name: str = ""
+    assigned_robot_id: str = ""
+    created_at: str = ""
+    deliver_after: str = ""
+    expires_at: str = ""
+    status: str = ""
+    claim_token: str = ""
+
+
+@dataclass(frozen=True)
+class RelayDeliveryAttempt:
+    """Machine-controlled playback attempt for one claimed relay message."""
+
+    message_id: str
+    claim_token: str
+    status: str
+    started_at: str = ""
+    completed_at: str = ""
+    failed_at: str = ""
+    failure_reason: str = ""
+    audio_started: bool = False
+
+
+@dataclass(frozen=True)
+class RelayMessageStatus:
+    """Sender-visible relay status that intentionally excludes message content."""
+
+    message_id: str
+    sender_person_id: str = ""
+    recipient_person_id: str = ""
+    sender_email: str = ""
+    recipient_email: str = ""
+    sender_display_name: str = ""
+    recipient_display_name: str = ""
+    assigned_robot_id: str = ""
+    status: str = ""
+    created_at: str = ""
+    deliver_after: str = ""
+    expires_at: str = ""
+    updated_at: str = ""
+    last_failure_reason: str = ""
+    last_failure_at: str = ""
+
+
+@dataclass(frozen=True)
+class RelayTransitionResult:
+    """Result of a claim-bound relay transition."""
+
+    message_id: str
+    status: str
+    claim_token: str = ""
+    body: str | None = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class PlaceInput:
     """Building and room identifier for a place."""
 
