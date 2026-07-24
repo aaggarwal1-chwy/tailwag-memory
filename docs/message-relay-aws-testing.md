@@ -102,6 +102,8 @@ worker artifacts. Do not enable the schedule until all gates pass:
   `relay_message_expires_at` are `ONLINE`
 - deployed Neo4j `EXPLAIN`/`PROFILE` uses `relay_message_delivery` for claim and
   `relay_message_status` for maintenance at representative retained volume
+- the edge integration timeout is 30 seconds, covering the bounded relay-policy
+  retry budget
 - ECS is stable on the intended task revision
 - the task definition contains one robot-token secret entry using the complete
   secret ARN

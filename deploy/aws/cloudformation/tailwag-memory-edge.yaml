@@ -24,7 +24,7 @@ Parameters:
     Description: Security group attached to the private Tailwag ALB.
   IntegrationTimeoutInMillis:
     Type: Number
-    Default: 10000
+    Default: 30000
     MinValue: 50
     MaxValue: 30000
     Description: Maximum time API Gateway waits for Tailwag.
