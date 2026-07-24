@@ -30,18 +30,13 @@ class RelayAuthConfigurationError(ValueError):
     """Relay authentication configuration is missing or ambiguous."""
 
 
-def _configured_token() -> str:
-    """Return the configured API bearer token."""
+def _configured_auth() -> tuple[str, dict[str, str]]:
+    """Load and validate the configured admin and robot credentials once."""
     load_env_file()
-    return str(os.getenv("TAILWAG_API_BEARER_TOKEN") or "").strip()
-
-
-def _configured_robot_tokens() -> dict[str, str]:
-    """Return stable robot IDs keyed by their configured opaque tokens."""
-    load_env_file()
+    admin_token = str(os.getenv("TAILWAG_API_BEARER_TOKEN") or "").strip()
     raw = str(os.getenv("TAILWAG_ROBOT_API_TOKENS_JSON") or "").strip()
     if not raw:
-        return {}
+        return admin_token, {}
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -65,20 +60,19 @@ def _configured_robot_tokens() -> dict[str, str]:
                 "TAILWAG_ROBOT_API_TOKENS_JSON contains duplicate tokens"
             )
         tokens[rendered_token] = rendered_robot_id
-    return tokens
+    if admin_token and admin_token in tokens:
+        raise RelayAuthConfigurationError(
+            "Tailwag API authentication scopes contain a duplicate token"
+        )
+    return admin_token, tokens
 
 
 def validate_relay_auth_configuration() -> dict[str, str]:
     """Return configured robot tokens or raise a readiness-safe error."""
-    admin_token = _configured_token()
-    robot_tokens = _configured_robot_tokens()
+    _, robot_tokens = _configured_auth()
     if not robot_tokens:
         raise RelayAuthConfigurationError(
             "TAILWAG_ROBOT_API_TOKENS_JSON must configure at least one robot"
-        )
-    if admin_token and admin_token in robot_tokens:
-        raise RelayAuthConfigurationError(
-            "Tailwag API authentication scopes contain a duplicate token"
         )
     return robot_tokens
 
@@ -88,12 +82,7 @@ def require_bearer_token(
 ) -> ApiPrincipal:
     """Require a configured bearer token for private API routes."""
     try:
-        token = _configured_token()
-        robot_tokens = _configured_robot_tokens()
-        if token and token in robot_tokens:
-            raise RelayAuthConfigurationError(
-                "Tailwag API authentication scopes contain a duplicate token"
-            )
+        token, robot_tokens = _configured_auth()
         if not token and not robot_tokens:
             raise RelayAuthConfigurationError(
                 "Tailwag API bearer authentication is not configured"

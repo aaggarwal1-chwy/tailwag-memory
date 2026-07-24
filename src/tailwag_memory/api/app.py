@@ -525,14 +525,13 @@ def _relay_router() -> APIRouter:
         principal: ApiPrincipal = Depends(require_robot_principal),
         client: TailwagMemoryClient = Depends(get_client),
     ) -> list[dict[str, Any]]:
-        result = _relay_invoke(
+        return _relay_invoke(
             lambda: client.relay_sender_statuses(
                 sender_email=payload.sender_email,
                 robot_id=principal.robot_id,
                 limit=payload.limit,
             )
         )
-        return list(result or [])
 
     return router
 
@@ -638,13 +637,6 @@ def _has_relay_schema_shape(
         and tuple(str(value) for value in (row.get("properties") or ()))
         == properties
     )
-
-
-def _body_free_relay_transition(value: Any) -> dict[str, Any]:
-    """Serialize a relay transition without permitting message content."""
-    payload = _plain(value)
-    payload.pop("body", None)
-    return payload
 
 
 def _payload_dict(value: Any) -> dict[str, Any] | None:

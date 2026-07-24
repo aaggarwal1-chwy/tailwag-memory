@@ -4,22 +4,19 @@ from __future__ import annotations
 
 from .models import RelayMessageEnvelope, RelayMessageStatus, RelayTransitionResult
 
+_STATUS_FIELDS = tuple(RelayMessageStatus.__dataclass_fields__)
+_ENVELOPE_FIELDS = tuple(RelayMessageEnvelope.__dataclass_fields__)
+
 
 def status(row: dict[str, object]) -> RelayMessageStatus:
     return RelayMessageStatus(
-        **{
-            field: str(row.get(field) or "")
-            for field in RelayMessageStatus.__dataclass_fields__
-        }
+        **{field: str(row.get(field) or "") for field in _STATUS_FIELDS}
     )
 
 
 def envelope(row: dict[str, object]) -> RelayMessageEnvelope:
     return RelayMessageEnvelope(
-        **{
-            field: str(row.get(field) or "")
-            for field in RelayMessageEnvelope.__dataclass_fields__
-        }
+        **{field: str(row.get(field) or "") for field in _ENVELOPE_FIELDS}
     )
 
 
@@ -44,10 +41,3 @@ def transition_or_conflict(
         body=str(row["body"]) if row.get("body") is not None else None,
         reason=reason,
     )
-
-
-def count(rows: list[dict[str, object]]) -> int:
-    if not rows:
-        return 0
-    value = rows[0].get("count", 0)
-    return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0

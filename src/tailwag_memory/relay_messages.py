@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 from typing import Callable
 from uuid import uuid4
@@ -73,19 +73,28 @@ class RelayMessageService:
     def check_policy(self, message: RelayMessageInput, *, robot_id: str) -> RelayPolicyResult:
         """Resolve both people and screen the exact proposed message without storing it."""
         normalized = self._validate_input(message, robot_id=robot_id)
-        identities = self._resolve_identities(
-            sender_email=normalized.sender_email,
-            recipient_email=normalized.recipient_email,
+        return self._check_normalized_policy(normalized, robot_id=robot_id)
+
+    def _check_normalized_policy(
+        self,
+        message: RelayMessageInput,
+        *,
+        robot_id: str,
+    ) -> RelayPolicyResult:
+        identities = resolve_identities(
+            self.runner,
+            sender_email=message.sender_email,
+            recipient_email=message.recipient_email,
             robot_id=robot_id,
         )
         if identities is None:
             return RelayPolicyResult(
                 allowed=False,
                 reason="Sender, recipient, or assigned robot could not be resolved uniquely.",
-                sender_email=normalized.sender_email,
-                recipient_email=normalized.recipient_email,
+                sender_email=message.sender_email,
+                recipient_email=message.recipient_email,
             )
-        decision = self.safety_provider.screen(body=normalized.body)
+        decision = self.safety_provider.screen(body=message.body)
         return RelayPolicyResult(
             allowed=decision.allowed,
             reason=decision.reason,
@@ -95,15 +104,12 @@ class RelayMessageService:
     def create_confirmed(self, message: RelayMessageInput, *, robot_id: str) -> RelayMessageStatus:
         """Persist only an already-confirmed message after repeating all server checks."""
         normalized = self._validate_input(message, robot_id=robot_id)
-        policy = self.check_policy(normalized, robot_id=robot_id)
+        policy = self._check_normalized_policy(normalized, robot_id=robot_id)
         if not policy.allowed:
             raise RelayPolicyRejectedError(
                 policy.reason or "relay message was rejected by policy"
             )
         now = self._now()
-        expires_at = normalized.expires_at or (
-            now + timedelta(days=self.settings.relay_default_expiry_days)
-        ).isoformat()
         lock_token = str(uuid4())
         rows = self.runner.run(
             """
@@ -179,8 +185,8 @@ class RelayMessageService:
                 "robot_id": _required(robot_id, "robot_id"),
                 "now": now.isoformat(),
                 "day_start": now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(),
-                "deliver_after": normalized.deliver_after or now.isoformat(),
-                "expires_at": expires_at,
+                "deliver_after": normalized.deliver_after,
+                "expires_at": normalized.expires_at,
                 "max_pending_per_pair": self.settings.relay_max_pending_per_pair,
                 "max_sends_per_day": self.settings.relay_max_sends_per_sender_per_day,
             },
@@ -441,20 +447,6 @@ class RelayMessageService:
             expired_count=counts.expired,
             claims_released_count=counts.claims_released,
             uncertain_count=counts.uncertain,
-        )
-
-    def _resolve_identities(
-        self,
-        *,
-        sender_email: str,
-        recipient_email: str,
-        robot_id: str,
-    ) -> dict[str, str] | None:
-        return resolve_identities(
-            self.runner,
-            sender_email=sender_email,
-            recipient_email=recipient_email,
-            robot_id=robot_id,
         )
 
     def _validate_input(self, message: RelayMessageInput, *, robot_id: str) -> RelayMessageInput:

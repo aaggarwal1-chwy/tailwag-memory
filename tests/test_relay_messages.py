@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import unittest
+from unittest.mock import patch
 
 from tailwag_memory.models import RelayMessageInput
+from tailwag_memory.relay_message_validation import validate_input
 from tailwag_memory.relay_messages import RelayMessageService
 from tailwag_memory.relay_policy import RelaySafetyDecision
 from tests.helpers import RecordingQueryRunner, test_settings
@@ -93,9 +95,14 @@ class RelayMessageServiceTest(unittest.TestCase):
         }
         runner = RecordingQueryRunner(results=[[_identity_row()], [status_row]])
 
-        result = _service(runner).create_confirmed(_message(), robot_id="robot-1")
+        with patch(
+            "tailwag_memory.relay_messages.validate_input",
+            wraps=validate_input,
+        ) as validation:
+            result = _service(runner).create_confirmed(_message(), robot_id="robot-1")
 
         self.assertEqual(result.status, "pending")
+        validation.assert_called_once()
         query = runner.queries[1]
         self.assertEqual(query.parameters["body"], "Keep  TWO spaces exactly.")
         self.assertEqual(query.parameters["max_pending_per_pair"], 3)
@@ -162,6 +169,7 @@ class RelayMessageServiceTest(unittest.TestCase):
         query = runner.queries[0].query
         self.assertIn("SET robot._relay_claim_lock", query)
         self.assertIn("SET message._relay_write_lock", query)
+        self.assertEqual(query.count("message.claim_token = randomUUID()"), 1)
         self.assertIn("REMOVE robot._relay_claim_lock", query)
         self.assertIn("REMOVE locked_message._relay_write_lock", query)
         self.assertNotIn("relay_claim_lock_version", query)
