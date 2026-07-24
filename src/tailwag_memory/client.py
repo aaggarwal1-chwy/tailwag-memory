@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime
 import os
+from threading import Lock
 
 from .config import Settings, load_settings
 from .db import Neo4jQueryRunner
@@ -58,6 +59,8 @@ class TailwagMemoryClient:
         self.runner = runner
         self.settings = settings
         self._embedding_provider: OpenAIEmbeddingProvider | None = None
+        self._relay_message_service = None
+        self._provider_lock = Lock()
 
     @classmethod
     def from_env(cls) -> "TailwagMemoryClient":
@@ -570,11 +573,13 @@ class TailwagMemoryClient:
     def _embeddings(self) -> OpenAIEmbeddingProvider:
         """Return the lazily initialized embedding provider."""
         if self._embedding_provider is None:
-            self._embedding_provider = OpenAIEmbeddingProvider(
-                api_key=self.settings.openai_api_key,
-                model=self.settings.embedding_model,
-                dimension=self.settings.embedding_dimension,
-            )
+            with self._provider_lock:
+                if self._embedding_provider is None:
+                    self._embedding_provider = OpenAIEmbeddingProvider(
+                        api_key=self.settings.openai_api_key,
+                        model=self.settings.embedding_model,
+                        dimension=self.settings.embedding_dimension,
+                    )
         return self._embedding_provider
 
     def _memory_extraction_service(self) -> EpisodeMemoryExtractionService:
@@ -608,10 +613,17 @@ class TailwagMemoryClient:
         )
 
     def _relay_messages(self):
-        """Build the relay service without making it a client construction dependency."""
-        from .relay_messages import RelayMessageService
+        """Return the client's shared relay service."""
+        if self._relay_message_service is None:
+            with self._provider_lock:
+                if self._relay_message_service is None:
+                    from .relay_messages import RelayMessageService
 
-        return RelayMessageService(self.runner, settings=self.settings)
+                    self._relay_message_service = RelayMessageService(
+                        self.runner,
+                        settings=self.settings,
+                    )
+        return self._relay_message_service
 
 
 def _memory_queue_url() -> str:

@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import unittest
 from unittest.mock import patch
@@ -699,6 +700,20 @@ class TailwagMemoryClientTest(unittest.TestCase):
                 {"sender_email": "sender@example.com", "robot_id": "cody", "limit": 25},
             ),
         )
+
+    def test_relay_service_is_cached_across_concurrent_calls(self) -> None:
+        client = TailwagMemoryClient(RecordingQueryRunner(), _settings())
+
+        with patch(
+            "tailwag_memory.relay_messages.RelayMessageService"
+        ) as service_type:
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                services = list(
+                    executor.map(lambda _: client._relay_messages(), range(16))
+                )
+
+        self.assertTrue(all(service is services[0] for service in services))
+        service_type.assert_called_once_with(client.runner, settings=client.settings)
 
     def test_context_manager_closes_runner(self) -> None:
         runner = RecordingQueryRunner()

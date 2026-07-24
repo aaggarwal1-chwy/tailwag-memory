@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import asdict, is_dataclass
 import os
 from typing import Any
@@ -13,7 +14,11 @@ from tailwag_memory.api.auth import (
     require_robot_principal,
     validate_relay_auth_configuration,
 )
-from tailwag_memory.api.dependencies import get_client
+from tailwag_memory.api.dependencies import (
+    TailwagMemoryClientProvider,
+    get_client,
+    get_client_provider,
+)
 from tailwag_memory.api.schemas import (
     BiometricEnrollmentRequest,
     BiometricObservationRequest,
@@ -74,25 +79,38 @@ RELAY_SCHEMA_INDEXES = {
 def create_app() -> FastAPI:
     """Create the Tailwag FastAPI application."""
     docs_enabled = _api_docs_enabled()
+    client_provider = TailwagMemoryClientProvider()
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        try:
+            yield
+        finally:
+            client_provider.close()
+
     app = FastAPI(
         title="Tailwag Memory API",
         docs_url="/docs" if docs_enabled else None,
         redoc_url="/redoc" if docs_enabled else None,
         openapi_url="/openapi.json" if docs_enabled else None,
+        lifespan=lifespan,
     )
+    app.state.tailwag_memory_client_provider = client_provider
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "tailwag-memory"}
 
     @app.get("/ready")
-    def readiness() -> dict[str, object]:
+    def readiness(
+        client_provider: TailwagMemoryClientProvider = Depends(get_client_provider),
+    ) -> dict[str, object]:
         """Run relay deployment preflight checks outside the lightweight liveness path."""
         try:
             validate_relay_auth_configuration()
-            with TailwagMemoryClient.from_env() as client:
-                validate_relay_settings(client.settings)
-                _validate_relay_database(client)
+            client = client_provider.get()
+            validate_relay_settings(client.settings)
+            _validate_relay_database(client)
         except Exception as exc:
             raise HTTPException(
                 status_code=503,

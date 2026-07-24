@@ -100,9 +100,12 @@ worker artifacts. Do not enable the schedule until all gates pass:
 - `relay_message_id` exists
 - `relay_message_status`, `relay_message_delivery`, and
   `relay_message_expires_at` are `ONLINE`
+- deployed Neo4j `EXPLAIN`/`PROFILE` uses `relay_message_delivery` for claim and
+  `relay_message_status` for maintenance at representative retained volume
 - ECS is stable on the intended task revision
 - the task definition contains one robot-token secret entry using the complete
   secret ARN
+- ECS tasks were restarted after any robot-token, Neo4j, or OpenAI secret change
 - `/health` passes for liveness and `/ready` passes dependency preflight
 - a robot-token `sender_statuses` request succeeds and returns no `body`
 - the memory Lambda uses the intended artifact and its SQS event source mapping

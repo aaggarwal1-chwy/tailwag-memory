@@ -150,7 +150,8 @@ class RelayMessageService:
               CREATE (created)-[:FOR_RECIPIENT]->(recipient)
               CREATE (created)-[:ASSIGNED_TO]->(robot)
             )
-            OPTIONAL MATCH (message:RelayMessage {_relay_create_token: $lock_token})
+            OPTIONAL MATCH (message:RelayMessage {id: $message_id})
+            WHERE message._relay_create_token = $lock_token
             WITH sender, recipient, message, within_limits
             REMOVE sender._relay_create_lock, message._relay_create_token
             WITH sender, recipient, message, within_limits
@@ -211,9 +212,39 @@ class RelayMessageService:
             SET robot._relay_claim_lock = randomUUID()
             WITH robot
             OPTIONAL MATCH (message:RelayMessage)-[:ASSIGNED_TO]->(robot)
+            USING INDEX message:RelayMessage(
+              assigned_robot_id, status, deliver_after, created_at
+            )
+            WHERE message.assigned_robot_id = $robot_id
+              AND message.status = 'pending'
+              AND message.deliver_after <= $now
+              AND message.created_at IS NOT NULL
+              AND message.expires_at > $now
             OPTIONAL MATCH (message)-[:FOR_RECIPIENT]->(recipient:Person)
             OPTIONAL MATCH (sender:Person)-[:SENT_RELAY]->(message)
-            WITH robot, message, sender, recipient
+            WITH robot,
+                 collect(
+                   CASE
+                     WHEN message IS NOT NULL
+                       AND toLower(trim(recipient.email)) = $recipient_email
+                       AND coalesce(recipient.status, 'active') <> 'archived'
+                       AND coalesce(sender.status, 'active') <> 'archived'
+                     THEN {
+                       message: message,
+                       sender: sender,
+                       recipient: recipient
+                     }
+                   END
+                 ) AS eligible_candidates
+            UNWIND CASE
+              WHEN size(eligible_candidates) = 0
+                THEN [{message: null, sender: null, recipient: null}]
+              ELSE eligible_candidates
+            END AS eligible
+            WITH robot,
+                 eligible.message AS message,
+                 eligible.sender AS sender,
+                 eligible.recipient AS recipient
             ORDER BY elementId(message)
             SET message._relay_write_lock = randomUUID()
             WITH robot, collect({

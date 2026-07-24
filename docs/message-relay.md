@@ -281,6 +281,9 @@ Seed two uniquely emailed people and the configured robot. Verify:
 - post-audio failure becomes non-replayable `delivery_uncertain`
 - sender-specified expiry is honored; default expiry applies when omitted
 - expiry never removes or changes the body
+- `EXPLAIN`/`PROFILE` selects `relay_message_delivery` for claim and
+  `relay_message_status` for maintenance
+- adding terminal history does not increase claim or maintenance candidate rows
 
 Mock tests do not prove Neo4j contention behavior. AWS readiness, worker, queue,
 and alarm checks are a separate gate documented in

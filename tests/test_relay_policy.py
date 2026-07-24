@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import sys
+import threading
+import time
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from tailwag_memory.relay_policy import (
     OpenAIRelaySafetyProvider,
@@ -44,6 +50,31 @@ class _FailingClient:
 
 
 class RelaySafetyProviderTest(unittest.TestCase):
+    def test_runtime_client_is_initialized_once_under_concurrency(self) -> None:
+        calls: list[dict[str, object]] = []
+        barrier = threading.Barrier(8)
+
+        def openai_factory(**kwargs: object) -> object:
+            calls.append(kwargs)
+            time.sleep(0.02)
+            return object()
+
+        provider = OpenAIRelaySafetyProvider(api_key="test-key", model="test-model")
+        with patch.dict(
+            sys.modules,
+            {"openai": SimpleNamespace(OpenAI=openai_factory)},
+        ):
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                clients = list(
+                    executor.map(
+                        lambda _: (barrier.wait(), provider._openai_client())[1],
+                        range(8),
+                    )
+                )
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(all(client is clients[0] for client in clients))
+
     def test_returns_structured_allowed_decision(self) -> None:
         client = _Client('{"allowed":true,"reason":""}')
         provider = OpenAIRelaySafetyProvider(api_key=None, model="test-model", client=client)

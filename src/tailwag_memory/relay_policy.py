@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from threading import Lock
 from typing import Any, Protocol
 
 from .embeddings import OpenAIConfigurationError
@@ -80,6 +81,7 @@ class OpenAIRelaySafetyProvider:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self._client = client
+        self._client_lock = Lock()
 
     def screen(self, *, body: str) -> RelaySafetyDecision:
         """Allow ordinary workplace messages and reject unsafe or abusive content."""
@@ -143,21 +145,23 @@ class OpenAIRelaySafetyProvider:
     def _openai_client(self) -> Any:
         if self._client is not None:
             return self._client
-        if not self.api_key:
-            raise OpenAIConfigurationError(
-                "OPENAI_API_KEY is required for relay workplace-safety screening."
-            )
-        try:
-            from openai import OpenAI
-        except ImportError as exc:
-            raise OpenAIConfigurationError(
-                "Install the openai package to use relay workplace-safety screening."
-            ) from exc
-        self._client = OpenAI(
-            api_key=self.api_key,
-            timeout=self.timeout_seconds,
-            max_retries=self.max_retries,
-        )
+        with self._client_lock:
+            if self._client is None:
+                if not self.api_key:
+                    raise OpenAIConfigurationError(
+                        "OPENAI_API_KEY is required for relay workplace-safety screening."
+                    )
+                try:
+                    from openai import OpenAI
+                except ImportError as exc:
+                    raise OpenAIConfigurationError(
+                        "Install the openai package to use relay workplace-safety screening."
+                    ) from exc
+                self._client = OpenAI(
+                    api_key=self.api_key,
+                    timeout=self.timeout_seconds,
+                    max_retries=self.max_retries,
+                )
         return self._client
 
     @staticmethod

@@ -59,6 +59,32 @@ class TailwagApiAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok", "service": "tailwag-memory"})
 
+    def test_shared_client_is_lazy_reused_and_closed_once(self) -> None:
+        from tailwag_memory.api.app import create_app
+        from tests.helpers import RecordingQueryRunner, test_settings
+
+        os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
+        os.environ["OPENAI_API_KEY"] = "test-key"
+        ready_client = _ReadyClient(
+            runner=RecordingQueryRunner(results=_relay_ready_results() * 2),
+            settings=test_settings(),
+        )
+
+        with patch(
+            "tailwag_memory.api.dependencies.TailwagMemoryClient.from_env",
+            return_value=ready_client,
+        ) as factory:
+            app = create_app()
+            with TestClient(app) as http:
+                self.assertEqual(http.get("/health").status_code, 200)
+                self.assertEqual(factory.call_count, 0)
+                self.assertEqual(http.get("/ready").status_code, 200)
+                self.assertEqual(http.get("/ready").status_code, 200)
+            app.state.tailwag_memory_client_provider.close()
+
+        factory.assert_called_once_with()
+        self.assertEqual(ready_client.close_calls, 1)
+
     def test_provider_health_uses_bearer_token_and_does_not_create_client(self) -> None:
         from tailwag_memory.api.app import create_app
         from tailwag_memory.api.dependencies import get_client
@@ -95,22 +121,11 @@ class TailwagApiAppTest(unittest.TestCase):
 
         os.environ["TAILWAG_ROBOT_API_TOKENS_JSON"] = '{"cody":"robot-token"}'
         os.environ["OPENAI_API_KEY"] = "test-key"
-        runner = RecordingQueryRunner(
-            results=[
-                [{"ok": 1}],
-                [{
-                    "name": "relay_message_id",
-                    "type": "UNIQUENESS",
-                    "labelsOrTypes": ["RelayMessage"],
-                    "properties": ["id"],
-                }],
-                _relay_index_rows(),
-            ]
-        )
+        runner = RecordingQueryRunner(results=_relay_ready_results())
         ready_client = _ReadyClient(runner=runner, settings=test_settings())
 
         with patch(
-            "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+            "tailwag_memory.api.dependencies.TailwagMemoryClient.from_env",
             return_value=ready_client,
         ):
             response = TestClient(create_app()).get("/ready")
@@ -132,7 +147,7 @@ class TailwagApiAppTest(unittest.TestCase):
         ready_client = _ReadyClient(runner=runner, settings=test_settings())
 
         with patch(
-            "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+            "tailwag_memory.api.dependencies.TailwagMemoryClient.from_env",
             return_value=ready_client,
         ):
             response = TestClient(create_app()).get("/ready")
@@ -171,7 +186,7 @@ class TailwagApiAppTest(unittest.TestCase):
                 )
                 ready_client = _ReadyClient(runner=runner, settings=test_settings())
                 with patch(
-                    "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+                    "tailwag_memory.api.dependencies.TailwagMemoryClient.from_env",
                     return_value=ready_client,
                 ):
                     response = TestClient(create_app()).get("/ready")
@@ -190,7 +205,7 @@ class TailwagApiAppTest(unittest.TestCase):
             ]
         )
         with patch(
-            "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+            "tailwag_memory.api.dependencies.TailwagMemoryClient.from_env",
             return_value=_ReadyClient(
                 runner=wrong_constraint_runner,
                 settings=test_settings(),
@@ -212,7 +227,7 @@ class TailwagApiAppTest(unittest.TestCase):
             ]
         )
         with patch(
-            "tailwag_memory.api.app.TailwagMemoryClient.from_env",
+            "tailwag_memory.api.dependencies.TailwagMemoryClient.from_env",
             return_value=_ReadyClient(
                 runner=wrong_type_runner,
                 settings=test_settings(),
@@ -669,8 +684,12 @@ class TailwagApiAppTest(unittest.TestCase):
 
     def test_episode_endpoint_rejects_malformed_payload_as_422(self) -> None:
         from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
 
-        response = TestClient(create_app()).post(
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: _FakeClient()
+
+        response = TestClient(app).post(
             f"{API_BASE}/episodes_record",
             headers=_auth_header(),
             json={"episode": {"id": "episode_1"}, "extract_memory": False},
@@ -708,6 +727,7 @@ class TailwagApiAppTest(unittest.TestCase):
 
     def test_episode_endpoint_rejects_operational_robot_fields(self) -> None:
         from tailwag_memory.api.app import create_app
+        from tailwag_memory.api.dependencies import get_client
 
         payload = {
             "episode": {
@@ -724,7 +744,9 @@ class TailwagApiAppTest(unittest.TestCase):
             "enqueue_memory_extraction": False,
         }
 
-        response = TestClient(create_app()).post(
+        app = create_app()
+        app.dependency_overrides[get_client] = lambda: _FakeClient()
+        response = TestClient(app).post(
             f"{API_BASE}/episodes_record",
             headers=_auth_header(),
             json=payload,
@@ -1148,16 +1170,27 @@ def _relay_index_rows(
     return rows
 
 
+def _relay_ready_results() -> list[list[dict[str, object]]]:
+    return [
+        [{"ok": 1}],
+        [{
+            "name": "relay_message_id",
+            "type": "UNIQUENESS",
+            "labelsOrTypes": ["RelayMessage"],
+            "properties": ["id"],
+        }],
+        _relay_index_rows(),
+    ]
+
+
 @dataclass
 class _ReadyClient:
     runner: object
     settings: object
+    close_calls: int = 0
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback) -> None:
-        return None
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 @dataclass

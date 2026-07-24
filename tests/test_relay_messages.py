@@ -117,6 +117,15 @@ class RelayMessageServiceTest(unittest.TestCase):
         self.assertIn("SENT_RELAY", query.query)
         self.assertIn("FOR_RECIPIENT", query.query)
         self.assertIn("ASSIGNED_TO", query.query)
+        self.assertIn(
+            "OPTIONAL MATCH (message:RelayMessage {id: $message_id})",
+            query.query,
+        )
+        self.assertIn("message._relay_create_token = $lock_token", query.query)
+        self.assertNotIn(
+            "RelayMessage {_relay_create_token: $lock_token}",
+            query.query,
+        )
 
     def test_explicit_expiry_may_only_shorten_thirty_day_default(self) -> None:
         too_late = "2026-08-23T15:00:00+00:00"
@@ -173,10 +182,55 @@ class RelayMessageServiceTest(unittest.TestCase):
         self.assertIn("REMOVE robot._relay_claim_lock", query)
         self.assertIn("REMOVE locked_message._relay_write_lock", query)
         self.assertNotIn("relay_claim_lock_version", query)
-        self.assertLess(
-            query.index("SET message._relay_write_lock"),
-            query.index("candidate.message.status"),
+        self.assertIn(
+            "USING INDEX message:RelayMessage(\n"
+            "              assigned_robot_id, status, deliver_after, created_at\n"
+            "            )",
+            query,
         )
+        first_status_check = query.index("message.status = 'pending'")
+        locked_status_check = query.index("candidate.message.status = 'pending'")
+        first_recipient_check = query.index(
+            "toLower(trim(recipient.email)) = $recipient_email"
+        )
+        locked_recipient_check = query.index(
+            "toLower(trim(candidate.recipient.email)) = $recipient_email"
+        )
+        first_recipient_status_check = query.index(
+            "coalesce(recipient.status, 'active') <> 'archived'"
+        )
+        locked_recipient_status_check = query.index(
+            "coalesce(candidate.recipient.status, 'active') <> 'archived'"
+        )
+        first_sender_status_check = query.index(
+            "coalesce(sender.status, 'active') <> 'archived'"
+        )
+        locked_sender_status_check = query.index(
+            "coalesce(candidate.sender.status, 'active') <> 'archived'"
+        )
+        message_lock = query.index("SET message._relay_write_lock")
+        self.assertLess(
+            first_status_check,
+            message_lock,
+        )
+        for prefilter_check, locked_check in (
+            (first_recipient_check, locked_recipient_check),
+            (first_recipient_status_check, locked_recipient_status_check),
+            (first_sender_status_check, locked_sender_status_check),
+        ):
+            self.assertLess(prefilter_check, message_lock)
+            self.assertLess(message_lock, locked_check)
+        self.assertLess(message_lock, locked_status_check)
+        self.assertIn("WHEN size(eligible_candidates) = 0", query)
+        self.assertIn(
+            "THEN [{message: null, sender: null, recipient: null}]",
+            query,
+        )
+        self.assertLess(
+            query.index("THEN [{message: null, sender: null, recipient: null}]"),
+            query.index("REMOVE robot._relay_claim_lock"),
+        )
+        self.assertIn("message.created_at IS NOT NULL", query)
 
     def test_permission_requires_recipient_and_is_only_body_release(self) -> None:
         runner = RecordingQueryRunner(
@@ -297,11 +351,20 @@ class RelayMessageServiceTest(unittest.TestCase):
         self.assertEqual(len(runner.queries), 1)
         query = runner.queries[0].query
         self.assertIn("delivery_uncertain", query)
+        self.assertIn("USING INDEX message:RelayMessage(status)", query)
         self.assertIn("ORDER BY elementId(message)", query)
-        self.assertLess(
-            query.index("SET message._relay_write_lock"),
-            query.index("message.status IN"),
+        first_status_check = query.index(
+            "message.status IN ['pending', 'claimed', 'permission_granted', 'delivering']"
         )
+        locked_status_check = query.index(
+            "message.status IN ['pending', 'claimed', 'permission_granted']",
+            query.index("SET message._relay_write_lock"),
+        )
+        self.assertLess(
+            first_status_check,
+            query.index("SET message._relay_write_lock"),
+        )
+        self.assertLess(query.index("SET message._relay_write_lock"), locked_status_check)
         self.assertIn("REMOVE message._relay_write_lock", query)
         self.assertTrue(
             all("REMOVE message.body" not in recorded.query for recorded in runner.queries)

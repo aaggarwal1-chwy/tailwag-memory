@@ -139,6 +139,23 @@ class RelayMessageTransitions:
         rows = self.runner.run(
             """
             MATCH (message:RelayMessage)
+            USING INDEX message:RelayMessage(status)
+            WHERE message.status IN ['pending', 'claimed', 'permission_granted', 'delivering']
+              AND (
+                (
+                  message.status IN ['pending', 'claimed', 'permission_granted']
+                  AND message.expires_at <= $now
+                )
+                OR (
+                  message.status IN ['claimed', 'permission_granted']
+                  AND message.claimed_at < $stale_before
+                  AND message.expires_at > $now
+                )
+                OR (
+                  message.status = 'delivering'
+                  AND message.delivery_started_at < $stale_before
+                )
+              )
             WITH message ORDER BY elementId(message)
             SET message._relay_write_lock = randomUUID()
             WITH message,
